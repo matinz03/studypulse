@@ -1,0 +1,194 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    background-color: #050811;
+    color: #f1f5f9;
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #050811;
+    color: #f1f5f9;
+    overflow-x: clip;
+    min-height: 100dvh;
+  }
+}
+
+.font-mono-num {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Living Aurora Backdrop for Liquid Glass Refraction */
+.aurora-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(65% 50% at 15% 10%, rgba(16, 185, 129, 0.22) 0%, transparent 70%),
+    radial-gradient(55% 45% at 88% 18%, rgba(6, 182, 212, 0.2) 0%, transparent 70%),
+    radial-gradient(60% 55% at 75% 82%, rgba(139, 92, 246, 0.22) 0%, transparent 72%),
+    radial-gradient(50% 45% at 18% 85%, rgba(236, 72, 153, 0.14) 0%, transparent 70%),
+    #050811;
+}
+
+.aurora-orb-a {
+  position: absolute;
+  width: 460px;
+  height: 460px;
+  top: -120px;
+  left: -90px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.34) 0%, rgba(6, 182, 212, 0.08) 55%, transparent 75%);
+  filter: blur(55px);
+  animation: aurora-drift-a 18s ease-in-out infinite alternate;
+}
+
+.aurora-orb-b {
+  position: absolute;
+  width: 440px;
+  height: 440px;
+  bottom: -100px;
+  right: -80px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.32) 0%, rgba(236, 72, 153, 0.08) 55%, transparent 75%);
+  filter: blur(60px);
+  animation: aurora-drift-b 22s ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift-a {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(48px, 36px, 0) scale(1.12); }
+}
+
+@keyframes aurora-drift-b {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(-44px, -32px, 0) scale(1.1); }
+}
+
+/* Refractive Spatial Liquid Glass Surface */
+.liquid-card,
+.glass-card {
+  position: relative;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(17, 25, 44, 0.56) 45%,
+    rgba(11, 17, 32, 0.72) 100%
+  );
+  backdrop-filter: blur(24px) saturate(185%);
+  -webkit-backdrop-filter: blur(24px) saturate(185%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 18px 42px -14px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.liquid-card::before,
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 14px auto 14px;
+  height: 1px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  pointer-events: none;
+}
+
+/* High-Elevation Liquid Glass Dock & Floating Header */
+.liquid-dock,
+.liquid-dock-lens {
+  background:
+    linear-gradient(165deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 42%, rgba(6, 182, 212, 0.05) 100%),
+    rgba(10, 15, 29, 0.86);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 22px 48px -10px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -1px 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.liquid-pill,
+.glass-pill {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.liquid-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #34d399 0%, #22d3ee 55%, #38bdf8 100%);
+  color: #041016;
+  box-shadow:
+    0 10px 28px -6px rgba(16, 185, 129, 0.52),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -2px 4px rgba(6, 78, 59, 0.25);
+}
+
+.liquid-btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 1px 4px 52% 4px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: max(0.65rem, env(safe-area-inset-top));
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1.16);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.16);
+    opacity: 0;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2.2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-orb-a,
+  .aurora-orb-b,
+  .animate-pulse-ring {
+    animation: none;
+  }
+}
