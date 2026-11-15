@@ -97,7 +97,9 @@ export function FeedView({ feed, onReact, onComment, onJumpToFocus }: FeedViewPr
 
       {items.length === 0 ? (
         <div className="glass-card rounded-3xl p-8 text-center">
-          <p className="text-sm font-bold text-white">No friend posts yet</p>
+          <p className="text-sm font-bold text-white">
+            {filter === 'friends' ? 'No friend posts yet' : 'No study sessions shared yet'}
+          </p>
           <p className="text-xs text-slate-400 mt-1">
             Add study peers in Compete or finish a session to kick off the feed!
           </p>

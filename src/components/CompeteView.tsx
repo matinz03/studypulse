@@ -423,7 +423,12 @@ export function CompeteView({
         </div>
 
         <div className="space-y-2">
-          {filteredDirectory.map((peer) => (
+          {filteredDirectory.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-4">
+              No other study peers found yet. Invite friends to join StudyPulse!
+            </p>
+          ) : (
+            filteredDirectory.map((peer) => (
             <div
               key={peer.id}
               className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-950/50 border border-white/5"
@@ -462,7 +467,8 @@ export function CompeteView({
                 <span>{peer.isFriend ? 'Friends' : 'Add'}</span>
               </motion.button>
             </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

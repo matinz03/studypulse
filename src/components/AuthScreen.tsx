@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Flame, Sparkles, ArrowRight, Zap, Users, Trophy } from 'lucide-react';
+import { Flame, Sparkles, ArrowRight, Users, Trophy } from 'lucide-react';
 import { User } from '../types';
 
 interface AuthScreenProps {
@@ -40,21 +40,6 @@ export function AuthScreen({ onSuccess }: AuthScreenProps) {
       onSuccess(data.token, data.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleGuest() {
-    setError('');
-    setLoading(true);
-    try {
-      const res = await fetch('/api/auth/guest', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Unable to start demo');
-      onSuccess(data.token, data.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to connect');
     } finally {
       setLoading(false);
     }
@@ -228,23 +213,6 @@ export function AuthScreen({ onSuccess }: AuthScreenProps) {
               <ArrowRight className="w-4 h-4" />
             </motion.button>
           </form>
-
-          <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-500">
-            <span className="h-px flex-1 bg-white/10" />
-            or jump right in
-            <span className="h-px flex-1 bg-white/10" />
-          </div>
-
-          <motion.button
-            whileTap={{ scale: 0.98 }}
-            type="button"
-            disabled={loading}
-            onClick={handleGuest}
-            className="w-full py-3 rounded-xl glass-pill hover:bg-white/10 text-sm font-semibold text-slate-100 flex items-center justify-center gap-2 cursor-pointer transition"
-          >
-            <Zap className="w-4 h-4 text-amber-400" />
-            Try Demo Account (@matin)
-          </motion.button>
         </div>
       </motion.div>
     </div>

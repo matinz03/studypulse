@@ -238,7 +238,14 @@ export function RoomsView({
 
           {/* Desk Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 relative z-10">
-            {currentRoom.occupants.map((occ) => {
+            {currentRoom.occupants.length === 0 ? (
+              <div className="col-span-full rounded-2xl p-6 bg-slate-950/50 border border-white/8 text-center">
+                <p className="text-xs font-bold text-slate-300">
+                  No one is seated in this room right now. Start a focus session to take the first desk!
+                </p>
+              </div>
+            ) : (
+              currentRoom.occupants.map((occ) => {
               const liveSec = computeLiveSec(occ, nowMs);
               const isMe = occ.userId === currentUserId;
               const ringClass =
@@ -318,7 +325,8 @@ export function RoomsView({
                   </div>
                 </motion.div>
               );
-            })}
+            })
+            )}
           </div>
 
           {/* Floating Emoji Cheer Dock */}

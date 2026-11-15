@@ -12,7 +12,6 @@ import {
   hashPassword,
   verifyPassword,
   createStarterSubjects,
-  ensureStarterTasks,
   dateKeyUTC,
 } from './db.js';
 
@@ -163,45 +162,8 @@ const livePresence = new Map();
 const wsSockets = new Set();
 
 function buildRoomOccupants(rooms) {
-  const now = Date.now();
-  // Seeded peer avatars to keep rooms vibrant when solo, overridden when real peer connects
-  const seededPeers = [
-    { userId: 2, username: 'sara_cs', displayName: 'Sara K.', avatar: '⚡', themeColor: '#06B6D4', roomIdx: 0, subjectName: 'Algorithms', subjectColor: '#06B6D4', taskTitle: 'Graph DP Problem Set', offsetSec: 1840 },
-    { userId: 5, username: 'marco_rust', displayName: 'Marco V.', avatar: '🦀', themeColor: '#F97316', roomIdx: 0, subjectName: 'Rust & Systems', subjectColor: '#F97316', taskTitle: 'Lock-free ring buffer', offsetSec: 3120 },
-    { userId: 3, username: 'luca_ml', displayName: 'Luca M.', avatar: '🧠', themeColor: '#8B5CF6', roomIdx: 1, subjectName: 'Machine Learning', subjectColor: '#8B5CF6', taskTitle: 'Attention KV-cache bench', offsetSec: 2490 },
-    { userId: 6, username: 'yuki_math', displayName: 'Yuki T.', avatar: '📐', themeColor: '#14B8A6', roomIdx: 1, subjectName: 'Calculus', subjectColor: '#10B981', taskTitle: 'Stochastic PDE proofs', offsetSec: 4210 },
-    { userId: 4, username: 'elena_med', displayName: 'Elena R.', avatar: '🩺', themeColor: '#EC4899', roomIdx: 2, subjectName: 'UI Engineering', subjectColor: '#EC4899', taskTitle: 'Fluid glass micro-interactions', offsetSec: 960 },
-    { userId: 7, username: 'amir_sys', displayName: 'Amir N.', avatar: '🛰️', themeColor: '#3B82F6', roomIdx: 3, subjectName: 'Rust & Systems', subjectColor: '#F97316', taskTitle: 'TCP congestion control notes', offsetSec: 1410 },
-  ];
-
-  // Cycle simulated peer timers every 90m with 5m break cadence
   const byRoom = new Map();
   for (const r of rooms) byRoom.set(r.id, []);
-
-  for (const p of seededPeers) {
-    if (livePresence.has(p.userId)) continue; // Real connection overrides simulation
-    const targetRoom = rooms[p.roomIdx % rooms.length];
-    if (!targetRoom) continue;
-    const cyclePos = (Math.floor(now / 1000) + p.offsetSec) % 3300; // 55m cycle
-    const onBreak = cyclePos >= 3000;
-    const activeSec = onBreak ? cyclePos - 3000 : cyclePos + 240;
-    byRoom.get(targetRoom.id).push({
-      userId: p.userId,
-      username: p.username,
-      displayName: p.displayName,
-      avatar: p.avatar,
-      themeColor: p.themeColor,
-      status: onBreak ? 'break' : 'studying',
-      roomId: targetRoom.id,
-      subjectName: p.subjectName,
-      subjectColor: p.subjectColor,
-      taskTitle: p.taskTitle,
-      startedAtMs: now - activeSec * 1000,
-      baseElapsedSec: 0,
-      mode: 'pomodoro',
-      simulated: true,
-    });
-  }
 
   for (const pres of livePresence.values()) {
     const rid = pres.roomId || rooms[0]?.id;
@@ -294,7 +256,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     uptime: Math.floor(process.uptime()),
-    onlineUsers: livePresence.size + 6,
+    onlineUsers: livePresence.size,
   });
 });
 
@@ -320,7 +282,7 @@ app.post('/api/auth/register', (req, res) => {
   const now = Date.now();
   const info = db.prepare(`
     INSERT INTO users (username, display_name, password_hash, avatar, theme_color, bio, title, xp, coins, streak_days, daily_goal_mins, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 100, 25, 1, 120, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 120, ?)
   `).run(
     usernameRaw,
     displayName.slice(0, 32),
@@ -334,14 +296,6 @@ app.post('/api/auth/register', (req, res) => {
 
   const uid = Number(info.lastInsertRowid);
   createStarterSubjects(uid);
-
-  // Auto-connect 2 friendly study peers so new users see friends right away
-  const peers = db.prepare('SELECT id FROM users WHERE id != ? LIMIT 2').all(uid);
-  const insFriend = db.prepare('INSERT OR IGNORE INTO friendships (user_id, friend_id, created_at) VALUES (?, ?, ?)');
-  for (const p of peers) {
-    insFriend.run(uid, p.id, now);
-    insFriend.run(p.id, uid, now);
-  }
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
   const token = signToken({ uid, username: user.username, exp: now + 30 * 86400_000 });
@@ -359,15 +313,7 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ token, user: sanitizeUser(user) });
 });
 
-app.post('/api/auth/guest', (_req, res) => {
-  const user = db.prepare("SELECT * FROM users WHERE username = 'matin'").get() || db.prepare('SELECT * FROM users ORDER BY id ASC LIMIT 1').get();
-  if (!user) return res.status(404).json({ error: 'Demo user unavailable' });
-  const token = signToken({ uid: user.id, username: user.username, exp: Date.now() + 30 * 86400_000 });
-  res.json({ token, user: sanitizeUser(user) });
-});
-
 function buildBootstrap(userId) {
-  ensureStarterTasks(userId);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const now = Date.now();
   const startOfToday = new Date();
@@ -480,7 +426,7 @@ function buildBootstrap(userId) {
       isFriend: friendSet.has(u.id),
       todayMins: todayMap.get(u.id)?.minutes || 0,
       weekMins: weekMap.get(u.id)?.minutes || 0,
-      isOnline: livePresence.has(u.id) || u.id <= 7,
+      isOnline: livePresence.has(u.id),
     }));
 
   // Rooms with live presence
