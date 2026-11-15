@@ -1,4 +1,4 @@
-export type SoundPreset = 'off' | 'rain' | 'brown' | 'binaural' | 'cafe';
+export type SoundPreset = 'off' | 'rain' | 'brown' | 'binaural' | 'cafe' | 'fire' | 'library';
 
 class AmbientSoundEngine {
   private ctx: AudioContext | null = null;
@@ -30,7 +30,7 @@ class AmbientSoundEngine {
     master.connect(ctx.destination);
     this.masterGain = master;
 
-    if (preset === 'rain' || preset === 'brown' || preset === 'cafe') {
+    if (preset === 'rain' || preset === 'brown' || preset === 'cafe' || preset === 'fire' || preset === 'library') {
       const bufferSize = ctx.sampleRate * 3;
       const buffer = ctx.createBuffer(2, bufferSize, ctx.sampleRate);
       for (let ch = 0; ch < 2; ch++) {
@@ -39,17 +39,22 @@ class AmbientSoundEngine {
         let b0 = 0, b1 = 0, b2 = 0;
         for (let i = 0; i < bufferSize; i++) {
           const white = Math.random() * 2 - 1;
-          if (preset === 'brown') {
+          if (preset === 'brown' || preset === 'fire') {
             out[i] = (lastOut + 0.02 * white) / 1.02;
             lastOut = out[i];
-            out[i] *= 3.2;
+            out[i] *= preset === 'fire' ? 2.8 : 3.2;
+            if (preset === 'fire' && Math.random() < 0.00055) {
+              out[i] += (Math.random() - 0.5) * 0.65;
+            }
           } else {
             b0 = 0.99765 * b0 + white * 0.099046;
             b1 = 0.963 * b1 + white * 0.2965164;
             b2 = 0.57 * b2 + white * 1.0526913;
-            out[i] = (b0 + b1 + b2 + white * 0.1848) * 0.14;
+            out[i] = (b0 + b1 + b2 + white * 0.1848) * (preset === 'library' ? 0.09 : 0.14);
             if (preset === 'cafe' && Math.random() < 0.0004) {
               out[i] += (Math.random() - 0.5) * 0.18;
+            } else if (preset === 'library' && Math.random() < 0.00008) {
+              out[i] += (Math.random() - 0.5) * 0.09;
             }
           }
         }
@@ -59,21 +64,21 @@ class AmbientSoundEngine {
       src.loop = true;
 
       const filter = ctx.createBiquadFilter();
-      filter.type = preset === 'cafe' ? 'bandpass' : 'lowpass';
-      filter.frequency.value = preset === 'brown' ? 320 : preset === 'cafe' ? 680 : 1900;
-      if (preset === 'cafe') filter.Q.value = 0.7;
+      filter.type = preset === 'cafe' || preset === 'library' ? 'bandpass' : 'lowpass';
+      filter.frequency.value =
+        preset === 'brown' ? 320 : preset === 'fire' ? 460 : preset === 'cafe' ? 680 : preset === 'library' ? 520 : 1900;
+      if (preset === 'cafe' || preset === 'library') filter.Q.value = preset === 'library' ? 1.1 : 0.7;
 
       src.connect(filter);
       filter.connect(master);
       src.start();
       this.activeNodes.push(src, filter);
 
-      if (preset === 'rain') {
-        // Gentle droplet shimmer via LFO modulation
+      if (preset === 'rain' || preset === 'fire') {
         const lfo = ctx.createOscillator();
         const lfoGain = ctx.createGain();
-        lfo.frequency.value = 0.18;
-        lfoGain.gain.value = 260;
+        lfo.frequency.value = preset === 'fire' ? 0.35 : 0.18;
+        lfoGain.gain.value = preset === 'fire' ? 180 : 260;
         lfo.connect(lfoGain);
         lfoGain.connect(filter.frequency);
         lfo.start();
@@ -144,6 +149,46 @@ class AmbientSoundEngine {
 
   getPreset() {
     return this.currentPreset;
+  }
+
+  getVolume() {
+    return this.volume;
+  }
+
+  playCompletionChime() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([250, 100, 250, 100, 400]);
+      }
+      const AudioCtx =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.ctx) {
+        this.ctx = new AudioCtx();
+      }
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      const ctx = this.ctx;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      const baseTime = ctx.currentTime + 0.03;
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, baseTime + idx * 0.14);
+        const start = baseTime + idx * 0.14;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.18, start + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.58);
+      });
+    } catch {
+      // ignore audio autoplay restrictions
+    }
   }
 }
 

@@ -4,18 +4,28 @@ interface FocusSpiritProps {
   elapsedSec: number;
   isRunning: boolean;
   accentColor: string;
+  spiritSkin?: string;
 }
 
-export function getSpiritStage(elapsedSec: number) {
+export function getSpiritStage(elapsedSec: number, spiritSkin = 'default') {
   const mins = elapsedSec / 60;
-  if (mins >= 50) return { key: 'cosmic', label: 'Cosmic Flame', tier: 4, primary: '#8B5CF6', secondary: '#06B6D4' };
-  if (mins >= 30) return { key: 'nova', label: 'Nova Spirit', tier: 3, primary: '#F97316', secondary: '#EC4899' };
-  if (mins >= 15) return { key: 'ember', label: 'Ember Fox', tier: 2, primary: '#10B981', secondary: '#34D399' };
-  return { key: 'spark', label: 'Focus Spark', tier: 1, primary: '#06B6D4', secondary: '#10B981' };
+  let stage;
+  if (mins >= 50) stage = { key: 'cosmic', label: 'Cosmic Flame', tier: 4, primary: '#8B5CF6', secondary: '#06B6D4' };
+  else if (mins >= 30) stage = { key: 'nova', label: 'Nova Spirit', tier: 3, primary: '#F97316', secondary: '#EC4899' };
+  else if (mins >= 15) stage = { key: 'ember', label: 'Ember Fox', tier: 2, primary: '#10B981', secondary: '#34D399' };
+  else stage = { key: 'spark', label: 'Focus Spark', tier: 1, primary: '#06B6D4', secondary: '#10B981' };
+
+  if (spiritSkin === 'spirit_phoenix') {
+    return { ...stage, primary: '#F97316', secondary: '#FB7185' };
+  }
+  if (spiritSkin === 'spirit_cyber') {
+    return { ...stage, primary: '#22D3EE', secondary: '#A855F7' };
+  }
+  return stage;
 }
 
-export function FocusSpirit({ elapsedSec, isRunning, accentColor }: FocusSpiritProps) {
-  const stage = getSpiritStage(elapsedSec);
+export function FocusSpirit({ elapsedSec, isRunning, accentColor, spiritSkin = 'default' }: FocusSpiritProps) {
+  const stage = getSpiritStage(elapsedSec, spiritSkin);
   const scaleBoost = Math.min(1.16, 0.92 + (stage.tier - 1) * 0.08);
 
   return (

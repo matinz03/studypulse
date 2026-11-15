@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Award, Calendar, Flame, LogOut, Settings2, Check, Target } from 'lucide-react';
-import { Achievement, HeatmapDay, SubjectStat, User, WeekDay } from '../types';
+import { Award, Calendar, Flame, LogOut, Settings2, Check, Target, ShoppingBag, Clock, Trash2, Coins } from 'lucide-react';
+import { Achievement, HeatmapDay, ShopItem, Subject, SubjectStat, User, WeekDay } from '../types';
 
 interface ProfileViewProps {
   user: User;
   heatmap: HeatmapDay[];
   weekTrend: WeekDay[];
+  hourlyDistribution: number[];
+  peakWindowLabel: string;
   subjectBreakdown: SubjectStat[];
+  subjects: Subject[];
+  shopItems: ShopItem[];
   achievements: Achievement[];
   onUpdateProfile: (payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) => Promise<void>;
+  onBuyShopItem: (itemKey: string) => Promise<void>;
+  onDeleteSubject: (subjectId: number) => Promise<void>;
   onLogout: () => void;
 }
 
@@ -25,9 +31,15 @@ export function ProfileView({
   user,
   heatmap,
   weekTrend,
+  hourlyDistribution,
+  peakWindowLabel,
   subjectBreakdown,
+  subjects,
+  shopItems,
   achievements,
   onUpdateProfile,
+  onBuyShopItem,
+  onDeleteSubject,
   onLogout,
 }: ProfileViewProps) {
   const [editing, setEditing] = useState(false);
@@ -35,9 +47,20 @@ export function ProfileView({
   const [bio, setBio] = useState(user.bio);
   const [dailyGoalMins, setDailyGoalMins] = useState(user.dailyGoalMins);
   const [saving, setSaving] = useState(false);
+  const [buyingKey, setBuyingKey] = useState<string | null>(null);
 
   const goalPct = Math.min(100, Math.round((user.todayMins / Math.max(1, user.dailyGoalMins)) * 100));
   const maxTrend = Math.max(30, ...weekTrend.map((d) => d.minutes));
+  const maxHour = Math.max(15, ...(hourlyDistribution.length ? hourlyDistribution : [15]));
+
+  async function handleBuy(key: string) {
+    setBuyingKey(key);
+    try {
+      await onBuyShopItem(key);
+    } finally {
+      setBuyingKey(null);
+    }
+  }
 
   // Chunk heatmap into 13 columns of 7 days (grid-flow-col)
   async function saveProfile(e: React.FormEvent) {
@@ -246,7 +269,7 @@ export function ProfileView({
         </div>
       </div>
 
-      {/* Subject Breakdown */}
+      {/* Subject Breakdown & Manage Subjects */}
       <div className="glass-card rounded-3xl p-4 space-y-2.5">
         <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
           Subject Breakdown
@@ -267,6 +290,131 @@ export function ProfileView({
             </div>
           </div>
         ))}
+        {subjects.length > 1 && (
+          <div className="pt-2 border-t border-white/8 flex flex-wrap gap-1.5">
+            {subjects.map((s) => (
+              <span
+                key={s.id}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full liquid-pill text-[11px] font-semibold text-slate-200"
+              >
+                <span>{s.icon}</span>
+                <span>{s.name}</span>
+                <button
+                  type="button"
+                  onClick={() => onDeleteSubject(s.id)}
+                  title={`Delete ${s.name}`}
+                  className="ml-0.5 text-slate-400 hover:text-rose-400 cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 24-Hour Focus Rhythm ("Early Bird vs. Night Owl") */}
+      <div className="glass-card rounded-3xl p-4">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-violet-400" />
+            24h Focus Rhythm
+          </h3>
+          <span className="liquid-pill px-2.5 py-0.5 rounded-full text-[10px] font-bold text-cyan-200">
+            {peakWindowLabel}
+          </span>
+        </div>
+        <div className="grid grid-cols-24 gap-0.5 items-end h-20 pt-1">
+          {(hourlyDistribution.length === 24 ? hourlyDistribution : new Array(24).fill(0)).map((mins, hr) => {
+            const pct = Math.max(8, Math.round((mins / maxHour) * 100));
+            return (
+              <div
+                key={hr}
+                title={`${hr}:00 — ${mins}m`}
+                className="h-full flex items-end"
+              >
+                <div
+                  className={`w-full rounded-t-sm transition-all ${
+                    mins > 0
+                      ? 'bg-gradient-to-t from-violet-500/80 to-cyan-300'
+                      : 'bg-white/10'
+                  }`}
+                  style={{ height: `${pct}%` }}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[9px] font-mono-num text-slate-500 mt-1.5">
+          <span>12a</span>
+          <span>6a</span>
+          <span>12p</span>
+          <span>6p</span>
+          <span>11p</span>
+        </div>
+      </div>
+
+      {/* Focus Coin Shop & Streak Freeze */}
+      <div className="glass-card rounded-3xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
+            Focus Coin Shop
+          </h3>
+          <div className="flex items-center gap-1.5">
+            <span className="liquid-pill px-2 py-0.5 rounded-full text-[10px] font-bold text-cyan-200">
+              🧊 {user.streakFreezes} Freeze{user.streakFreezes === 1 ? '' : 's'}
+            </span>
+            <span className="liquid-pill px-2 py-0.5 rounded-full text-[10px] font-mono-num font-extrabold text-amber-300 flex items-center gap-1">
+              <Coins className="w-3 h-3" /> {user.coins}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {shopItems.map((item) => {
+            const canAfford = user.coins >= item.price;
+            return (
+              <div
+                key={item.key}
+                className="flex items-center justify-between gap-2.5 p-2.5 rounded-2xl bg-slate-950/55 border border-white/8"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-9 h-9 rounded-xl liquid-pill flex items-center justify-center text-lg shrink-0">
+                    {item.icon}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{item.name}</div>
+                    <div className="text-[10px] text-slate-400 line-clamp-1">{item.desc}</div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={buyingKey === item.key || item.equipped || (!item.unlocked && !canAfford)}
+                  onClick={() => handleBuy(item.key)}
+                  className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-extrabold cursor-pointer transition ${
+                    item.equipped
+                      ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 cursor-default'
+                      : item.unlocked
+                        ? 'bg-cyan-400/20 border border-cyan-300/40 text-cyan-200 hover:bg-cyan-400/30'
+                        : canAfford
+                          ? 'bg-amber-400 text-slate-950 hover:brightness-110'
+                          : 'bg-slate-800/80 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  {buyingKey === item.key
+                    ? '...'
+                    : item.equipped
+                      ? 'Equipped'
+                      : item.unlocked
+                        ? 'Equip'
+                        : `🪙 ${item.price}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Achievements Grid */}

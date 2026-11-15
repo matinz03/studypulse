@@ -14,6 +14,7 @@ interface RoomsViewProps {
   currentUserId: number;
   isRunning: boolean;
   onJumpToFocus: () => void;
+  onMatchSubject?: (subjectName: string) => void;
 }
 
 const CHEERS = ['🔥', '⚡', '👏', '☕', '🚀', '💜'];
@@ -35,6 +36,7 @@ export function RoomsView({
   currentUserId,
   isRunning,
   onJumpToFocus,
+  onMatchSubject,
 }: RoomsViewProps) {
   const [nowMs, setNowMs] = useState(Date.now());
   const [creating, setCreating] = useState(false);
@@ -275,12 +277,30 @@ export function RoomsView({
                     {occ.displayName}
                   </div>
 
-                  <div
-                    className="mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold truncate max-w-full"
-                    style={{ backgroundColor: `${occ.subjectColor}22`, color: occ.subjectColor }}
-                  >
-                    {occ.subjectName}
-                  </div>
+                  {!isMe && onMatchSubject ? (
+                    <button
+                      type="button"
+                      onClick={() => onMatchSubject(occ.subjectName)}
+                      title="Study same subject"
+                      className="mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold truncate max-w-full cursor-pointer hover:brightness-125 transition"
+                      style={{ backgroundColor: `${occ.subjectColor}22`, color: occ.subjectColor }}
+                    >
+                      {occ.subjectName}
+                    </button>
+                  ) : (
+                    <div
+                      className="mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold truncate max-w-full"
+                      style={{ backgroundColor: `${occ.subjectColor}22`, color: occ.subjectColor }}
+                    >
+                      {occ.subjectName}
+                    </div>
+                  )}
+
+                  {occ.taskTitle && (
+                    <div className="mt-1 text-[10px] text-slate-300/90 truncate max-w-full px-1">
+                      🎯 {occ.taskTitle}
+                    </div>
+                  )}
 
                   <div className="mt-2 font-mono-num text-xs font-bold flex items-center gap-1.5">
                     <span

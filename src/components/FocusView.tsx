@@ -12,14 +12,24 @@ import {
   Sun,
   X,
   Target,
+  Lock,
+  Unlock,
+  PictureInPicture2,
+  ListTodo,
+  Trash2,
+  Check,
+  Clock,
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
-import { Room, Subject, TimerMode } from '../types';
+import { Room, StudyTask, Subject, TimerMode } from '../types';
 import { SoundPreset } from '../utils/soundEngine';
 
 interface FocusViewProps {
   mode: TimerMode;
   onChangeMode: (m: TimerMode) => void;
+  customMins: number;
+  onChangeCustomMins: (mins: number) => void;
+  pomoCycleCount: number;
   isRunning: boolean;
   onToggleRun: () => void;
   elapsedSec: number;
@@ -31,20 +41,37 @@ interface FocusViewProps {
   onSelectSubject: (s: Subject) => void;
   onCreateSubject: (name: string, color: string, icon: string) => Promise<void>;
   purityPct: number;
+  strictMode: boolean;
+  onToggleStrictMode: () => void;
   wakeLocked: boolean;
+  pipActive: boolean;
+  pipSupported: boolean;
+  onTogglePip: () => void;
   soundPreset: SoundPreset;
+  soundVolume: number;
   onChangeSound: (p: SoundPreset) => void;
+  onChangeSoundVolume: (v: number) => void;
   currentRoom: Room | undefined;
   onGoToRooms: () => void;
   todayMins: number;
   dailyGoalMins: number;
   focusTask: string;
   onChangeFocusTask: (v: string) => void;
+  spiritSkin?: string;
+  tasks: StudyTask[];
+  activeTaskId: number | null;
+  onSelectTask: (task: StudyTask | null) => void;
+  onCreateTask: (title: string, subjectName: string, targetPomos: number) => Promise<void>;
+  onToggleTaskDone: (task: StudyTask) => Promise<void>;
+  onDeleteTask: (taskId: number) => Promise<void>;
+  onLogManual: (mins: number, note: string) => Promise<void>;
 }
 
 const MODES: { key: TimerMode; label: string; sub: string }[] = [
   { key: 'pomodoro', label: 'Pomodoro', sub: '25m' },
   { key: 'deep', label: 'Deep Work', sub: '50m' },
+  { key: 'custom', label: 'Custom', sub: 'mins' },
+  { key: 'break', label: 'Break', sub: '5m' },
   { key: 'stopwatch', label: 'Flow', sub: '∞' },
   { key: 'sprint', label: 'Sprint', sub: '1m' },
 ];
@@ -55,6 +82,8 @@ const SOUNDS: { key: SoundPreset; label: string; icon: string }[] = [
   { key: 'brown', label: 'Brown', icon: '🌊' },
   { key: 'binaural', label: '40Hz', icon: '🧠' },
   { key: 'cafe', label: 'Café', icon: '☕' },
+  { key: 'fire', label: 'Fire', icon: '🔥' },
+  { key: 'library', label: 'Library', icon: '📖' },
 ];
 
 const SUBJECT_EMOJIS = ['📚', '💻', '🧠', '📐', '🦀', '⚡', '🎨', '🔬'];
@@ -74,6 +103,9 @@ export function formatClock(totalSeconds: number) {
 export function FocusView({
   mode,
   onChangeMode,
+  customMins,
+  onChangeCustomMins,
+  pomoCycleCount,
   isRunning,
   onToggleRun,
   elapsedSec,
@@ -85,21 +117,46 @@ export function FocusView({
   onSelectSubject,
   onCreateSubject,
   purityPct,
+  strictMode,
+  onToggleStrictMode,
   wakeLocked,
+  pipActive,
+  pipSupported,
+  onTogglePip,
   soundPreset,
+  soundVolume,
   onChangeSound,
+  onChangeSoundVolume,
   currentRoom,
   onGoToRooms,
   todayMins,
   dailyGoalMins,
   focusTask,
   onChangeFocusTask,
+  spiritSkin = 'default',
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  onCreateTask,
+  onToggleTaskDone,
+  onDeleteTask,
+  onLogManual,
 }: FocusViewProps) {
   const [addingSubject, setAddingSubject] = useState(false);
   const [newSubName, setNewSubName] = useState('');
   const [newSubIcon, setNewSubIcon] = useState('📚');
   const [newSubColor, setNewSubColor] = useState('#10B981');
   const [savingSub, setSavingSub] = useState(false);
+
+  const [loggingManual, setLoggingManual] = useState(false);
+  const [manualMins, setManualMins] = useState(30);
+  const [manualNote, setManualNote] = useState('');
+  const [savingManual, setSavingManual] = useState(false);
+
+  const [addingTask, setAddingTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskPomos, setNewTaskPomos] = useState(2);
+  const [savingTask, setSavingTask] = useState(false);
 
   const isStopwatch = mode === 'stopwatch';
   const displayedSeconds = isStopwatch ? elapsedSec : Math.max(0, targetSec - elapsedSec);
@@ -116,7 +173,7 @@ export function FocusView({
   const dotX = 132 + radius * Math.cos(angleRad);
   const dotY = 132 + radius * Math.sin(angleRad);
 
-  const stage = getSpiritStage(elapsedSec);
+  const stage = getSpiritStage(elapsedSec, spiritSkin);
 
   async function submitSubject(e: React.FormEvent) {
     e.preventDefault();
@@ -131,11 +188,37 @@ export function FocusView({
     }
   }
 
+  async function submitTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newTaskTitle.trim() || savingTask) return;
+    setSavingTask(true);
+    try {
+      await onCreateTask(newTaskTitle.trim(), activeSubject.name, newTaskPomos);
+      setNewTaskTitle('');
+      setAddingTask(false);
+    } finally {
+      setSavingTask(false);
+    }
+  }
+
+  async function submitManual(e: React.FormEvent) {
+    e.preventDefault();
+    if (savingManual) return;
+    setSavingManual(true);
+    try {
+      await onLogManual(manualMins, manualNote);
+      setManualNote('');
+      setLoggingManual(false);
+    } finally {
+      setSavingManual(false);
+    }
+  }
+
   const goalPct = Math.min(100, Math.round((todayMins / Math.max(1, dailyGoalMins)) * 100));
 
   return (
     <div className="space-y-4">
-      {/* Daily Goal & Focus Intention Strip */}
+      {/* Daily Goal, Manual Log & Focus Intention Strip */}
       <div className="liquid-card rounded-3xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-200">
@@ -150,6 +233,14 @@ export function FocusView({
             <span className="liquid-pill px-2 py-0.5 rounded-full font-mono-num text-[10px] font-bold text-cyan-200">
               {goalPct}%
             </span>
+            <button
+              type="button"
+              onClick={() => setLoggingManual((v) => !v)}
+              className="liquid-pill px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+              title="Log offline study session"
+            >
+              <Clock className="w-2.5 h-2.5" /> +Log
+            </button>
           </div>
         </div>
         <div className="w-full h-1.5 rounded-full bg-white/8 overflow-hidden">
@@ -166,12 +257,56 @@ export function FocusView({
           onChange={(e) => onChangeFocusTask(e.target.value)}
           className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-950/55 border border-white/10 text-xs font-medium text-white placeholder-slate-400 focus:outline-none focus:border-emerald-400/55 transition"
         />
+
+        <AnimatePresence>
+          {loggingManual && (
+            <motion.form
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              onSubmit={submitManual}
+              className="pt-2 border-t border-white/10 space-y-2 overflow-hidden"
+            >
+              <div className="flex items-center justify-between text-[11px] text-slate-300">
+                <span>Log Offline {activeSubject.name} Block</span>
+                <span className="font-mono-num font-bold text-emerald-300">{manualMins} mins</span>
+              </div>
+              <input
+                type="range"
+                min={5}
+                max={180}
+                step={5}
+                value={manualMins}
+                onChange={(e) => setManualMins(Number(e.target.value))}
+                className="w-full accent-emerald-400"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  maxLength={120}
+                  placeholder="Optional note (e.g. textbook reading)"
+                  value={manualNote}
+                  onChange={(e) => setManualNote(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-white focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={savingManual}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-extrabold cursor-pointer"
+                >
+                  {savingManual ? '...' : 'Save'}
+                </button>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Mode Switcher Pills */}
-      <div className="grid grid-cols-4 gap-1.5 p-1 rounded-2xl glass-card">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 p-1 rounded-2xl glass-card">
         {MODES.map((m) => {
           const active = mode === m.key;
+          const subLabel = m.key === 'custom' ? `${customMins}m` : m.sub;
           return (
             <button
               key={m.key}
@@ -189,11 +324,44 @@ export function FocusView({
                 />
               )}
               <div className="relative z-10 text-xs font-bold leading-tight">{m.label}</div>
-              <div className="relative z-10 text-[10px] text-slate-400 font-mono-num">{m.sub}</div>
+              <div className="relative z-10 text-[10px] text-slate-400 font-mono-num">{subLabel}</div>
             </button>
           );
         })}
       </div>
+
+      {/* Custom Timer Duration Selector */}
+      {mode === 'custom' && !isRunning && (
+        <div className="glass-card rounded-2xl p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-200">Custom Timer Length</span>
+            <span className="font-mono-num font-extrabold text-cyan-300">{customMins} mins</span>
+          </div>
+          <input
+            type="range"
+            min={5}
+            max={180}
+            step={5}
+            value={customMins}
+            onChange={(e) => onChangeCustomMins(Number(e.target.value))}
+            className="w-full accent-cyan-400"
+          />
+          <div className="flex items-center gap-1.5">
+            {[15, 35, 45, 60, 90].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onChangeCustomMins(m)}
+                className={`flex-1 py-1 rounded-lg font-mono-num text-[11px] font-bold cursor-pointer transition ${
+                  customMins === m ? 'bg-cyan-400/25 border border-cyan-300/60 text-white' : 'liquid-pill text-slate-300'
+                }`}
+              >
+                {m}m
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Horizontal Subject Pills */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
@@ -292,21 +460,60 @@ export function FocusView({
 
       {/* Main Circular Timer & Focus Spirit Dial */}
       <div className="glass-card rounded-3xl p-5 flex flex-col items-center relative overflow-hidden">
-        {/* Top micro telemetry pills */}
-        <div className="w-full flex items-center justify-between text-[11px] mb-1">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/25 text-emerald-300 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Purity {purityPct}%
-          </span>
-          {wakeLocked ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-400/25 text-amber-300 font-medium">
-              <Sun className="w-3 h-3" /> Screen Awake
+        {/* Top micro telemetry & smart purity pills */}
+        <div className="w-full flex flex-wrap items-center justify-between gap-1.5 text-[11px] mb-1">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/25 text-emerald-300 font-medium">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Purity {purityPct}%
             </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400">
-              <Sparkles className="w-3 h-3 text-cyan-400" /> {stage.label}
+            <button
+              type="button"
+              onClick={onToggleStrictMode}
+              title={
+                strictMode
+                  ? 'Strict Lock: 1.25x XP boost, penalizes app-switching even with PiP'
+                  : 'Multi-App PiP: Use external apps freely with PiP without Purity penalty'
+              }
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full font-bold cursor-pointer border transition ${
+                strictMode
+                  ? 'bg-orange-500/20 border-orange-400/45 text-orange-200'
+                  : 'liquid-pill text-slate-300 hover:text-white'
+              }`}
+            >
+              {strictMode ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              <span>{strictMode ? 'Strict 1.25x' : 'Multi-App'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="liquid-pill px-2 py-1 rounded-full text-[10px] font-mono-num font-bold text-amber-200">
+              🍅 {(pomoCycleCount % 4) + 1}/4
             </span>
-          )}
+            {pipSupported && (
+              <button
+                type="button"
+                onClick={onTogglePip}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                  pipActive
+                    ? 'bg-cyan-400/25 border-cyan-300/60 text-cyan-100'
+                    : 'liquid-pill text-slate-300 hover:text-white'
+                }`}
+              >
+                <PictureInPicture2 className="w-3 h-3" />
+                <span>{pipActive ? 'Floating' : 'Float'}</span>
+              </button>
+            )}
+            {wakeLocked ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/10 border border-amber-400/25 text-amber-300 font-medium">
+                <Sun className="w-3 h-3" /> Awake
+              </span>
+            ) : (
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400">
+                <Sparkles className="w-3 h-3 text-cyan-400" /> {stage.label}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* SVG Timer Ring */}
@@ -378,6 +585,7 @@ export function FocusView({
                 elapsedSec={elapsedSec}
                 isRunning={isRunning}
                 accentColor={activeSubject?.color || '#10B981'}
+                spiritSkin={spiritSkin}
               />
               <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tight text-white mt-1">
                 {formatClock(displayedSeconds)}
@@ -467,27 +675,148 @@ export function FocusView({
         </motion.button>
       )}
 
-      {/* Ambient Soundscape Bar */}
-      <div className="glass-card rounded-2xl p-3">
-        <div className="flex items-center justify-between mb-2 px-1">
+      {/* Study Task Queue & Planner */}
+      <div className="glass-card rounded-3xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <ListTodo className="w-3.5 h-3.5 text-emerald-400" />
+            Study Task Queue
+          </span>
+          <button
+            type="button"
+            onClick={() => setAddingTask((v) => !v)}
+            className="px-2.5 py-1 rounded-full liquid-pill text-[11px] font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
+          >
+            {addingTask ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+            <span>{addingTask ? 'Close' : 'Add Task'}</span>
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {addingTask && (
+            <motion.form
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              onSubmit={submitTask}
+              className="space-y-2 pb-1 overflow-hidden"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  required
+                  maxLength={90}
+                  placeholder="New task (e.g. Ch. 5 Practice Set)"
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-400/50"
+                />
+                <select
+                  value={newTaskPomos}
+                  onChange={(e) => setNewTaskPomos(Number(e.target.value))}
+                  className="px-2 py-2 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-amber-200 font-mono-num"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n}🍅
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={savingTask}
+                  className="px-3 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-extrabold cursor-pointer"
+                >
+                  {savingTask ? '...' : 'Add'}
+                </button>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
+
+        <div className="space-y-1.5">
+          {tasks.slice(0, 6).map((task) => {
+            const pinned = activeTaskId === task.id;
+            return (
+              <div
+                key={task.id}
+                className={`flex items-center justify-between gap-2 p-2.5 rounded-2xl border transition ${
+                  pinned
+                    ? 'bg-emerald-500/15 border-emerald-400/45'
+                    : 'bg-slate-950/45 border-white/8'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onToggleTaskDone(task)}
+                  aria-label={task.done ? 'Mark incomplete' : 'Mark complete'}
+                  className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 cursor-pointer transition ${
+                    task.done
+                      ? 'bg-emerald-400 border-emerald-300 text-slate-950'
+                      : 'border-white/25 hover:border-emerald-400'
+                  }`}
+                >
+                  {task.done && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onSelectTask(pinned ? null : task)}
+                  className="flex-1 text-left min-w-0 cursor-pointer"
+                >
+                  <div
+                    className={`text-xs font-semibold truncate ${
+                      task.done ? 'line-through text-slate-500' : 'text-white'
+                    }`}
+                  >
+                    {task.title}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono-num">
+                    {task.subjectName} • {task.completedPomos}/{task.targetPomos} 🍅
+                    {pinned ? ' • Pinned to Timer' : ''}
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onDeleteTask(task.id)}
+                  aria-label="Delete task"
+                  className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Ambient Soundscape Bar + Volume Slider */}
+      <div className="glass-card rounded-2xl p-3 space-y-2.5">
+        <div className="flex items-center justify-between px-1">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
             <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
             Focus Soundscape
           </span>
-          {soundPreset !== 'off' && (
-            <div className="flex items-end gap-0.5 h-3">
-              {[0, 1, 2, 3].map((bar) => (
-                <motion.span
-                  key={bar}
-                  animate={{ height: ['35%', '100%', '45%'] }}
-                  transition={{ duration: 0.7 + bar * 0.15, repeat: Infinity, ease: 'easeInOut' }}
-                  className="w-1 rounded-full bg-cyan-400"
-                />
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {soundPreset !== 'off' && (
+              <div className="flex items-end gap-0.5 h-3">
+                {[0, 1, 2, 3].map((bar) => (
+                  <motion.span
+                    key={bar}
+                    animate={{ height: ['35%', '100%', '45%'] }}
+                    transition={{ duration: 0.7 + bar * 0.15, repeat: Infinity, ease: 'easeInOut' }}
+                    className="w-1 rounded-full bg-cyan-400"
+                  />
+                ))}
+              </div>
+            )}
+            <span className="font-mono-num text-[10px] text-slate-400">
+              {Math.round(soundVolume * 100)}%
+            </span>
+          </div>
         </div>
-        <div className="grid grid-cols-5 gap-1.5">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
           {SOUNDS.map((s) => {
             const active = soundPreset === s.key;
             return (
@@ -496,7 +825,7 @@ export function FocusView({
                 whileTap={{ scale: 0.94 }}
                 type="button"
                 onClick={() => onChangeSound(s.key)}
-                className={`py-2 px-1 rounded-xl text-center transition cursor-pointer border ${
+                className={`shrink-0 min-w-[54px] py-2 px-2 rounded-xl text-center transition cursor-pointer border ${
                   active
                     ? 'bg-cyan-500/20 border-cyan-400/50 text-white'
                     : 'bg-slate-900/50 border-white/5 text-slate-400 hover:text-slate-200'
@@ -508,6 +837,16 @@ export function FocusView({
             );
           })}
         </div>
+        <input
+          type="range"
+          min={0.05}
+          max={1}
+          step={0.05}
+          value={soundVolume}
+          onChange={(e) => onChangeSoundVolume(Number(e.target.value))}
+          aria-label="Soundscape volume"
+          className="w-full h-1.5 accent-cyan-400 cursor-pointer"
+        />
       </div>
     </div>
   );

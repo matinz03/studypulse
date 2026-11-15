@@ -5,7 +5,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { db, hashPassword, verifyPassword, createStarterSubjects, dateKeyUTC } from './db.js';
+import { createRequire } from 'node:module';
+const webpush = createRequire(import.meta.url)('web-push');
+import {
+  db,
+  hashPassword,
+  verifyPassword,
+  createStarterSubjects,
+  ensureStarterTasks,
+  dateKeyUTC,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -25,6 +34,62 @@ if (!AUTH_SECRET) {
     fs.writeFileSync(SECRET_FILE, AUTH_SECRET, { mode: 0o600 });
   }
 }
+
+// Persistent Web Push VAPID keys for lock-screen / closed-browser notifications
+const VAPID_FILE = path.join(DATA_DIR, '.vapid_keys.json');
+let vapidKeys;
+if (fs.existsSync(VAPID_FILE)) {
+  vapidKeys = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8'));
+} else {
+  vapidKeys = webpush.generateVAPIDKeys();
+  fs.writeFileSync(VAPID_FILE, JSON.stringify(vapidKeys, null, 2), { mode: 0o600 });
+}
+webpush.setVapidDetails('mailto:focus@study.matinz03.tech', vapidKeys.publicKey, vapidKeys.privateKey);
+
+const SHOP_CATALOG = [
+  {
+    key: 'freeze_1',
+    category: 'consumable',
+    name: 'Streak Freeze Shield',
+    desc: 'Automatically saves your daily streak if you miss a day.',
+    icon: '🧊',
+    price: 120,
+  },
+  {
+    key: 'spirit_phoenix',
+    category: 'spirit',
+    name: 'Solar Phoenix Spirit',
+    desc: 'Unlocks fiery amber-rose luminescence for your Focus Spirit.',
+    icon: '🔥',
+    price: 200,
+  },
+  {
+    key: 'spirit_cyber',
+    category: 'spirit',
+    name: 'Cyber Prism Spirit',
+    desc: 'Unlocks holographic neon cyan-violet Spirit aura.',
+    icon: '💎',
+    price: 250,
+  },
+  {
+    key: 'title_archmage',
+    category: 'title',
+    name: 'Focus Archmage Title',
+    desc: 'Sets your peer badge title to "Focus Archmage".',
+    icon: '🧙',
+    price: 180,
+    titleValue: 'Focus Archmage',
+  },
+  {
+    key: 'title_titan',
+    category: 'title',
+    name: 'Deep Work Titan Title',
+    desc: 'Sets your peer badge title to "Deep Work Titan".',
+    icon: '⚡',
+    price: 300,
+    titleValue: 'Deep Work Titan',
+  },
+];
 
 function signToken(payload) {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -72,6 +137,8 @@ function sanitizeUser(u) {
     streakDays: u.streak_days,
     lastStudyDate: u.last_study_date,
     dailyGoalMins: u.daily_goal_mins,
+    streakFreezes: u.streak_freezes ?? 1,
+    equippedSpirit: u.equipped_spirit || 'default',
     createdAt: u.created_at,
     ...lvl,
   };
@@ -99,12 +166,12 @@ function buildRoomOccupants(rooms) {
   const now = Date.now();
   // Seeded peer avatars to keep rooms vibrant when solo, overridden when real peer connects
   const seededPeers = [
-    { userId: 2, username: 'sara_cs', displayName: 'Sara K.', avatar: '⚡', themeColor: '#06B6D4', roomIdx: 0, subjectName: 'Algorithms', subjectColor: '#06B6D4', offsetSec: 1840 },
-    { userId: 5, username: 'marco_rust', displayName: 'Marco V.', avatar: '🦀', themeColor: '#F97316', roomIdx: 0, subjectName: 'Rust & Systems', subjectColor: '#F97316', offsetSec: 3120 },
-    { userId: 3, username: 'luca_ml', displayName: 'Luca M.', avatar: '🧠', themeColor: '#8B5CF6', roomIdx: 1, subjectName: 'Machine Learning', subjectColor: '#8B5CF6', offsetSec: 2490 },
-    { userId: 6, username: 'yuki_math', displayName: 'Yuki T.', avatar: '📐', themeColor: '#14B8A6', roomIdx: 1, subjectName: 'Calculus', subjectColor: '#10B981', offsetSec: 4210 },
-    { userId: 4, username: 'elena_med', displayName: 'Elena R.', avatar: '🩺', themeColor: '#EC4899', roomIdx: 2, subjectName: 'UI Engineering', subjectColor: '#EC4899', offsetSec: 960 },
-    { userId: 7, username: 'amir_sys', displayName: 'Amir N.', avatar: '🛰️', themeColor: '#3B82F6', roomIdx: 3, subjectName: 'Rust & Systems', subjectColor: '#F97316', offsetSec: 1410 },
+    { userId: 2, username: 'sara_cs', displayName: 'Sara K.', avatar: '⚡', themeColor: '#06B6D4', roomIdx: 0, subjectName: 'Algorithms', subjectColor: '#06B6D4', taskTitle: 'Graph DP Problem Set', offsetSec: 1840 },
+    { userId: 5, username: 'marco_rust', displayName: 'Marco V.', avatar: '🦀', themeColor: '#F97316', roomIdx: 0, subjectName: 'Rust & Systems', subjectColor: '#F97316', taskTitle: 'Lock-free ring buffer', offsetSec: 3120 },
+    { userId: 3, username: 'luca_ml', displayName: 'Luca M.', avatar: '🧠', themeColor: '#8B5CF6', roomIdx: 1, subjectName: 'Machine Learning', subjectColor: '#8B5CF6', taskTitle: 'Attention KV-cache bench', offsetSec: 2490 },
+    { userId: 6, username: 'yuki_math', displayName: 'Yuki T.', avatar: '📐', themeColor: '#14B8A6', roomIdx: 1, subjectName: 'Calculus', subjectColor: '#10B981', taskTitle: 'Stochastic PDE proofs', offsetSec: 4210 },
+    { userId: 4, username: 'elena_med', displayName: 'Elena R.', avatar: '🩺', themeColor: '#EC4899', roomIdx: 2, subjectName: 'UI Engineering', subjectColor: '#EC4899', taskTitle: 'Fluid glass micro-interactions', offsetSec: 960 },
+    { userId: 7, username: 'amir_sys', displayName: 'Amir N.', avatar: '🛰️', themeColor: '#3B82F6', roomIdx: 3, subjectName: 'Rust & Systems', subjectColor: '#F97316', taskTitle: 'TCP congestion control notes', offsetSec: 1410 },
   ];
 
   // Cycle simulated peer timers every 90m with 5m break cadence
@@ -128,6 +195,7 @@ function buildRoomOccupants(rooms) {
       roomId: targetRoom.id,
       subjectName: p.subjectName,
       subjectColor: p.subjectColor,
+      taskTitle: p.taskTitle,
       startedAtMs: now - activeSec * 1000,
       baseElapsedSec: 0,
       mode: 'pomodoro',
@@ -168,6 +236,58 @@ function broadcastPresence() {
   const rooms = db.prepare('SELECT * FROM study_rooms ORDER BY id ASC').all();
   broadcast({ type: 'presence_snapshot', rooms: buildRoomOccupants(rooms) });
 }
+
+async function sendPushToUser(userId, payloadObj) {
+  const subs = db.prepare('SELECT id, endpoint, subscription_json FROM push_subscriptions WHERE user_id = ?').all(userId);
+  if (!subs.length) return 0;
+  let sent = 0;
+  const payloadStr = JSON.stringify(payloadObj);
+  for (const row of subs) {
+    try {
+      await webpush.sendNotification(JSON.parse(row.subscription_json), payloadStr);
+      sent += 1;
+    } catch (err) {
+      if (err?.statusCode === 404 || err?.statusCode === 410) {
+        db.prepare('DELETE FROM push_subscriptions WHERE id = ?').run(row.id);
+      }
+    }
+  }
+  return sent;
+}
+
+// Server-side lock-screen timer expiration scheduler (fires even when phone screen is locked / browser exited)
+setInterval(() => {
+  const now = Date.now();
+  const due = db.prepare('SELECT * FROM scheduled_timers WHERE fired = 0 AND target_end_ms <= ?').all(now);
+  if (!due.length) return;
+  const markFired = db.prepare('UPDATE scheduled_timers SET fired = 1 WHERE user_id = ?');
+  for (const row of due) {
+    markFired.run(row.user_id);
+    broadcast({
+      type: 'timer_expired',
+      userId: row.user_id,
+      mode: row.mode,
+      subjectName: row.subject_name,
+      durationSec: row.duration_sec,
+    });
+    const mins = Math.max(1, Math.round(row.duration_sec / 60));
+    const pushPayload =
+      row.mode === 'break'
+        ? {
+            title: '☕ Break Over — Time to Lock In!',
+            body: 'Your break is finished. Jump back into your next focus sprint!',
+            tag: 'studypulse-break',
+            data: { url: '/?tab=focus', mode: 'break' },
+          }
+        : {
+            title: "⏰ Time's Up! Focus Block Complete",
+            body: `${mins}m on ${row.subject_name} complete! Tap to claim your XP & Coins 🔥`,
+            tag: 'studypulse-timer',
+            data: { url: '/?tab=focus', mode: row.mode },
+          };
+    sendPushToUser(row.user_id, pushPayload).catch(() => {});
+  }
+}, 1000);
 
 // Routes
 app.get('/api/health', (_req, res) => {
@@ -247,6 +367,7 @@ app.post('/api/auth/guest', (_req, res) => {
 });
 
 function buildBootstrap(userId) {
+  ensureStarterTasks(userId);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const now = Date.now();
   const startOfToday = new Date();
@@ -437,22 +558,46 @@ function buildBootstrap(userId) {
     };
   });
 
-  // 90-day heatmap & 7-day trend & subject breakdown for current user
+  // 90-day heatmap & 7-day trend & subject breakdown & 24h rhythm for current user
   const mySessions = db.prepare('SELECT subject_name, subject_color, duration_sec, purity_pct, created_at FROM study_sessions WHERE user_id = ?').all(userId);
   const daySecMap = new Map();
   const dayCountMap = new Map();
   const subjMap = new Map();
+  const hourSec = new Array(24).fill(0);
   let pureSessions = 0;
 
   for (const s of mySessions) {
     const dk = dateKeyUTC(s.created_at);
     daySecMap.set(dk, (daySecMap.get(dk) || 0) + s.duration_sec);
     dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
+    const hr = new Date(s.created_at).getHours();
+    hourSec[hr] += s.duration_sec;
     const curSub = subjMap.get(s.subject_name) || { name: s.subject_name, color: s.subject_color, seconds: 0 };
     curSub.seconds += s.duration_sec;
     subjMap.set(s.subject_name, curSub);
     if (s.purity_pct >= 95 && s.duration_sec >= 300) pureSessions++;
   }
+
+  const hourlyDistribution = hourSec.map((sec) => Math.round(sec / 60));
+  let peakHour = 0;
+  let peakMin = 0;
+  for (let h = 0; h < 24; h++) {
+    if (hourlyDistribution[h] > peakMin) {
+      peakMin = hourlyDistribution[h];
+      peakHour = h;
+    }
+  }
+  const formatHour = (h) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`;
+  const peakWindowLabel =
+    peakMin <= 0
+      ? 'Flexible Scholar'
+      : peakHour >= 5 && peakHour < 12
+        ? `Early Bird (Peak ${formatHour(peakHour)})`
+        : peakHour >= 12 && peakHour < 17
+          ? `Afternoon Deep Work (Peak ${formatHour(peakHour)})`
+          : peakHour >= 17 && peakHour < 21
+            ? `Evening Sprinter (Peak ${formatHour(peakHour)})`
+            : `Night Owl (Peak ${formatHour(peakHour)})`;
 
   const heatmap = [];
   for (let d = 89; d >= 0; d--) {
@@ -499,6 +644,31 @@ function buildBootstrap(userId) {
     { id: 'level5', title: 'Focus Nova', desc: 'Reach Scholar Level 5', icon: '🌟', unlocked: levelFromXp(user.xp).level >= 5, progress: Math.min(5, levelFromXp(user.xp).level), target: 5 },
   ];
 
+  const taskRows = db
+    .prepare('SELECT * FROM study_tasks WHERE user_id = ? ORDER BY done ASC, id DESC')
+    .all(userId);
+  const tasks = taskRows.map((t) => ({
+    id: t.id,
+    userId: t.user_id,
+    title: t.title,
+    subjectName: t.subject_name,
+    targetPomos: t.target_pomos,
+    completedPomos: t.completed_pomos,
+    done: Boolean(t.done),
+    createdAt: t.created_at,
+  }));
+
+  const unlockSet = new Set(
+    db.prepare('SELECT item_key FROM user_unlocks WHERE user_id = ?').all(userId).map((r) => r.item_key)
+  );
+  const shopItems = SHOP_CATALOG.map((item) => ({
+    ...item,
+    unlocked: item.category !== 'consumable' && unlockSet.has(item.key),
+    equipped:
+      (item.category === 'spirit' && (user.equipped_spirit || 'default') === item.key) ||
+      (item.category === 'title' && user.title === item.titleValue),
+  }));
+
   return {
     user: {
       ...sanitizeUser(user),
@@ -509,6 +679,9 @@ function buildBootstrap(userId) {
       avgPurity: Math.round(userStats.avg_purity || 100),
     },
     subjects,
+    tasks,
+    shopItems,
+    vapidPublicKey: vapidKeys.publicKey,
     directory,
     leaderboards: {
       today: todayBoard,
@@ -519,6 +692,8 @@ function buildBootstrap(userId) {
     feed,
     heatmap,
     weekTrend,
+    hourlyDistribution,
+    peakWindowLabel,
     subjectBreakdown,
     achievements,
     onlineCount: rooms.reduce((acc, r) => acc + r.activeCount, 0),
@@ -527,6 +702,66 @@ function buildBootstrap(userId) {
 
 app.get('/api/bootstrap', authMiddleware, (req, res) => {
   res.json(buildBootstrap(req.user.id));
+});
+
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  res.json({ publicKey: vapidKeys.publicKey });
+});
+
+app.post('/api/push/subscribe', authMiddleware, (req, res) => {
+  const sub = req.body?.subscription || req.body;
+  const endpoint = String(sub?.endpoint || '');
+  if (!endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+    return res.status(400).json({ error: 'Invalid push subscription object' });
+  }
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO push_subscriptions (user_id, endpoint, subscription_json, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET
+      user_id = excluded.user_id,
+      subscription_json = excluded.subscription_json,
+      created_at = excluded.created_at
+  `).run(req.user.id, endpoint, JSON.stringify(sub), now);
+  res.status(201).json({ ok: true });
+});
+
+app.post('/api/push/test', authMiddleware, async (req, res) => {
+  const sent = await sendPushToUser(req.user.id, {
+    title: '🔔 StudyPulse Lock-Screen Alert Active!',
+    body: "You'll get notified right on your lock screen the moment your timer finishes.",
+    tag: 'studypulse-test',
+    data: { url: '/' },
+  });
+  res.json({ ok: true, sent });
+});
+
+app.post('/api/timer/schedule', authMiddleware, (req, res) => {
+  const targetEndMs = Number(req.body?.targetEndMs);
+  const mode = String(req.body?.mode || 'pomodoro').slice(0, 20);
+  const subjectName = String(req.body?.subjectName || 'Focus').slice(0, 40);
+  const taskTitle = String(req.body?.taskTitle || '').slice(0, 100);
+  const durationSec = Math.max(5, Math.min(43200, Math.round(Number(req.body?.durationSec || 1500))));
+  if (!Number.isFinite(targetEndMs) || targetEndMs <= Date.now()) {
+    return res.status(400).json({ error: 'Invalid targetEndMs timestamp' });
+  }
+  db.prepare(`
+    INSERT INTO scheduled_timers (user_id, target_end_ms, mode, subject_name, task_title, duration_sec, fired)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(user_id) DO UPDATE SET
+      target_end_ms = excluded.target_end_ms,
+      mode = excluded.mode,
+      subject_name = excluded.subject_name,
+      task_title = excluded.task_title,
+      duration_sec = excluded.duration_sec,
+      fired = 0
+  `).run(req.user.id, Math.round(targetEndMs), mode, subjectName, taskTitle, durationSec);
+  res.json({ ok: true, targetEndMs: Math.round(targetEndMs) });
+});
+
+app.post('/api/timer/cancel', authMiddleware, (req, res) => {
+  db.prepare('DELETE FROM scheduled_timers WHERE user_id = ?').run(req.user.id);
+  res.json({ ok: true });
 });
 
 app.post('/api/subjects', authMiddleware, (req, res) => {
@@ -539,18 +774,138 @@ app.post('/api/subjects', authMiddleware, (req, res) => {
   res.status(201).json({ id: Number(info.lastInsertRowid), name, color, icon });
 });
 
+app.delete('/api/subjects/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  const count = db.prepare('SELECT COUNT(*) AS c FROM subjects WHERE user_id = ?').get(req.user.id).c;
+  if (count <= 1) {
+    return res.status(400).json({ error: 'Keep at least one active subject' });
+  }
+  const info = db.prepare('DELETE FROM subjects WHERE id = ? AND user_id = ?').run(id, req.user.id);
+  if (!info.changes) return res.status(404).json({ error: 'Subject not found' });
+  res.json({ ok: true });
+});
+
+app.post('/api/tasks', authMiddleware, (req, res) => {
+  const title = String(req.body?.title || '').trim().slice(0, 100);
+  const subjectName = String(req.body?.subjectName || 'Focus').trim().slice(0, 40);
+  const targetPomos = Math.max(1, Math.min(8, Math.round(Number(req.body?.targetPomos || 1))));
+  if (!title) return res.status(400).json({ error: 'Task title is required' });
+  const now = Date.now();
+  const info = db.prepare(
+    'INSERT INTO study_tasks (user_id, title, subject_name, target_pomos, completed_pomos, done, rewarded, created_at) VALUES (?, ?, ?, ?, 0, 0, 0, ?)'
+  ).run(req.user.id, title, subjectName, targetPomos, now);
+  res.status(201).json({
+    id: Number(info.lastInsertRowid),
+    userId: req.user.id,
+    title,
+    subjectName,
+    targetPomos,
+    completedPomos: 0,
+    done: false,
+    createdAt: now,
+  });
+});
+
+app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare('SELECT * FROM study_tasks WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  if (!row) return res.status(404).json({ error: 'Task not found' });
+
+  const nextDone = req.body?.done !== undefined ? (req.body.done ? 1 : 0) : row.done;
+  const nextCompleted =
+    req.body?.completedPomos !== undefined
+      ? Math.max(0, Math.min(20, Math.round(Number(req.body.completedPomos))))
+      : row.completed_pomos;
+  const nextTitle = req.body?.title !== undefined ? String(req.body.title).trim().slice(0, 100) || row.title : row.title;
+
+  let bonusXp = 0;
+  let bonusCoins = 0;
+  let nextRewarded = row.rewarded;
+  if (nextDone === 1 && !row.rewarded) {
+    bonusXp = 15;
+    bonusCoins = 3;
+    nextRewarded = 1;
+    db.prepare('UPDATE users SET xp = xp + ?, coins = coins + ? WHERE id = ?').run(bonusXp, bonusCoins, req.user.id);
+  }
+
+  db.prepare('UPDATE study_tasks SET title = ?, done = ?, completed_pomos = ?, rewarded = ? WHERE id = ? AND user_id = ?').run(
+    nextTitle,
+    nextDone,
+    nextCompleted,
+    nextRewarded,
+    id,
+    req.user.id
+  );
+  const updated = db.prepare('SELECT * FROM study_tasks WHERE id = ?').get(id);
+  res.json({
+    task: {
+      id: updated.id,
+      userId: updated.user_id,
+      title: updated.title,
+      subjectName: updated.subject_name,
+      targetPomos: updated.target_pomos,
+      completedPomos: updated.completed_pomos,
+      done: Boolean(updated.done),
+      createdAt: updated.created_at,
+    },
+    bonusXp,
+    bonusCoins,
+  });
+});
+
+app.delete('/api/tasks/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  db.prepare('DELETE FROM study_tasks WHERE id = ? AND user_id = ?').run(id, req.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/shop/buy', authMiddleware, (req, res) => {
+  const itemKey = String(req.body?.itemKey || '').trim();
+  const item = SHOP_CATALOG.find((x) => x.key === itemKey);
+  if (!item) return res.status(404).json({ error: 'Shop item not found' });
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (item.category === 'consumable') {
+    if (user.coins < item.price) return res.status(400).json({ error: `Need ${item.price} Focus Coins` });
+    db.prepare('UPDATE users SET coins = coins - ?, streak_freezes = streak_freezes + 1 WHERE id = ?').run(item.price, user.id);
+    const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    return res.json({ ok: true, action: 'purchased', itemKey, user: sanitizeUser(updated) });
+  }
+
+  const alreadyUnlocked = db.prepare('SELECT 1 FROM user_unlocks WHERE user_id = ? AND item_key = ?').get(user.id, itemKey);
+  let action = 'equipped';
+  if (!alreadyUnlocked) {
+    if (user.coins < item.price) return res.status(400).json({ error: `Need ${item.price} Focus Coins` });
+    db.prepare('UPDATE users SET coins = coins - ? WHERE id = ?').run(item.price, user.id);
+    db.prepare('INSERT INTO user_unlocks (user_id, item_key, created_at) VALUES (?, ?, ?)').run(user.id, itemKey, Date.now());
+    action = 'purchased_and_equipped';
+  }
+
+  if (item.category === 'spirit') {
+    db.prepare('UPDATE users SET equipped_spirit = ? WHERE id = ?').run(item.key, user.id);
+  } else if (item.category === 'title' && item.titleValue) {
+    db.prepare('UPDATE users SET title = ? WHERE id = ?').run(item.titleValue, user.id);
+  }
+
+  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  res.json({ ok: true, action, itemKey, user: sanitizeUser(updated) });
+});
+
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const subjectName = String(req.body?.subjectName || 'Focus Block').trim().slice(0, 40);
   const subjectColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '') ? req.body.subjectColor : '#10B981';
   const mode = String(req.body?.mode || 'pomodoro').slice(0, 20);
   const durationSec = Math.max(5, Math.min(43200, Math.round(Number(req.body?.durationSec || 0))));
   const purityPct = Math.max(10, Math.min(100, Math.round(Number(req.body?.purityPct ?? 100))));
+  const strictMode = Boolean(req.body?.strictMode);
+  const taskId = Number(req.body?.taskId || 0) || null;
   const note = String(req.body?.note || '').trim().slice(0, 280);
   const shareToFeed = req.body?.shareToFeed === false ? 0 : 1;
 
   const mins = Math.max(1, Math.round(durationSec / 60));
   const purityBonus = purityPct >= 95 ? 35 : purityPct >= 80 ? 15 : 0;
-  const xpEarned = Math.max(20, mins * 12 + purityBonus);
+  const baseXp = Math.max(20, mins * 12 + purityBonus);
+  const xpEarned = strictMode && purityPct >= 95 ? Math.round(baseXp * 1.25) : baseXp;
   const coinsEarned = Math.max(5, Math.round(xpEarned / 10));
 
   const now = Date.now();
@@ -558,12 +913,19 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   const yesterdayStr = dateKeyUTC(now - 86400_000);
 
   let nextStreak = req.user.streak_days || 0;
+  let nextFreezes = req.user.streak_freezes ?? 0;
+  let usedFreeze = false;
+
   if (!req.user.last_study_date) {
     nextStreak = 1;
   } else if (req.user.last_study_date === todayStr) {
     nextStreak = Math.max(1, nextStreak);
   } else if (req.user.last_study_date === yesterdayStr) {
     nextStreak += 1;
+  } else if (nextFreezes > 0 && nextStreak > 0) {
+    nextFreezes -= 1;
+    nextStreak += 1;
+    usedFreeze = true;
   } else {
     nextStreak = 1;
   }
@@ -574,8 +936,13 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   `).run(req.user.id, subjectName, subjectColor, mode, durationSec, purityPct, xpEarned, note, shareToFeed, now);
 
   db.prepare(`
-    UPDATE users SET xp = xp + ?, coins = coins + ?, streak_days = ?, last_study_date = ? WHERE id = ?
-  `).run(xpEarned, coinsEarned, nextStreak, todayStr, req.user.id);
+    UPDATE users SET xp = xp + ?, coins = coins + ?, streak_days = ?, last_study_date = ?, streak_freezes = ? WHERE id = ?
+  `).run(xpEarned, coinsEarned, nextStreak, todayStr, nextFreezes, req.user.id);
+
+  if (taskId) {
+    db.prepare('UPDATE study_tasks SET completed_pomos = completed_pomos + 1 WHERE id = ? AND user_id = ?').run(taskId, req.user.id);
+  }
+  db.prepare('DELETE FROM scheduled_timers WHERE user_id = ?').run(req.user.id);
 
   const session = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(Number(info.lastInsertRowid));
   broadcast({
@@ -592,6 +959,7 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     xpEarned,
     coinsEarned,
     newStreak: nextStreak,
+    usedFreeze,
   });
 });
 
@@ -704,6 +1072,12 @@ app.patch('/api/profile', authMiddleware, (req, res) => {
 
 // Serve static Vite build in production
 if (fs.existsSync(DIST_DIR)) {
+  app.use((req, res, next) => {
+    if (req.path === '/sw.js' || req.path === '/manifest.webmanifest') {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+    next();
+  });
   app.use(express.static(DIST_DIR, { maxAge: '1h' }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/ws')) return next();
@@ -775,6 +1149,7 @@ wss.on('connection', (ws) => {
         roomId: Number(msg.roomId) || 1,
         subjectName: String(msg.subjectName || 'Focus').slice(0, 32),
         subjectColor: String(msg.subjectColor || u.theme_color).slice(0, 16),
+        taskTitle: String(msg.taskTitle || '').slice(0, 80),
         startedAtMs: Date.now(),
         baseElapsedSec: Math.max(0, Math.round(Number(msg.elapsedSec || 0))),
         mode: String(msg.mode || 'pomodoro').slice(0, 20),

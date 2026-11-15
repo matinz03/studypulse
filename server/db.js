@@ -39,6 +39,9 @@ db.exec(`
     streak_days INTEGER NOT NULL DEFAULT 0,
     last_study_date TEXT,
     daily_goal_mins INTEGER NOT NULL DEFAULT 120,
+    streak_freezes INTEGER NOT NULL DEFAULT 1,
+    equipped_spirit TEXT NOT NULL DEFAULT 'default',
+    tasks_seeded INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
 
@@ -97,9 +100,58 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS study_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    subject_name TEXT NOT NULL DEFAULT 'Focus',
+    target_pomos INTEGER NOT NULL DEFAULT 1,
+    completed_pomos INTEGER NOT NULL DEFAULT 0,
+    done INTEGER NOT NULL DEFAULT 0,
+    rewarded INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT UNIQUE NOT NULL,
+    subscription_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS scheduled_timers (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    target_end_ms INTEGER NOT NULL,
+    mode TEXT NOT NULL,
+    subject_name TEXT NOT NULL,
+    task_title TEXT NOT NULL DEFAULT '',
+    duration_sec INTEGER NOT NULL,
+    fired INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS user_unlocks (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, item_key)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_user_time ON study_sessions(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON study_sessions(created_at DESC);
 `);
+
+// Safe migrations for existing production DBs
+const userCols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+if (!userCols.has('streak_freezes')) {
+  db.exec('ALTER TABLE users ADD COLUMN streak_freezes INTEGER NOT NULL DEFAULT 1');
+}
+if (!userCols.has('equipped_spirit')) {
+  db.exec("ALTER TABLE users ADD COLUMN equipped_spirit TEXT NOT NULL DEFAULT 'default'");
+}
+if (!userCols.has('tasks_seeded')) {
+  db.exec('ALTER TABLE users ADD COLUMN tasks_seeded INTEGER NOT NULL DEFAULT 0');
+}
 
 export const DEFAULT_SUBJECTS = [
   { name: 'Rust & Systems', color: '#F97316', icon: '🦀' },
@@ -109,11 +161,28 @@ export const DEFAULT_SUBJECTS = [
   { name: 'UI Engineering', color: '#EC4899', icon: '✨' },
 ];
 
+export function ensureStarterTasks(userId) {
+  const user = db.prepare('SELECT tasks_seeded FROM users WHERE id = ?').get(userId);
+  if (!user || user.tasks_seeded) return;
+  const existing = db.prepare('SELECT COUNT(*) AS c FROM study_tasks WHERE user_id = ?').get(userId).c;
+  if (existing === 0) {
+    const now = Date.now();
+    const ins = db.prepare(
+      'INSERT INTO study_tasks (user_id, title, subject_name, target_pomos, completed_pomos, done, rewarded, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)'
+    );
+    ins.run(userId, 'Review distributed consensus notes', 'Rust & Systems', 2, 0, now - 3000);
+    ins.run(userId, 'Solve 2 graph DP problems', 'Algorithms', 2, 1, now - 2000);
+    ins.run(userId, 'Write systems benchmark report', 'Machine Learning', 1, 0, now - 1000);
+  }
+  db.prepare('UPDATE users SET tasks_seeded = 1 WHERE id = ?').run(userId);
+}
+
 export function createStarterSubjects(userId) {
   const insert = db.prepare('INSERT INTO subjects (user_id, name, color, icon) VALUES (?, ?, ?, ?)');
   for (const s of DEFAULT_SUBJECTS) {
     insert.run(userId, s.name, s.color, s.icon);
   }
+  ensureStarterTasks(userId);
 }
 
 export function dateKeyUTC(ts) {

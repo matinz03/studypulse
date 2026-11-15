@@ -1,5 +1,5 @@
 export type TabKey = 'focus' | 'rooms' | 'compete' | 'feed' | 'me';
-export type TimerMode = 'pomodoro' | 'deep' | 'stopwatch' | 'sprint';
+export type TimerMode = 'pomodoro' | 'deep' | 'custom' | 'stopwatch' | 'sprint' | 'break';
 
 export interface User {
   id: number;
@@ -12,6 +12,8 @@ export interface User {
   xp: number;
   coins: number;
   streakDays: number;
+  streakFreezes: number;
+  equippedSpirit: string;
   lastStudyDate: string | null;
   dailyGoalMins: number;
   level: number;
@@ -23,6 +25,29 @@ export interface User {
   totalMins: number;
   sessionsCount: number;
   avgPurity: number;
+}
+
+export interface StudyTask {
+  id: number;
+  userId: number;
+  title: string;
+  subjectName: string;
+  targetPomos: number;
+  completedPomos: number;
+  done: boolean;
+  createdAt: number;
+}
+
+export interface ShopItem {
+  key: string;
+  category: 'consumable' | 'spirit' | 'title';
+  name: string;
+  desc: string;
+  icon: string;
+  price: number;
+  titleValue?: string;
+  unlocked: boolean;
+  equipped: boolean;
 }
 
 export interface Subject {
@@ -78,6 +103,7 @@ export interface RoomOccupant {
   roomId: number;
   subjectName: string;
   subjectColor: string;
+  taskTitle?: string;
   startedAtMs: number;
   baseElapsedSec: number;
   mode: string;
@@ -166,6 +192,9 @@ export interface Achievement {
 export interface BootstrapData {
   user: User;
   subjects: Subject[];
+  tasks: StudyTask[];
+  shopItems: ShopItem[];
+  vapidPublicKey: string;
   directory: PeerUser[];
   leaderboards: {
     today: LeaderboardEntry[];
@@ -176,6 +205,8 @@ export interface BootstrapData {
   feed: FeedItem[];
   heatmap: HeatmapDay[];
   weekTrend: WeekDay[];
+  hourlyDistribution: number[];
+  peakWindowLabel: string;
   subjectBreakdown: SubjectStat[];
   achievements: Achievement[];
   onlineCount: number;

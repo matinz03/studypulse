@@ -1,6 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timer, Users, Trophy, Flame, User as UserIcon, Coins, Radio, Zap } from 'lucide-react';
+import {
+  Timer,
+  Users,
+  Trophy,
+  Flame,
+  User as UserIcon,
+  Coins,
+  Radio,
+  Zap,
+  Bell,
+  BellRing,
+  PictureInPicture2,
+  Play,
+  Pause,
+  Download,
+} from 'lucide-react';
 import { AuthScreen } from './components/AuthScreen';
 import { FocusView, formatClock } from './components/FocusView';
 import { RoomsView } from './components/RoomsView';
@@ -8,17 +23,96 @@ import { CompeteView } from './components/CompeteView';
 import { FeedView } from './components/FeedView';
 import { ProfileView } from './components/ProfileView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
-import { BootstrapData, FloatingEmoji, Subject, TabKey, TimerMode, User } from './types';
+import { BootstrapData, FloatingEmoji, StudyTask, Subject, TabKey, TimerMode, User } from './types';
 import { soundEngine, SoundPreset } from './utils/soundEngine';
+import { pipEngine } from './utils/pipEngine';
 
 const TOKEN_KEY = 'studypulse_token';
+const TIMER_STATE_KEY = 'studypulse_timer_state';
 
-const TARGETS: Record<TimerMode, number> = {
-  pomodoro: 25 * 60,
-  deep: 50 * 60,
-  stopwatch: 0,
-  sprint: 60,
-};
+function getTargetSec(mode: TimerMode, customMins: number) {
+  switch (mode) {
+    case 'pomodoro':
+      return 25 * 60;
+    case 'deep':
+      return 50 * 60;
+    case 'custom':
+      return Math.max(5, customMins) * 60;
+    case 'break':
+      return 5 * 60;
+    case 'sprint':
+      return 60;
+    case 'stopwatch':
+      return 0;
+  }
+}
+
+function getModeLabel(mode: TimerMode) {
+  switch (mode) {
+    case 'pomodoro':
+      return 'Pomodoro';
+    case 'deep':
+      return 'Deep Work';
+    case 'custom':
+      return 'Custom';
+    case 'break':
+      return 'Break';
+    case 'sprint':
+      return 'Sprint';
+    case 'stopwatch':
+      return 'Flow';
+  }
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+interface PersistedTimerState {
+  mode: TimerMode;
+  customMins: number;
+  pomoCycleCount: number;
+  isRunning: boolean;
+  baseElapsedSec: number;
+  startedAtMs: number;
+  purityPct: number;
+  strictMode: boolean;
+  focusTask: string;
+  activeTaskId: number | null;
+}
+
+function loadPersistedTimer(): Partial<PersistedTimerState> & { initialElapsed: number; finishedOffline: boolean; finishedSec: number } {
+  try {
+    const raw = localStorage.getItem(TIMER_STATE_KEY);
+    if (!raw) return { initialElapsed: 0, finishedOffline: false, finishedSec: 0 };
+    const p = JSON.parse(raw) as PersistedTimerState;
+    const mode: TimerMode = p.mode || 'pomodoro';
+    const customMins = Number(p.customMins || 35);
+    const target = getTargetSec(mode, customMins);
+    if (p.isRunning && p.startedAtMs) {
+      const elapsedNow = (p.baseElapsedSec || 0) + Math.max(0, Math.floor((Date.now() - p.startedAtMs) / 1000));
+      if (mode !== 'stopwatch' && target > 0 && elapsedNow >= target) {
+        return { ...p, isRunning: false, initialElapsed: target, finishedOffline: true, finishedSec: target };
+      }
+      return { ...p, initialElapsed: elapsedNow, finishedOffline: false, finishedSec: 0 };
+    }
+    return { ...p, initialElapsed: p.baseElapsedSec || 0, finishedOffline: false, finishedSec: 0 };
+  } catch {
+    return { initialElapsed: 0, finishedOffline: false, finishedSec: 0 };
+  }
+}
 
 interface ToastMsg {
   id: number;
@@ -31,26 +125,42 @@ export function App() {
   const [loading, setLoading] = useState(Boolean(token));
   const [tab, setTab] = useState<TabKey>('focus');
 
+  const restored = useMemo(() => loadPersistedTimer(), []);
+
   // Timer state
-  const [mode, setMode] = useState<TimerMode>('pomodoro');
-  const [isRunning, setIsRunning] = useState(false);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [purityPct, setPurityPct] = useState(100);
+  const [mode, setMode] = useState<TimerMode>(restored.mode || 'pomodoro');
+  const [customMins, setCustomMins] = useState<number>(restored.customMins || 35);
+  const [pomoCycleCount, setPomoCycleCount] = useState<number>(restored.pomoCycleCount || 0);
+  const [isRunning, setIsRunning] = useState<boolean>(Boolean(restored.isRunning));
+  const [elapsedSec, setElapsedSec] = useState<number>(restored.initialElapsed || 0);
+  const [purityPct, setPurityPct] = useState<number>(restored.purityPct ?? 100);
+  const [strictMode, setStrictMode] = useState<boolean>(Boolean(restored.strictMode));
   const [wakeLocked, setWakeLocked] = useState(false);
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
   const [soundPreset, setSoundPreset] = useState<SoundPreset>('off');
-  const [showCompleteModal, setShowCompleteModal] = useState(false);
-  const [pendingDurationSec, setPendingDurationSec] = useState(0);
-  const [focusTask, setFocusTask] = useState('');
+  const [soundVolume, setSoundVolume] = useState<number>(0.45);
+  const [showCompleteModal, setShowCompleteModal] = useState<boolean>(Boolean(restored.finishedOffline));
+  const [pendingDurationSec, setPendingDurationSec] = useState<number>(restored.finishedSec || 0);
+  const [focusTask, setFocusTask] = useState<string>(restored.focusTask || '');
+  const [activeTaskId, setActiveTaskId] = useState<number | null>(restored.activeTaskId ?? null);
+
+  // Floating PiP, Notifications & PWA Install State
+  const [pipActive, setPipActive] = useState<boolean>(() => pipEngine.isActive());
+  const pipSupported = useMemo(() => pipEngine.isSupported(), []);
+  const [pushEnabled, setPushEnabled] = useState<boolean>(false);
+  const [swReg, setSwReg] = useState<ServiceWorkerRegistration | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   // Realtime UI state
   const [floatingEmojis, setFloatingEmojis] = useState<FloatingEmoji[]>([]);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const lastTickRef = useRef<number>(Date.now());
+  const startedAtMsRef = useRef<number>(restored.isRunning && restored.startedAtMs ? restored.startedAtMs : Date.now());
+  const baseElapsedRef = useRef<number>(restored.isRunning ? restored.baseElapsedSec || 0 : restored.initialElapsed || 0);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+  const lastAlertKeyRef = useRef<string>('');
 
   const pushToast = useCallback((text: string) => {
     const id = Date.now() + Math.random();
@@ -129,6 +239,140 @@ export function App() {
     return rooms.find((r) => r.id === selectedRoomId) || rooms[0];
   }, [data?.rooms, selectedRoomId]);
 
+  // Register Service Worker + Install Prompt + PiP listener
+  useEffect(() => {
+    const unsubPip = pipEngine.onChange(setPipActive);
+
+    const onInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener('beforeinstallprompt', onInstallPrompt);
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then(async (reg) => {
+          setSwReg(reg);
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (sub || (typeof Notification !== 'undefined' && Notification.permission === 'granted')) {
+              setPushEnabled(true);
+            }
+          } catch {
+            // ignore pushManager checks
+          }
+        })
+        .catch(() => {});
+
+      const onSwMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'SW_NOTIFICATION_CLICK' && event.data?.action === 'break') {
+          setShowCompleteModal(false);
+          setMode('break');
+          baseElapsedRef.current = 0;
+          startedAtMsRef.current = Date.now();
+          setElapsedSec(0);
+          setIsRunning(true);
+          setTab('focus');
+        }
+      };
+      navigator.serviceWorker.addEventListener('message', onSwMessage);
+      return () => {
+        unsubPip();
+        window.removeEventListener('beforeinstallprompt', onInstallPrompt);
+        navigator.serviceWorker.removeEventListener('message', onSwMessage);
+      };
+    }
+
+    return () => {
+      unsubPip();
+      window.removeEventListener('beforeinstallprompt', onInstallPrompt);
+    };
+  }, []);
+
+  const triggerCompletionAlert = useCallback(
+    (finishedMode: TimerMode, durSec: number, subName: string) => {
+      const alertKey = `${finishedMode}-${subName}-${Math.floor(Date.now() / 3000)}`;
+      if (lastAlertKeyRef.current === alertKey) return;
+      lastAlertKeyRef.current = alertKey;
+
+      soundEngine.playCompletionChime();
+      const mins = Math.max(1, Math.round(durSec / 60));
+      const title =
+        finishedMode === 'break'
+          ? '☕ Break Over — Time to Lock In!'
+          : "⏰ Time's Up! Focus Block Complete";
+      const body =
+        finishedMode === 'break'
+          ? 'Your break is finished. Ready for your next focus sprint!'
+          : `${mins}m on ${subName} complete! Claim your XP & Coins 🔥`;
+
+      pushToast(title);
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        if (swReg?.active) {
+          swReg.active.postMessage({
+            type: 'SHOW_LOCAL_NOTIFICATION',
+            payload: { title, body, tag: 'studypulse-timer', data: { url: '/' } },
+          });
+        } else {
+          try {
+            new Notification(title, { body, icon: '/icon.svg', tag: 'studypulse-timer' });
+          } catch {
+            // ignore platforms requiring SW for Notification constructor
+          }
+        }
+      }
+    },
+    [pushToast, swReg]
+  );
+
+  // Persist timer snapshot cleanly to survive lock screen & browser exit
+  useEffect(() => {
+    try {
+      const payload: PersistedTimerState = {
+        mode,
+        customMins,
+        pomoCycleCount,
+        isRunning,
+        baseElapsedSec: baseElapsedRef.current,
+        startedAtMs: startedAtMsRef.current,
+        purityPct,
+        strictMode,
+        focusTask,
+        activeTaskId,
+      };
+      localStorage.setItem(TIMER_STATE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore storage quota
+    }
+  }, [mode, customMins, pomoCycleCount, isRunning, elapsedSec, purityPct, strictMode, focusTask, activeTaskId]);
+
+  const syncServerSchedule = useCallback(
+    async (running: boolean, curMode: TimerMode, curElapsed: number, targetSecVal: number, subName: string, task: string) => {
+      if (!token) return;
+      try {
+        if (running && curMode !== 'stopwatch' && targetSecVal > curElapsed) {
+          const targetEndMs = Date.now() + (targetSecVal - curElapsed) * 1000;
+          await apiFetch('/api/timer/schedule', {
+            method: 'POST',
+            body: JSON.stringify({
+              targetEndMs,
+              mode: curMode,
+              subjectName: subName,
+              taskTitle: task,
+              durationSec: targetSecVal,
+            }),
+          });
+        } else {
+          await apiFetch('/api/timer/cancel', { method: 'POST' });
+        }
+      } catch {
+        // offline resilience
+      }
+    },
+    [token, apiFetch]
+  );
+
   // WebSocket Connection
   useEffect(() => {
     if (!token || !data?.user) return;
@@ -165,6 +409,8 @@ export function App() {
             pushToast(`${msg.fromAvatar || '⚡'} ${msg.fromDisplayName} nudged you to lock in!`);
           } else if (msg.type === 'session_completed' && msg.userId !== data?.user.id) {
             pushToast(`${msg.displayName} just logged ${Math.max(1, Math.round(msg.durationSec / 60))}m on ${msg.subjectName}!`);
+          } else if (msg.type === 'timer_expired' && msg.userId === data?.user.id) {
+            triggerCompletionAlert(msg.mode, msg.durationSec, msg.subjectName);
           }
         } catch {
           // ignore malformed ws message
@@ -198,51 +444,93 @@ export function App() {
         subjectName: activeSubject.name,
         subjectColor: activeSubject.color,
         elapsedSec,
+        taskTitle: focusTask,
         mode,
       })
     );
-  }, [isRunning, selectedRoomId, activeSubject.name, activeSubject.color, mode, data?.user?.id]);
+  }, [isRunning, selectedRoomId, activeSubject.name, activeSubject.color, focusTask, mode, data?.user?.id]);
 
-  // High-accuracy Focus Timer Ticker
+  // Wall-clock accurate Focus Timer Ticker (resists background throttling & sleep)
   useEffect(() => {
     if (!isRunning) return;
-    lastTickRef.current = Date.now();
+    startedAtMsRef.current = Date.now();
+    baseElapsedRef.current = elapsedSec;
+    const target = getTargetSec(mode, customMins);
 
-    const interval = window.setInterval(() => {
-      const now = Date.now();
-      const deltaSec = Math.floor((now - lastTickRef.current) / 1000);
-      if (deltaSec >= 1) {
-        lastTickRef.current += deltaSec * 1000;
-        setElapsedSec((prev) => {
-          const next = prev + deltaSec;
-          const target = TARGETS[mode];
-          if (mode !== 'stopwatch' && target > 0 && next >= target) {
-            setIsRunning(false);
-            setPendingDurationSec(target);
-            setShowCompleteModal(true);
-            return target;
-          }
-          return next;
-        });
+    const tick = () => {
+      const realElapsed = baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000));
+      if (mode !== 'stopwatch' && target > 0 && realElapsed >= target) {
+        baseElapsedRef.current = target;
+        setElapsedSec(target);
+        setIsRunning(false);
+        if (mode === 'break') {
+          triggerCompletionAlert('break', target, activeSubject.name);
+          baseElapsedRef.current = 0;
+          setElapsedSec(0);
+          setMode('pomodoro');
+        } else {
+          setPendingDurationSec(target);
+          setShowCompleteModal(true);
+          triggerCompletionAlert(mode, target, activeSubject.name);
+        }
+        syncServerSchedule(false, mode, target, target, activeSubject.name, focusTask);
+        return;
       }
-    }, 250);
+      setElapsedSec(realElapsed);
+    };
 
+    const interval = window.setInterval(tick, 250);
     return () => window.clearInterval(interval);
-  }, [isRunning, mode]);
+  }, [isRunning, mode, customMins, activeSubject.name, focusTask, triggerCompletionAlert, syncServerSchedule]);
 
-  // Focus Purity Shield (Page Visibility)
+  // Dynamic tab title & Floating PiP live HUD sync
+  useEffect(() => {
+    const target = getTargetSec(mode, customMins);
+    const isStopwatch = mode === 'stopwatch';
+    const displayed = isStopwatch ? elapsedSec : Math.max(0, target - elapsedSec);
+    const clock = formatClock(displayed);
+    const progress = isStopwatch
+      ? Math.min(1, (elapsedSec % 3600) / 3600)
+      : target > 0
+        ? Math.min(1, elapsedSec / target)
+        : 0;
+
+    if (isRunning) {
+      document.title = `${mode === 'break' ? '☕' : '⏳'} ${clock} • ${activeSubject.name} — StudyPulse`;
+    } else if (elapsedSec > 0) {
+      document.title = `⏸ ${clock} • StudyPulse`;
+    } else {
+      document.title = 'StudyPulse — Live Social Study & Focus';
+    }
+
+    pipEngine.updateState({
+      clockText: clock,
+      subjectName: activeSubject.name,
+      subjectColor: activeSubject.color,
+      taskTitle: focusTask,
+      modeLabel: getModeLabel(mode),
+      isRunning,
+      progress,
+      purityPct,
+    });
+  }, [isRunning, elapsedSec, mode, customMins, activeSubject.name, activeSubject.color, focusTask, purityPct]);
+
+  // Smart Focus Purity Shield (Page Visibility)
   useEffect(() => {
     function handleVisibility() {
-      if (!isRunning) return;
+      if (!isRunning || mode === 'break') return;
       if (document.hidden) {
-        setPurityPct((p) => Math.max(40, p - 4));
-      } else {
+        if (!strictMode && pipEngine.isActive()) {
+          return; // Multi-App PiP mode skips penalty while studying externally with Floating HUD
+        }
+        setPurityPct((p) => Math.max(40, p - (strictMode ? 6 : 4)));
+      } else if (strictMode || !pipEngine.isActive()) {
         pushToast('Focus Purity dipped slightly while away — stay locked in! 🛡️');
       }
     }
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [isRunning, pushToast]);
+  }, [isRunning, mode, strictMode, pushToast]);
 
   // Screen Wake Lock while actively studying on phone
   useEffect(() => {
@@ -288,12 +576,36 @@ export function App() {
 
   function handleLogout() {
     soundEngine.stop();
+    pipEngine.close();
     setSoundPreset('off');
     setIsRunning(false);
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TIMER_STATE_KEY);
     setToken(null);
     setData(null);
   }
+
+  const handleToggleRun = useCallback(() => {
+    setIsRunning((prevRunning) => {
+      const nextRunning = !prevRunning;
+      const target = getTargetSec(mode, customMins);
+      if (nextRunning) {
+        if (soundPreset !== 'off') {
+          soundEngine.setPreset(soundPreset, soundVolume);
+        }
+        baseElapsedRef.current = elapsedSec;
+        startedAtMsRef.current = Date.now();
+        syncServerSchedule(true, mode, elapsedSec, target, activeSubject.name, focusTask);
+      } else {
+        const realElapsed = baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000));
+        baseElapsedRef.current = realElapsed;
+        startedAtMsRef.current = Date.now();
+        setElapsedSec(realElapsed);
+        syncServerSchedule(false, mode, realElapsed, target, activeSubject.name, focusTask);
+      }
+      return nextRunning;
+    });
+  }, [mode, customMins, elapsedSec, activeSubject.name, focusTask, soundPreset, soundVolume, syncServerSchedule]);
 
   function handleChangeMode(m: TimerMode) {
     if (isRunning) {
@@ -301,30 +613,178 @@ export function App() {
       return;
     }
     setMode(m);
+    baseElapsedRef.current = 0;
+    startedAtMsRef.current = Date.now();
     setElapsedSec(0);
     setPurityPct(100);
   }
 
+  function handleChangeCustomMins(mins: number) {
+    if (isRunning) return;
+    const clamped = Math.max(5, Math.min(180, Math.round(mins)));
+    setCustomMins(clamped);
+    baseElapsedRef.current = 0;
+    startedAtMsRef.current = Date.now();
+    setElapsedSec(0);
+  }
+
   function handleChangeSound(preset: SoundPreset) {
     setSoundPreset(preset);
-    soundEngine.setPreset(preset);
+    soundEngine.setPreset(preset, soundVolume);
   }
 
-  function handleBoost5m() {
+  function handleChangeSoundVolume(vol: number) {
+    setSoundVolume(vol);
+    soundEngine.setVolume(vol);
+  }
+
+  const handleBoost5m = useCallback(() => {
     const added = 5 * 60;
-    const next = elapsedSec + added;
+    const target = getTargetSec(mode, customMins);
+    const currentReal = isRunning
+      ? baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000))
+      : elapsedSec;
+    const next = mode !== 'stopwatch' && target > 0 ? Math.min(target, currentReal + added) : currentReal + added;
+    baseElapsedRef.current = next;
+    startedAtMsRef.current = Date.now();
     setElapsedSec(next);
+
+    if (isRunning) {
+      if (mode !== 'stopwatch' && target > 0 && next >= target) {
+        setIsRunning(false);
+        syncServerSchedule(false, mode, target, target, activeSubject.name, focusTask);
+        if (mode === 'break') {
+          triggerCompletionAlert('break', target, activeSubject.name);
+          baseElapsedRef.current = 0;
+          setElapsedSec(0);
+          setMode('pomodoro');
+        } else {
+          setPendingDurationSec(target);
+          setShowCompleteModal(true);
+          triggerCompletionAlert(mode, target, activeSubject.name);
+        }
+        return;
+      }
+      syncServerSchedule(true, mode, next, target, activeSubject.name, focusTask);
+    }
     pushToast('+5m focus boost applied ⚡');
-  }
+  }, [mode, customMins, isRunning, elapsedSec, activeSubject.name, focusTask, syncServerSchedule, triggerCompletionAlert, pushToast]);
 
-  function handleOpenFinish() {
-    if (elapsedSec < 5) return;
+  const handleOpenFinish = useCallback(() => {
+    const currentReal = isRunning
+      ? baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000))
+      : elapsedSec;
+    if (currentReal < 5) return;
     setIsRunning(false);
-    setPendingDurationSec(elapsedSec);
+    baseElapsedRef.current = currentReal;
+    startedAtMsRef.current = Date.now();
+    setElapsedSec(currentReal);
+    syncServerSchedule(false, mode, currentReal, getTargetSec(mode, customMins), activeSubject.name, focusTask);
+
+    if (mode === 'break') {
+      baseElapsedRef.current = 0;
+      setElapsedSec(0);
+      setMode('pomodoro');
+      pushToast('Break wrapped up — back to focus! 🍅');
+      return;
+    }
+    setPendingDurationSec(currentReal);
     setShowCompleteModal(true);
+  }, [isRunning, elapsedSec, mode, customMins, activeSubject.name, focusTask, syncServerSchedule, pushToast]);
+
+  useEffect(() => {
+    pipEngine.setActions({
+      onToggleRun: handleToggleRun,
+      onBoost5m: handleBoost5m,
+      onFinish: handleOpenFinish,
+    });
+  }, [handleToggleRun, handleBoost5m, handleOpenFinish]);
+
+  async function handleTogglePip() {
+    const active = await pipEngine.toggle({
+      onToggleRun: handleToggleRun,
+      onBoost5m: handleBoost5m,
+      onFinish: handleOpenFinish,
+    });
+    if (active) {
+      pushToast('Floating Top Mini-App open — stays visible outside your browser! 🪟');
+    } else if (!pipSupported) {
+      pushToast('Browser does not support Floating PiP here — install app or enable Time-Up Alerts instead.');
+    }
   }
 
-  async function handleSaveSession({ note, shareToFeed }: { note: string; shareToFeed: boolean }) {
+  async function handleEnableAlerts() {
+    try {
+      if (typeof Notification === 'undefined') {
+        pushToast('System notifications are not available on this browser.');
+        return;
+      }
+      const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      if (perm !== 'granted') {
+        pushToast('Notifications denied — enable notifications in browser settings for Time-Up alarms.');
+        return;
+      }
+      setPushEnabled(true);
+
+      const reg = swReg || (await navigator.serviceWorker?.getRegistration());
+      const vapidKey = data?.vapidPublicKey;
+      let subscribed = false;
+      if (reg?.pushManager && vapidKey) {
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          });
+        }
+        await apiFetch('/api/push/subscribe', {
+          method: 'POST',
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+        subscribed = true;
+      }
+
+      if (isRunning && mode !== 'stopwatch') {
+        const target = getTargetSec(mode, customMins);
+        const realElapsed = baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000));
+        syncServerSchedule(true, mode, realElapsed, target, activeSubject.name, focusTask);
+      }
+
+      soundEngine.playCompletionChime();
+      if (subscribed) {
+        try {
+          await apiFetch('/api/push/test', { method: 'POST' });
+        } catch {
+          // fallback toast already shown
+        }
+        pushToast('Lock-screen & closed-browser Web Push armed! 🔔');
+      } else {
+        pushToast('Browser Time-Up notifications enabled! 🔔');
+      }
+    } catch {
+      pushToast('Browser alert permission updated 🔔');
+    }
+  }
+
+  async function handleInstallApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === 'accepted') {
+      setInstallPrompt(null);
+      pushToast('StudyPulse installed to your device! 🚀');
+    }
+  }
+
+  async function handleSaveSession({
+    note,
+    shareToFeed,
+    startBreakAfter,
+  }: {
+    note: string;
+    shareToFeed: boolean;
+    startBreakAfter?: boolean;
+  }) {
     const res = await apiFetch('/api/sessions', {
       method: 'POST',
       body: JSON.stringify({
@@ -333,18 +793,88 @@ export function App() {
         mode,
         durationSec: pendingDurationSec || elapsedSec,
         purityPct,
+        strictMode,
+        taskId: activeTaskId,
         note,
         shareToFeed,
         roomId: selectedRoomId,
       }),
     });
     setShowCompleteModal(false);
+    baseElapsedRef.current = 0;
+    startedAtMsRef.current = Date.now();
     setElapsedSec(0);
     setPurityPct(100);
     setFocusTask('');
+    setPomoCycleCount((c) => c + 1);
     await refreshBootstrap();
-    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned} Coins earned! Streak: ${res.newStreak}d 🔥`);
-    if (shareToFeed) setTab('feed');
+
+    const freezeNote = res.usedFreeze ? ' • Streak Freeze used ❄️' : '';
+    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned} Coins! Streak: ${res.newStreak}d 🔥${freezeNote}`);
+
+    if (startBreakAfter) {
+      setMode('break');
+      baseElapsedRef.current = 0;
+      startedAtMsRef.current = Date.now();
+      setIsRunning(true);
+      syncServerSchedule(true, 'break', 0, getTargetSec('break', customMins), activeSubject.name, 'Short recharge break');
+      setTab('focus');
+    } else if (shareToFeed) {
+      setTab('feed');
+    }
+  }
+
+  async function handleLogManual(mins: number, note: string) {
+    const res = await apiFetch('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        subjectName: activeSubject.name,
+        subjectColor: activeSubject.color,
+        mode: 'manual',
+        durationSec: Math.max(60, Math.round(mins * 60)),
+        purityPct: 100,
+        note: note || `Logged ${mins}m offline study`,
+        shareToFeed: true,
+        roomId: selectedRoomId,
+      }),
+    });
+    await refreshBootstrap();
+    pushToast(`Offline session logged: +${res.xpEarned} XP & +${res.coinsEarned} Coins! 📝`);
+  }
+
+  async function handleCreateTask(title: string, subjectName: string, targetPomos: number) {
+    const res = await apiFetch('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        subjectName: subjectName || activeSubject.name,
+        targetPomos,
+      }),
+    });
+    const created: StudyTask | undefined = res.task || res;
+    await refreshBootstrap();
+    if (created?.id) {
+      setActiveTaskId(created.id);
+      setFocusTask(created.title);
+    }
+    pushToast(`Added task "${title}"`);
+  }
+
+  async function handleToggleTaskDone(task: StudyTask) {
+    const res = await apiFetch(`/api/tasks/${task.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ done: !task.done }),
+    });
+    await refreshBootstrap();
+    if (res.bonusXp > 0) {
+      pushToast(`Task cleared! +${res.bonusXp} Bonus XP & +${res.bonusCoins} Coins ✅`);
+    }
+  }
+
+  async function handleDeleteTask(taskId: number) {
+    await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+    if (activeTaskId === taskId) setActiveTaskId(null);
+    await refreshBootstrap();
   }
 
   async function handleCreateSubject(name: string, color: string, icon: string) {
@@ -355,6 +885,27 @@ export function App() {
     await refreshBootstrap();
     setSelectedSubjectId(created.id);
     pushToast(`Added subject "${created.name}"`);
+  }
+
+  async function handleDeleteSubject(subjectId: number) {
+    await apiFetch(`/api/subjects/${subjectId}`, { method: 'DELETE' });
+    await refreshBootstrap();
+    pushToast('Subject removed');
+  }
+
+  async function handleBuyShopItem(itemKey: string) {
+    const res = await apiFetch('/api/shop/buy', {
+      method: 'POST',
+      body: JSON.stringify({ itemKey }),
+    });
+    await refreshBootstrap();
+    if (res.action === 'equipped') {
+      pushToast('Equipped item! ✨');
+    } else if (res.action === 'purchased_and_equipped') {
+      pushToast('Unlocked & equipped! 🎉');
+    } else {
+      pushToast('Purchased! Your Streak Freeze is armed ❄️');
+    }
   }
 
   async function handleCreateRoom(name: string, topic: string, icon: string, accent: string) {
@@ -499,8 +1050,8 @@ export function App() {
       <div className="max-w-5xl mx-auto lg:grid lg:grid-cols-[minmax(0,480px)_minmax(0,360px)] lg:justify-center lg:gap-6 lg:px-6">
         {/* Primary Mobile-First Column */}
         <div className="w-full max-w-[480px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
-          {/* Floating Liquid Glass Header */}
-          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2.5 rounded-[26px] liquid-dock">
+          {/* Floating Liquid Glass Header + Out-of-Browser Hover Bar */}
+          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-[26px] liquid-dock">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
@@ -553,6 +1104,93 @@ export function App() {
                 </button>
               </div>
             </div>
+
+            {/* Top Hover Navlink & Mini-App Utility Strip */}
+            <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-between gap-1.5">
+              {tab !== 'focus' && (isRunning || elapsedSec > 0) ? (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setTab('focus')}
+                    className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 border border-white/20 text-[10px] font-extrabold text-white flex items-center gap-1.5 truncate cursor-pointer"
+                    title="Jump back to Focus timer"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}
+                    />
+                    <span className="font-mono-num">
+                      {formatClock(
+                        mode === 'stopwatch'
+                          ? elapsedSec
+                          : Math.max(0, getTargetSec(mode, customMins) - elapsedSec)
+                      )}
+                    </span>
+                    <span className="truncate text-slate-300">• {activeSubject.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleToggleRun}
+                    className="w-6 h-6 rounded-full bg-emerald-400 text-slate-950 flex items-center justify-center shrink-0 cursor-pointer"
+                    title={isRunning ? 'Pause timer' : 'Resume timer'}
+                  >
+                    {isRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setTab('focus')}
+                  className="text-[10px] font-bold text-slate-300 hover:text-white flex items-center gap-1.5 truncate cursor-pointer"
+                >
+                  <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
+                  <span className="truncate">
+                    {pipActive ? 'Floating above apps' : isRunning ? `${getModeLabel(mode)} live` : 'Top Hover HUD Ready'}
+                  </span>
+                </button>
+              )}
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleTogglePip}
+                  className={`px-2 py-1 rounded-full border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition ${
+                    pipActive
+                      ? 'bg-cyan-400/20 border-cyan-300/60 text-cyan-200'
+                      : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-200'
+                  }`}
+                  title="Pop out always-on-top mini window (stays visible outside browser)"
+                >
+                  <PictureInPicture2 className="w-3 h-3" />
+                  <span>{pipActive ? 'Floating' : 'Float'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnableAlerts}
+                  className={`px-2 py-1 rounded-full border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition ${
+                    pushEnabled
+                      ? 'bg-emerald-400/20 border-emerald-300/60 text-emerald-200'
+                      : 'bg-amber-400/15 hover:bg-amber-400/25 border-amber-300/40 text-amber-200'
+                  }`}
+                  title="Enable lock-screen & closed-browser Time-Up notifications"
+                >
+                  {pushEnabled ? <BellRing className="w-3 h-3" /> : <Bell className="w-3 h-3" />}
+                  <span>{pushEnabled ? 'Alerts On' : 'Alerts'}</span>
+                </button>
+
+                {installPrompt && (
+                  <button
+                    type="button"
+                    onClick={handleInstallApp}
+                    className="px-2 py-1 rounded-full bg-violet-500/25 hover:bg-violet-500/35 border border-violet-300/40 text-[10px] font-extrabold text-violet-100 flex items-center gap-1 cursor-pointer"
+                    title="Install StudyPulse as standalone app"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>App</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </header>
 
           {/* Scrollable Active Tab Content */}
@@ -569,10 +1207,13 @@ export function App() {
                   <FocusView
                     mode={mode}
                     onChangeMode={handleChangeMode}
+                    customMins={customMins}
+                    onChangeCustomMins={handleChangeCustomMins}
+                    pomoCycleCount={pomoCycleCount}
                     isRunning={isRunning}
-                    onToggleRun={() => setIsRunning((r) => !r)}
+                    onToggleRun={handleToggleRun}
                     elapsedSec={elapsedSec}
-                    targetSec={TARGETS[mode]}
+                    targetSec={getTargetSec(mode, customMins)}
                     onBoost5m={handleBoost5m}
                     onFinishSession={handleOpenFinish}
                     subjects={data.subjects}
@@ -580,15 +1221,33 @@ export function App() {
                     onSelectSubject={(s) => setSelectedSubjectId(s.id)}
                     onCreateSubject={handleCreateSubject}
                     purityPct={purityPct}
+                    strictMode={strictMode}
+                    onToggleStrictMode={() => setStrictMode((v) => !v)}
                     wakeLocked={wakeLocked}
+                    pipActive={pipActive}
+                    pipSupported={pipSupported}
+                    onTogglePip={handleTogglePip}
                     soundPreset={soundPreset}
+                    soundVolume={soundVolume}
                     onChangeSound={handleChangeSound}
+                    onChangeSoundVolume={handleChangeSoundVolume}
                     currentRoom={currentRoom}
                     onGoToRooms={() => setTab('rooms')}
                     todayMins={user.todayMins}
                     dailyGoalMins={user.dailyGoalMins}
                     focusTask={focusTask}
                     onChangeFocusTask={setFocusTask}
+                    spiritSkin={user.equippedSpirit}
+                    tasks={data.tasks}
+                    activeTaskId={activeTaskId}
+                    onSelectTask={(t) => {
+                      setActiveTaskId(t ? t.id : null);
+                      if (t) setFocusTask(t.title);
+                    }}
+                    onCreateTask={handleCreateTask}
+                    onToggleTaskDone={handleToggleTaskDone}
+                    onDeleteTask={handleDeleteTask}
+                    onLogManual={handleLogManual}
                   />
                 )}
 
@@ -606,6 +1265,16 @@ export function App() {
                     currentUserId={user.id}
                     isRunning={isRunning}
                     onJumpToFocus={() => setTab('focus')}
+                    onMatchSubject={(subName) => {
+                      const match = data.subjects.find(
+                        (s) => s.name.toLowerCase() === subName.toLowerCase()
+                      );
+                      if (match) {
+                        setSelectedSubjectId(match.id);
+                      }
+                      setTab('focus');
+                      pushToast(`Matched "${subName}" — hit Start Focus! ⚡`);
+                    }}
                   />
                 )}
 
@@ -634,7 +1303,13 @@ export function App() {
                     heatmap={data.heatmap}
                     weekTrend={data.weekTrend}
                     subjectBreakdown={data.subjectBreakdown}
+                    hourlyDistribution={data.hourlyDistribution}
+                    peakWindowLabel={data.peakWindowLabel}
                     achievements={data.achievements}
+                    subjects={data.subjects}
+                    shopItems={data.shopItems}
+                    onBuyShopItem={handleBuyShopItem}
+                    onDeleteSubject={handleDeleteSubject}
                     onUpdateProfile={handleUpdateProfile}
                     onLogout={handleLogout}
                   />
@@ -782,10 +1457,13 @@ export function App() {
             mode={mode}
             durationSec={pendingDurationSec || elapsedSec}
             purityPct={purityPct}
+            strictMode={strictMode}
             initialNote={focusTask}
             onSave={handleSaveSession}
             onDiscard={() => {
               setShowCompleteModal(false);
+              baseElapsedRef.current = 0;
+              startedAtMsRef.current = Date.now();
               setElapsedSec(0);
               setPurityPct(100);
               setFocusTask('');
