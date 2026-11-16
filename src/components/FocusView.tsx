@@ -513,17 +513,17 @@ export function FocusView({
           </div>
         </div>
 
-        {/* SVG Timer Ring */}
+        {/* Precision Chronometer SVG Timer Ring */}
         <div className="relative w-[264px] h-[264px] flex items-center justify-center my-1">
           <svg width="264" height="264" viewBox="0 0 264 264" className="transform">
             <defs>
               <linearGradient id={`ringGrad-${themeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor={themeMeta.colors.accent} />
-                <stop offset="60%" stopColor={themeMeta.colors.accent2} />
+                <stop offset="55%" stopColor={themeMeta.colors.accent2} />
                 <stop offset="100%" stopColor={themeMeta.colors.accent} />
               </linearGradient>
               <filter id="glowRing" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
                   <feMergeNode in="SourceGraphic" />
@@ -531,27 +531,38 @@ export function FocusView({
               </filter>
             </defs>
 
-            {/* Background track */}
-            <circle cx="132" cy="132" r={radius} stroke={themeMeta.colors.track} strokeWidth="11" fill="none" />
+            {/* Outer bezel hairline */}
+            <circle cx="132" cy="132" r="125" stroke={themeMeta.colors.track} strokeWidth="1" fill="none" />
 
-            {/* Subtle tick marks */}
-            <circle
-              cx="132"
-              cy="132"
-              r={radius - 13}
-              stroke={themeMeta.colors.track}
-              strokeWidth="1.5"
-              strokeDasharray="2 9"
-              fill="none"
-            />
+            {/* Background recessed track */}
+            <circle cx="132" cy="132" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
 
-            {/* Active monochrome / theme arc */}
+            {/* 60 Precision Chronometer Dial Ticks */}
+            {Array.from({ length: 60 }).map((_, idx) => {
+              const major = idx % 5 === 0;
+              const deg = idx * 6;
+              return (
+                <line
+                  key={idx}
+                  x1="132"
+                  y1={major ? 16 : 19}
+                  x2="132"
+                  y2={23}
+                  stroke={major ? themeMeta.colors.accent2 : themeMeta.colors.track}
+                  strokeOpacity={major ? 0.55 : 0.8}
+                  strokeWidth={major ? 1.5 : 1}
+                  transform={`rotate(${deg} 132 132)`}
+                />
+              );
+            })}
+
+            {/* Active precision progress arc */}
             <circle
               cx="132"
               cy="132"
               r={radius}
               stroke={`url(#ringGrad-${themeId})`}
-              strokeWidth="11"
+              strokeWidth="9"
               strokeLinecap="round"
               fill="none"
               filter="url(#glowRing)"
@@ -561,12 +572,12 @@ export function FocusView({
               style={{ transition: 'stroke-dashoffset 0.35s linear' }}
             />
 
-            {/* Orbiting beacon dot */}
+            {/* Orbiting precision index beacon */}
             {progress > 0.005 && (
               <circle
                 cx={dotX}
                 cy={dotY}
-                r="6.5"
+                r="6"
                 fill={themeMeta.light ? '#ffffff' : '#09090b'}
                 stroke={themeMeta.colors.accent}
                 strokeWidth="3"
@@ -575,9 +586,9 @@ export function FocusView({
             )}
           </svg>
 
-          {/* Center Content: Concentric Refractive Glass Orb + Focus Spirit + Live Clock */}
+          {/* Center Content: Machined Recessed Chronometer Core */}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-[190px] h-[190px] rounded-full liquid-pill flex flex-col items-center justify-center p-2 shadow-[0_12px_32px_rgba(0,0,0,0.35)]">
+            <div className="w-[186px] h-[186px] sp-dial-core flex flex-col items-center justify-center p-2">
               <FocusSpirit
                 elapsedSec={elapsedSec}
                 isRunning={isRunning}
@@ -585,12 +596,12 @@ export function FocusView({
                 spiritSkin={spiritSkin}
                 themeId={themeId}
               />
-              <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tight text-white mt-1">
+              <div className="font-mono-num text-[36px] leading-none font-extrabold tracking-tighter text-white mt-1.5">
                 {formatClock(displayedSeconds)}
               </div>
-              <div className="text-[11px] font-medium text-slate-300 mt-1 flex items-center gap-1.5 max-w-[140px] truncate">
+              <div className="text-[11px] font-semibold text-slate-400 mt-1.5 flex items-center gap-1.5 max-w-[140px] truncate">
                 <span
-                  className="w-2 h-2 rounded-full inline-block shrink-0"
+                  className="w-1.5 h-1.5 rounded-full inline-block shrink-0"
                   style={{ backgroundColor: resolvedSubAccent }}
                 />
                 <span className="truncate">{activeSubject?.name || 'Focus'}</span>

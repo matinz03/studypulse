@@ -184,8 +184,8 @@ export function AuthScreen({ onSuccess, themeId, onOpenThemeModal }: AuthScreenP
                           key={c}
                           type="button"
                           onClick={() => setThemeColor(c)}
-                          className={`w-6 h-6 rounded-full border border-white/25 transition cursor-pointer ${
-                            themeColor === c ? 'ring-2 ring-white ring-offset-2 ring-offset-zinc-950 scale-110' : 'opacity-70'
+                          className={`w-6 h-6 rounded-md border border-white/25 transition cursor-pointer ${
+                            themeColor === c ? 'ring-2 ring-white ring-offset-2 ring-offset-zinc-950 scale-105' : 'opacity-70'
                           }`}
                           style={{ backgroundColor: c }}
                         />

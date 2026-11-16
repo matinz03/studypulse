@@ -1109,13 +1109,13 @@ export function App() {
         {/* Primary Mobile-First Column */}
         <div className="w-full max-w-[480px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
           {/* Floating Shadcn Glass Header + Out-of-Browser Hover Bar */}
-          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-[22px] liquid-dock">
+          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-xl liquid-dock">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
                   type="button"
                   onClick={() => setTab('me')}
-                  className="w-9 h-9 rounded-xl bg-slate-900 border flex items-center justify-center text-lg shrink-0 cursor-pointer"
+                  className="w-9 h-9 rounded-lg sp-inset border flex items-center justify-center text-lg shrink-0 cursor-pointer"
                   style={{ borderColor: resolveAccent(user.themeColor, themeId) }}
                 >
                   {user.avatar}
@@ -1495,7 +1495,7 @@ export function App() {
         aria-label="Primary Navigation"
         className="fixed bottom-3 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[440px]"
       >
-        <div className="liquid-dock liquid-dock-lens rounded-[26px] p-1.5 grid grid-cols-5 gap-1">
+        <div className="liquid-dock liquid-dock-lens rounded-xl p-1.5 grid grid-cols-5 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = tab === item.key;
@@ -1505,7 +1505,7 @@ export function App() {
                 key={item.key}
                 type="button"
                 onClick={() => setTab(item.key)}
-                className={`relative py-2 rounded-[20px] flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
+                className={`relative py-2 rounded-lg flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
                   active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -1513,7 +1513,7 @@ export function App() {
                   <motion.div
                     layoutId="navActivePill"
                     transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                    className="absolute inset-0 rounded-[20px] sp-tab-active"
+                    className="absolute inset-0 rounded-lg sp-tab-active"
                   />
                 )}
                 <div className="relative z-10">
