@@ -1,16 +1,186 @@
 @import "tailwindcss";
 
+:root,
+[data-theme="shadcn-dark"] {
+  color-scheme: dark;
+  --sp-bg: #09090b;
+  --sp-fg: #fafafa;
+  --sp-fg-muted: #a1a1aa;
+  --sp-card-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.055) 0%, rgba(24, 24, 27, 0.72) 55%, rgba(9, 9, 11, 0.85) 100%);
+  --sp-card-border: rgba(255, 255, 255, 0.11);
+  --sp-dock-bg: linear-gradient(165deg, rgba(255, 255, 255, 0.08) 0%, rgba(24, 24, 27, 0.82) 100%);
+  --sp-dock-border: rgba(255, 255, 255, 0.16);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+  --sp-pill-border: rgba(255, 255, 255, 0.13);
+  --sp-inset-bg: rgba(9, 9, 11, 0.65);
+  --sp-primary-bg: #fafafa;
+  --sp-primary-fg: #09090b;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.08) 100%);
+  --sp-tab-active-border: rgba(255, 255, 255, 0.28);
+  --sp-tab-active-fg: #fafafa;
+  --sp-accent: #fafafa;
+  --sp-accent-2: #a1a1aa;
+  --sp-ring-track: rgba(255, 255, 255, 0.08);
+  --sp-orb-a: rgba(255, 255, 255, 0.08);
+  --sp-orb-b: rgba(161, 161, 170, 0.06);
+  --sp-grid-dot: rgba(255, 255, 255, 0.045);
+  --sp-blur: 24px;
+  --sp-radius: 1.25rem;
+  --sp-shadow: 0 20px 44px -16px rgba(0, 0, 0, 0.85);
+}
+
+[data-theme="shadcn-light"] {
+  color-scheme: light;
+  --sp-bg: #f4f4f5;
+  --sp-fg: #09090b;
+  --sp-fg-muted: #52525b;
+  --sp-card-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(250, 250, 250, 0.78) 100%);
+  --sp-card-border: rgba(9, 9, 11, 0.11);
+  --sp-dock-bg: linear-gradient(165deg, rgba(255, 255, 255, 0.94) 0%, rgba(244, 244, 245, 0.88) 100%);
+  --sp-dock-border: rgba(9, 9, 11, 0.14);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(228, 228, 231, 0.45) 100%);
+  --sp-pill-border: rgba(9, 9, 11, 0.12);
+  --sp-inset-bg: rgba(244, 244, 245, 0.82);
+  --sp-primary-bg: #09090b;
+  --sp-primary-fg: #fafafa;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 244, 245, 0.92) 100%);
+  --sp-tab-active-border: rgba(9, 9, 11, 0.22);
+  --sp-tab-active-fg: #09090b;
+  --sp-accent: #18181b;
+  --sp-accent-2: #71717a;
+  --sp-ring-track: rgba(9, 9, 11, 0.09);
+  --sp-orb-a: rgba(9, 9, 11, 0.045);
+  --sp-orb-b: rgba(113, 113, 122, 0.05);
+  --sp-grid-dot: rgba(9, 9, 11, 0.05);
+  --sp-blur: 22px;
+  --sp-radius: 1.25rem;
+  --sp-shadow: 0 18px 40px -16px rgba(9, 9, 11, 0.14);
+}
+
+[data-theme="vercel"] {
+  color-scheme: dark;
+  --sp-bg: #000000;
+  --sp-fg: #ededed;
+  --sp-fg-muted: #888888;
+  --sp-card-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.04) 0%, rgba(12, 12, 12, 0.88) 100%);
+  --sp-card-border: rgba(255, 255, 255, 0.15);
+  --sp-dock-bg: linear-gradient(165deg, rgba(20, 20, 20, 0.92) 0%, rgba(5, 5, 5, 0.92) 100%);
+  --sp-dock-border: rgba(255, 255, 255, 0.2);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
+  --sp-pill-border: rgba(255, 255, 255, 0.16);
+  --sp-inset-bg: rgba(10, 10, 10, 0.9);
+  --sp-primary-bg: #ffffff;
+  --sp-primary-fg: #000000;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.09) 100%);
+  --sp-tab-active-border: rgba(255, 255, 255, 0.34);
+  --sp-tab-active-fg: #ffffff;
+  --sp-accent: #ffffff;
+  --sp-accent-2: #888888;
+  --sp-ring-track: rgba(255, 255, 255, 0.1);
+  --sp-orb-a: rgba(255, 255, 255, 0.05);
+  --sp-orb-b: rgba(255, 255, 255, 0.03);
+  --sp-grid-dot: rgba(255, 255, 255, 0.055);
+  --sp-blur: 18px;
+  --sp-radius: 0.875rem;
+  --sp-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.95);
+}
+
+[data-theme="linear"] {
+  color-scheme: dark;
+  --sp-bg: #08090a;
+  --sp-fg: #f7f8f8;
+  --sp-fg-muted: #8a8f98;
+  --sp-card-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.05) 0%, rgba(18, 19, 24, 0.78) 60%, rgba(10, 11, 14, 0.88) 100%);
+  --sp-card-border: rgba(255, 255, 255, 0.11);
+  --sp-dock-bg: linear-gradient(165deg, rgba(28, 30, 38, 0.86) 0%, rgba(12, 13, 18, 0.9) 100%);
+  --sp-dock-border: rgba(199, 210, 254, 0.2);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+  --sp-pill-border: rgba(255, 255, 255, 0.12);
+  --sp-inset-bg: rgba(11, 12, 16, 0.78);
+  --sp-primary-bg: #f7f8f8;
+  --sp-primary-fg: #08090a;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(129, 140, 248, 0.22) 0%, rgba(129, 140, 248, 0.08) 100%);
+  --sp-tab-active-border: rgba(165, 180, 252, 0.42);
+  --sp-tab-active-fg: #f7f8f8;
+  --sp-accent: #c7d2fe;
+  --sp-accent-2: #818cf8;
+  --sp-ring-track: rgba(255, 255, 255, 0.08);
+  --sp-orb-a: rgba(129, 140, 248, 0.12);
+  --sp-orb-b: rgba(255, 255, 255, 0.05);
+  --sp-grid-dot: rgba(199, 210, 254, 0.04);
+  --sp-blur: 24px;
+  --sp-radius: 1.15rem;
+  --sp-shadow: 0 22px 46px -14px rgba(0, 0, 0, 0.86);
+}
+
+[data-theme="apple-glass"] {
+  color-scheme: dark;
+  --sp-bg: #101114;
+  --sp-fg: #ffffff;
+  --sp-fg-muted: #b4b6be;
+  --sp-card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.14) 0%, rgba(44, 46, 54, 0.52) 55%, rgba(24, 26, 32, 0.64) 100%);
+  --sp-card-border: rgba(255, 255, 255, 0.22);
+  --sp-dock-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.2) 0%, rgba(42, 44, 52, 0.64) 100%);
+  --sp-dock-border: rgba(255, 255, 255, 0.3);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.17) 0%, rgba(255, 255, 255, 0.06) 100%);
+  --sp-pill-border: rgba(255, 255, 255, 0.24);
+  --sp-inset-bg: rgba(18, 20, 26, 0.5);
+  --sp-primary-bg: #ffffff;
+  --sp-primary-fg: #101114;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.12) 100%);
+  --sp-tab-active-border: rgba(255, 255, 255, 0.42);
+  --sp-tab-active-fg: #ffffff;
+  --sp-accent: #f4f4f5;
+  --sp-accent-2: #a1a1aa;
+  --sp-ring-track: rgba(255, 255, 255, 0.12);
+  --sp-orb-a: rgba(255, 255, 255, 0.1);
+  --sp-orb-b: rgba(212, 212, 216, 0.07);
+  --sp-grid-dot: rgba(255, 255, 255, 0.025);
+  --sp-blur: 32px;
+  --sp-radius: 1.5rem;
+  --sp-shadow: 0 24px 54px -14px rgba(0, 0, 0, 0.78);
+}
+
+[data-theme="raycast"] {
+  color-scheme: dark;
+  --sp-bg: #0c0d10;
+  --sp-fg: #fafafa;
+  --sp-fg-muted: #9ca3af;
+  --sp-card-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.06) 0%, rgba(22, 23, 28, 0.8) 55%, rgba(12, 13, 16, 0.9) 100%);
+  --sp-card-border: rgba(255, 255, 255, 0.11);
+  --sp-dock-bg: linear-gradient(165deg, rgba(28, 29, 36, 0.88) 0%, rgba(14, 15, 20, 0.92) 100%);
+  --sp-dock-border: rgba(255, 255, 255, 0.16);
+  --sp-pill-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+  --sp-pill-border: rgba(255, 255, 255, 0.13);
+  --sp-inset-bg: rgba(10, 11, 14, 0.72);
+  --sp-primary-bg: #fafafa;
+  --sp-primary-fg: #0c0d10;
+  --sp-tab-active-bg: linear-gradient(180deg, rgba(255, 99, 99, 0.2) 0%, rgba(255, 99, 99, 0.08) 100%);
+  --sp-tab-active-border: rgba(255, 99, 99, 0.45);
+  --sp-tab-active-fg: #ffffff;
+  --sp-accent: #e4e4e7;
+  --sp-accent-2: #ff6363;
+  --sp-ring-track: rgba(255, 255, 255, 0.08);
+  --sp-orb-a: rgba(255, 99, 99, 0.09);
+  --sp-orb-b: rgba(255, 255, 255, 0.05);
+  --sp-grid-dot: rgba(255, 255, 255, 0.04);
+  --sp-blur: 24px;
+  --sp-radius: 1.15rem;
+  --sp-shadow: 0 22px 46px -14px rgba(0, 0, 0, 0.88);
+}
+
 @layer base {
   html {
-    background-color: #050811;
-    color: #f1f5f9;
+    background-color: var(--sp-bg);
+    color: var(--sp-fg);
     font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   body {
-    background-color: #050811;
-    color: #f1f5f9;
+    background-color: var(--sp-bg);
+    color: var(--sp-fg);
     overflow-x: clip;
     min-height: 100dvh;
   }
@@ -21,132 +191,210 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Living Aurora Backdrop for Liquid Glass Refraction */
+/* Monochrome Spatial Backdrop & Subtle Dot Matrix */
 .aurora-bg {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background:
-    radial-gradient(65% 50% at 15% 10%, rgba(16, 185, 129, 0.22) 0%, transparent 70%),
-    radial-gradient(55% 45% at 88% 18%, rgba(6, 182, 212, 0.2) 0%, transparent 70%),
-    radial-gradient(60% 55% at 75% 82%, rgba(139, 92, 246, 0.22) 0%, transparent 72%),
-    radial-gradient(50% 45% at 18% 85%, rgba(236, 72, 153, 0.14) 0%, transparent 70%),
-    #050811;
+  background-color: var(--sp-bg);
+  background-image:
+    radial-gradient(65% 50% at 15% 8%, var(--sp-orb-a) 0%, transparent 72%),
+    radial-gradient(55% 45% at 88% 18%, var(--sp-orb-b) 0%, transparent 72%),
+    radial-gradient(circle at 1px 1px, var(--sp-grid-dot) 1px, transparent 0);
+  background-size: 100% 100%, 100% 100%, 24px 24px;
 }
 
 .aurora-orb-a {
   position: absolute;
-  width: 460px;
-  height: 460px;
-  top: -120px;
+  width: 440px;
+  height: 440px;
+  top: -140px;
   left: -90px;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.34) 0%, rgba(6, 182, 212, 0.08) 55%, transparent 75%);
+  background: radial-gradient(circle, var(--sp-orb-a) 0%, transparent 72%);
   filter: blur(55px);
   animation: aurora-drift-a 18s ease-in-out infinite alternate;
 }
 
 .aurora-orb-b {
   position: absolute;
-  width: 440px;
-  height: 440px;
-  bottom: -100px;
+  width: 420px;
+  height: 420px;
+  bottom: -120px;
   right: -80px;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.32) 0%, rgba(236, 72, 153, 0.08) 55%, transparent 75%);
+  background: radial-gradient(circle, var(--sp-orb-b) 0%, transparent 72%);
   filter: blur(60px);
   animation: aurora-drift-b 22s ease-in-out infinite alternate;
 }
 
 @keyframes aurora-drift-a {
   0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(48px, 36px, 0) scale(1.12); }
+  100% { transform: translate3d(44px, 32px, 0) scale(1.1); }
 }
 
 @keyframes aurora-drift-b {
   0% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(-44px, -32px, 0) scale(1.1); }
+  100% { transform: translate3d(-40px, -28px, 0) scale(1.08); }
 }
 
-/* Refractive Spatial Liquid Glass Surface */
+/* Shadcn Frosted Glass Card Surface */
 .liquid-card,
 .glass-card {
   position: relative;
-  background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.1) 0%,
-    rgba(17, 25, 44, 0.56) 45%,
-    rgba(11, 17, 32, 0.72) 100%
-  );
-  backdrop-filter: blur(24px) saturate(185%);
-  -webkit-backdrop-filter: blur(24px) saturate(185%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--sp-radius);
+  background: var(--sp-card-bg);
+  backdrop-filter: blur(var(--sp-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--sp-blur)) saturate(160%);
+  border: 1px solid var(--sp-card-border);
+  color: var(--sp-fg);
   box-shadow:
-    0 18px 42px -14px rgba(0, 0, 0, 0.72),
-    inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.32),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.06);
+    var(--sp-shadow),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.22);
 }
 
 .liquid-card::before,
 .glass-card::before {
   content: "";
   position: absolute;
-  inset: 0 14px auto 14px;
+  inset: 0 16px auto 16px;
   height: 1px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
   pointer-events: none;
 }
 
-/* High-Elevation Liquid Glass Dock & Floating Header */
+/* Elevated Frosted Navigation Dock & Floating Header */
 .liquid-dock,
 .liquid-dock-lens {
-  background:
-    linear-gradient(165deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 42%, rgba(6, 182, 212, 0.05) 100%),
-    rgba(10, 15, 29, 0.86);
-  backdrop-filter: blur(28px) saturate(200%);
-  -webkit-backdrop-filter: blur(28px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: var(--sp-dock-bg);
+  backdrop-filter: blur(calc(var(--sp-blur) + 4px)) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(var(--sp-blur) + 4px)) saturate(180%);
+  border: 1px solid var(--sp-dock-border);
+  color: var(--sp-fg);
   box-shadow:
-    0 22px 48px -10px rgba(0, 0, 0, 0.9),
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.48),
-    inset 0 -1px 1px 0 rgba(255, 255, 255, 0.12);
+    var(--sp-shadow),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
 }
 
+/* Shadcn Glass Pill / Secondary Button */
 .liquid-pill,
-.glass-pill {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.13) 0%,
-    rgba(255, 255, 255, 0.04) 100%
-  );
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+.glass-pill,
+.sp-btn-secondary,
+.sp-badge {
+  background: var(--sp-pill-bg);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid var(--sp-pill-border);
+  color: var(--sp-fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
+/* Shadcn Primary Solid CTA */
+.sp-btn-primary,
 .liquid-btn-primary {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, #34d399 0%, #22d3ee 55%, #38bdf8 100%);
-  color: #041016;
+  background: var(--sp-primary-bg) !important;
+  color: var(--sp-primary-fg) !important;
+  border: 1px solid var(--sp-pill-border);
   box-shadow:
-    0 10px 28px -6px rgba(16, 185, 129, 0.52),
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.65),
-    inset 0 -2px 4px rgba(6, 78, 59, 0.25);
+    0 8px 24px -6px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.liquid-btn-primary::after {
-  content: "";
-  position: absolute;
-  inset: 1px 4px 52% 4px;
-  border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
-  pointer-events: none;
+.sp-btn-primary:hover,
+.liquid-btn-primary:hover {
+  opacity: 0.92;
+}
+
+/* Shadcn Segmented Control Active Pill */
+.sp-tab-active {
+  background: var(--sp-tab-active-bg);
+  border: 1px solid var(--sp-tab-active-border);
+  color: var(--sp-tab-active-fg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+/* Shadcn Input & Recessed Surface */
+.sp-input,
+.sp-inset {
+  background: var(--sp-inset-bg);
+  border: 1px solid var(--sp-card-border);
+  color: var(--sp-fg);
+}
+
+.sp-input::placeholder {
+  color: var(--sp-fg-muted);
+}
+
+.sp-input:focus {
+  outline: none;
+  border-color: var(--sp-accent-2);
+  box-shadow: 0 0 0 2px var(--sp-pill-border);
+}
+
+.sp-muted {
+  color: var(--sp-fg-muted);
+}
+
+.sp-accent-text {
+  color: var(--sp-accent);
+}
+
+.sp-scrim-bottom {
+  background: linear-gradient(to top, var(--sp-bg) 0%, transparent 100%);
+  opacity: 0.92;
+}
+
+/* Daylight Light-Mode Polarity Adaptation */
+[data-theme="shadcn-light"] .liquid-card::before,
+[data-theme="shadcn-light"] .glass-card::before {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), transparent);
+}
+
+[data-theme="shadcn-light"] .text-white,
+[data-theme="shadcn-light"] .text-slate-100,
+[data-theme="shadcn-light"] .text-zinc-100 {
+  color: #09090b !important;
+}
+
+[data-theme="shadcn-light"] .text-slate-200,
+[data-theme="shadcn-light"] .text-slate-300,
+[data-theme="shadcn-light"] .text-zinc-200,
+[data-theme="shadcn-light"] .text-zinc-300 {
+  color: #27272a !important;
+}
+
+[data-theme="shadcn-light"] .text-slate-400,
+[data-theme="shadcn-light"] .text-slate-500,
+[data-theme="shadcn-light"] .text-zinc-400,
+[data-theme="shadcn-light"] .text-zinc-500 {
+  color: #52525b !important;
+}
+
+[data-theme="shadcn-light"] .sp-btn-primary,
+[data-theme="shadcn-light"] .liquid-btn-primary,
+[data-theme="shadcn-light"] .sp-btn-primary * {
+  color: #fafafa !important;
+}
+
+[data-theme="shadcn-light"] [class*="bg-slate-950"],
+[data-theme="shadcn-light"] [class*="bg-slate-900"],
+[data-theme="shadcn-light"] [class*="bg-zinc-950"],
+[data-theme="shadcn-light"] [class*="bg-zinc-900"],
+[data-theme="shadcn-light"] .bg-white\/5,
+[data-theme="shadcn-light"] .bg-white\/10 {
+  background-color: rgba(24, 24, 27, 0.045) !important;
+}
+
+[data-theme="shadcn-light"] [class*="border-white/"] {
+  border-color: rgba(9, 9, 11, 0.12) !important;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -179,7 +427,7 @@
 }
 
 .glass-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(52, 211, 153, 0.65);
+  background: var(--sp-accent-2);
 }
 
 .pb-safe {
@@ -193,7 +441,7 @@
 @keyframes pulse-ring {
   0% {
     transform: scale(0.95);
-    opacity: 0.8;
+    opacity: 0.7;
   }
   70% {
     transform: scale(1.16);

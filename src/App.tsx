@@ -15,6 +15,7 @@ import {
   Play,
   Pause,
   Download,
+  Palette,
 } from 'lucide-react';
 import { AuthScreen } from './components/AuthScreen';
 import { FocusView, formatClock } from './components/FocusView';
@@ -23,7 +24,9 @@ import { CompeteView } from './components/CompeteView';
 import { FeedView } from './components/FeedView';
 import { ProfileView } from './components/ProfileView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
+import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { BootstrapData, FloatingEmoji, StudyTask, Subject, TabKey, TimerMode, User } from './types';
+import { ThemeId, THEME_STORAGE_KEY, isValidThemeId, resolveAccent } from './themes';
 import { soundEngine, SoundPreset } from './utils/soundEngine';
 import { pipEngine } from './utils/pipEngine';
 
@@ -126,6 +129,16 @@ export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
   const [tab, setTab] = useState<TabKey>('focus');
+  const [themeId, setThemeId] = useState<ThemeId>(() => {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return isValidThemeId(saved) ? saved : 'shadcn-dark';
+  });
+  const [showThemeModal, setShowThemeModal] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', themeId);
+    localStorage.setItem(THEME_STORAGE_KEY, themeId);
+  }, [themeId]);
 
   const restored = useMemo(() => loadPersistedTimer(), []);
 
@@ -1000,13 +1013,33 @@ export function App() {
   }
 
   if (!token) {
-    return <AuthScreen onSuccess={handleAuthSuccess} />;
+    return (
+      <>
+        <AuthScreen
+          onSuccess={handleAuthSuccess}
+          themeId={themeId}
+          onOpenThemeModal={() => setShowThemeModal(true)}
+        />
+        <AnimatePresence>
+          {showThemeModal && (
+            <ThemeSelectorModal
+              themeId={themeId}
+              onSelectTheme={setThemeId}
+              onClose={() => setShowThemeModal(false)}
+            />
+          )}
+        </AnimatePresence>
+      </>
+    );
   }
 
   if (loading || !data) {
     return (
       <div className="min-h-[100dvh] flex flex-col items-center justify-center gap-3 text-slate-300">
-        <div className="w-12 h-12 rounded-2xl border-2 border-emerald-400 border-t-transparent animate-spin" />
+        <div
+          className="w-12 h-12 rounded-2xl border-2 border-t-transparent animate-spin"
+          style={{ borderColor: 'var(--sp-accent)', borderTopColor: 'transparent' }}
+        />
         <p className="text-xs font-semibold tracking-wider uppercase text-slate-400">
           Syncing StudyPulse...
         </p>
@@ -1048,7 +1081,7 @@ export function App() {
         </defs>
       </svg>
 
-      {/* Living Aurora Backdrop */}
+      {/* Monochrome Spatial Backdrop */}
       <div className="aurora-bg">
         <div className="aurora-orb-a" />
         <div className="aurora-orb-b" />
@@ -1063,7 +1096,7 @@ export function App() {
               initial={{ opacity: 0, y: -16, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -12, scale: 0.94 }}
-              className="px-4 py-2 rounded-full liquid-dock border border-emerald-400/50 text-xs font-bold text-white"
+              className="px-4 py-2 rounded-full liquid-dock text-xs font-bold text-white"
             >
               {t.text}
             </motion.div>
@@ -1075,29 +1108,29 @@ export function App() {
       <div className="max-w-5xl mx-auto lg:grid lg:grid-cols-[minmax(0,480px)_minmax(0,360px)] lg:justify-center lg:gap-6 lg:px-6">
         {/* Primary Mobile-First Column */}
         <div className="w-full max-w-[480px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
-          {/* Floating Liquid Glass Header + Out-of-Browser Hover Bar */}
-          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-[26px] liquid-dock">
+          {/* Floating Shadcn Glass Header + Out-of-Browser Hover Bar */}
+          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-[22px] liquid-dock">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
                   type="button"
                   onClick={() => setTab('me')}
                   className="w-9 h-9 rounded-xl bg-slate-900 border flex items-center justify-center text-lg shrink-0 cursor-pointer"
-                  style={{ borderColor: user.themeColor }}
+                  style={{ borderColor: resolveAccent(user.themeColor, themeId) }}
                 >
                   {user.avatar}
                 </button>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-extrabold text-white truncate">{user.displayName}</span>
-                    <span className="px-1.5 py-0.5 rounded-md bg-violet-500/20 text-[10px] font-extrabold text-violet-200">
+                    <span className="px-1.5 py-0.5 rounded-md sp-badge text-[10px] font-bold">
                       Lv.{user.level}
                     </span>
                   </div>
-                  <div className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden mt-1">
+                  <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden mt-1">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400"
-                      style={{ width: `${user.levelProgressPct}%` }}
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${user.levelProgressPct}%`, backgroundColor: 'var(--sp-accent)' }}
                     />
                   </div>
                 </div>
@@ -1105,43 +1138,47 @@ export function App() {
 
               <div className="flex items-center gap-1.5 shrink-0">
                 <span
-                  className="px-2 py-1 rounded-full bg-orange-500/15 border border-orange-400/30 text-[11px] font-extrabold text-orange-300 flex items-center gap-1"
+                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1"
                   title="Study streak"
                 >
-                  <Flame className="w-3.5 h-3.5 text-orange-400" />
+                  <Flame className="w-3.5 h-3.5 opacity-80" />
                   <span className="font-mono-num">{user.streakDays}</span>
                 </span>
                 <span
-                  className="px-2 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-[11px] font-extrabold text-amber-300 flex items-center gap-1"
+                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1"
                   title="Focus coins"
                 >
-                  <Coins className="w-3.5 h-3.5 text-amber-400" />
+                  <Coins className="w-3.5 h-3.5 opacity-80" />
                   <span className="font-mono-num">{user.coins}</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => setTab('rooms')}
-                  className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-[11px] font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                   title="Live online studiers"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: 'var(--sp-accent)' }}
+                  />
                   <span className="font-mono-num">{data.onlineCount}</span>
                 </button>
               </div>
             </div>
 
-            {/* Top Hover Navlink & Mini-App Utility Strip */}
+            {/* Top Hover Navlink & Utility Strip */}
             <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-between gap-1.5">
               {tab !== 'focus' && (isRunning || elapsedSec > 0) ? (
                 <div className="flex items-center gap-1.5 min-w-0">
                   <button
                     type="button"
                     onClick={() => setTab('focus')}
-                    className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 border border-white/20 text-[10px] font-extrabold text-white flex items-center gap-1.5 truncate cursor-pointer"
+                    className="px-2.5 py-1 rounded-full sp-badge hover:opacity-90 text-[10px] font-extrabold flex items-center gap-1.5 truncate cursor-pointer"
                     title="Jump back to Focus timer"
                   >
                     <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'animate-pulse' : 'opacity-50'}`}
+                      style={{ backgroundColor: 'var(--sp-accent)' }}
                     />
                     <span className="font-mono-num">
                       {formatClock(
@@ -1155,7 +1192,7 @@ export function App() {
                   <button
                     type="button"
                     onClick={handleToggleRun}
-                    className="w-6 h-6 rounded-full bg-emerald-400 text-slate-950 flex items-center justify-center shrink-0 cursor-pointer"
+                    className="w-6 h-6 rounded-full sp-btn-primary flex items-center justify-center shrink-0 cursor-pointer"
                     title={isRunning ? 'Pause timer' : 'Resume timer'}
                   >
                     {isRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
@@ -1165,9 +1202,9 @@ export function App() {
                 <button
                   type="button"
                   onClick={() => setTab('focus')}
-                  className="text-[10px] font-bold text-slate-300 hover:text-white flex items-center gap-1.5 truncate cursor-pointer"
+                  className="text-[10px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 min-w-0 truncate cursor-pointer"
                 >
-                  <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
+                  <Zap className="w-3 h-3 shrink-0 opacity-80" />
                   <span className="truncate">
                     {pipActive ? 'Floating above apps' : isRunning ? `${getModeLabel(mode)} live` : 'Top Hover HUD Ready'}
                   </span>
@@ -1178,10 +1215,8 @@ export function App() {
                 <button
                   type="button"
                   onClick={handleTogglePip}
-                  className={`px-2 py-1 rounded-full border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition ${
-                    pipActive
-                      ? 'bg-cyan-400/20 border-cyan-300/60 text-cyan-200'
-                      : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-200'
+                  className={`px-2 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                    pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
                   }`}
                   title="Pop out always-on-top mini window (stays visible outside browser)"
                 >
@@ -1192,10 +1227,8 @@ export function App() {
                 <button
                   type="button"
                   onClick={handleEnableAlerts}
-                  className={`px-2 py-1 rounded-full border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition ${
-                    pushEnabled
-                      ? 'bg-emerald-400/20 border-emerald-300/60 text-emerald-200'
-                      : 'bg-amber-400/15 hover:bg-amber-400/25 border-amber-300/40 text-amber-200'
+                  className={`px-2 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                    pushEnabled ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
                   }`}
                   title="Enable lock-screen & closed-browser Time-Up notifications"
                 >
@@ -1203,11 +1236,22 @@ export function App() {
                   <span>{pushEnabled ? 'Alerts On' : 'Alerts'}</span>
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => setShowThemeModal(true)}
+                  aria-label="Select theme"
+                  title="Select UI theme"
+                  className="px-2 py-1 rounded-full sp-badge hover:opacity-90 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <Palette className="w-3 h-3" />
+                  <span>Theme</span>
+                </button>
+
                 {installPrompt && (
                   <button
                     type="button"
                     onClick={handleInstallApp}
-                    className="px-2 py-1 rounded-full bg-violet-500/25 hover:bg-violet-500/35 border border-violet-300/40 text-[10px] font-extrabold text-violet-100 flex items-center gap-1 cursor-pointer"
+                    className="px-2 py-1 rounded-full sp-btn-primary text-[10px] font-bold flex items-center gap-1 cursor-pointer"
                     title="Install StudyPulse as standalone app"
                   >
                     <Download className="w-3 h-3" />
@@ -1230,6 +1274,7 @@ export function App() {
               >
                 {tab === 'focus' && (
                   <FocusView
+                    themeId={themeId}
                     mode={mode}
                     onChangeMode={handleChangeMode}
                     customMins={customMins}
@@ -1278,6 +1323,7 @@ export function App() {
 
                 {tab === 'rooms' && (
                   <RoomsView
+                    themeId={themeId}
                     rooms={data.rooms}
                     selectedRoomId={selectedRoomId}
                     onSelectRoom={(id) => {
@@ -1316,6 +1362,7 @@ export function App() {
 
                 {tab === 'feed' && (
                   <FeedView
+                    themeId={themeId}
                     feed={data.feed}
                     onReact={handleReactFeed}
                     onComment={handleCommentFeed}
@@ -1325,6 +1372,7 @@ export function App() {
 
                 {tab === 'me' && (
                   <ProfileView
+                    themeId={themeId}
                     user={user}
                     heatmap={data.heatmap}
                     weekTrend={data.weekTrend}
@@ -1349,10 +1397,10 @@ export function App() {
         <aside className="hidden lg:flex flex-col gap-4 py-6 sticky top-0 h-[100dvh] overflow-y-auto no-scrollbar z-10">
           <div className="glass-card rounded-3xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 animate-pulse" /> Live Study Pulse
               </span>
-              <span className="font-mono-num text-xs font-bold text-slate-300">
+              <span className="font-mono-num text-xs font-semibold text-slate-400">
                 {data.onlineCount} studying now
               </span>
             </div>
@@ -1369,8 +1417,8 @@ export function App() {
                     }}
                     className={`w-full p-2.5 rounded-2xl border flex items-center justify-between text-left cursor-pointer transition ${
                       selected
-                        ? 'bg-emerald-950/30 border-emerald-400/50'
-                        : 'bg-slate-950/60 border-white/5 hover:border-emerald-400/30'
+                        ? 'sp-tab-active'
+                        : 'sp-inset hover:border-white/25'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -1380,7 +1428,7 @@ export function App() {
                         <div className="text-[10px] text-slate-400 truncate">{r.topic}</div>
                       </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono-num text-[11px] font-bold shrink-0">
+                    <span className="px-2 py-0.5 rounded-full sp-badge font-mono-num text-[11px] font-bold shrink-0">
                       {r.activeCount} live
                     </span>
                   </button>
@@ -1391,13 +1439,13 @@ export function App() {
 
           <div className="glass-card rounded-3xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5" /> Weekly Top 5
               </span>
               <button
                 type="button"
                 onClick={() => setTab('compete')}
-                className="text-[11px] font-bold text-cyan-300 hover:underline cursor-pointer"
+                className="text-[11px] font-semibold text-slate-300 hover:text-white hover:underline cursor-pointer"
               >
                 Full Standings
               </button>
@@ -1406,8 +1454,8 @@ export function App() {
               {data.leaderboards.week.slice(0, 5).map((e) => (
                 <div
                   key={e.id}
-                  className={`flex items-center justify-between p-2 rounded-xl ${
-                    e.isSelf ? 'bg-emerald-500/15 border border-emerald-400/30' : 'bg-slate-950/45'
+                  className={`flex items-center justify-between p-2 rounded-xl border ${
+                    e.isSelf ? 'sp-tab-active' : 'sp-inset border-white/5'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -1415,7 +1463,7 @@ export function App() {
                     <span className="text-base">{e.avatar}</span>
                     <span className="text-xs font-bold text-white truncate">{e.displayName}</span>
                   </div>
-                  <span className="font-mono-num text-xs font-bold text-emerald-300">
+                  <span className="font-mono-num text-xs font-bold text-white">
                     {(e.minutes / 60).toFixed(1)}h
                   </span>
                 </div>
@@ -1424,8 +1472,8 @@ export function App() {
           </div>
 
           {isRunning && (
-            <div className="glass-card rounded-3xl p-4 border border-emerald-400/40 bg-emerald-950/20">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+            <div className="glass-card rounded-3xl p-4 border sp-tab-active">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
                 Active Focus Session
               </div>
               <div className="font-mono-num text-2xl font-extrabold text-white mt-1">
@@ -1439,15 +1487,15 @@ export function App() {
       {/* Soft Bottom Vignette Scrim behind Fixed Dock */}
       <div
         aria-hidden="true"
-        className="fixed bottom-0 inset-x-0 h-24 bg-gradient-to-t from-[#050811]/90 via-[#050811]/40 to-transparent pointer-events-none z-[90]"
+        className="fixed bottom-0 inset-x-0 h-24 sp-scrim-bottom pointer-events-none z-[90]"
       />
 
-      {/* True Viewport-Locked Fixed Liquid Glass Bottom Dock */}
+      {/* True Viewport-Locked Fixed Shadcn Glass Bottom Dock */}
       <nav
         aria-label="Primary Navigation"
         className="fixed bottom-3 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[440px]"
       >
-        <div className="liquid-dock liquid-dock-lens rounded-[30px] p-1.5 grid grid-cols-5 gap-1">
+        <div className="liquid-dock liquid-dock-lens rounded-[26px] p-1.5 grid grid-cols-5 gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = tab === item.key;
@@ -1457,7 +1505,7 @@ export function App() {
                 key={item.key}
                 type="button"
                 onClick={() => setTab(item.key)}
-                className={`relative py-2 rounded-[22px] flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
+                className={`relative py-2 rounded-[20px] flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
                   active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -1465,13 +1513,16 @@ export function App() {
                   <motion.div
                     layoutId="navActivePill"
                     transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                    className="absolute inset-0 rounded-[22px] bg-gradient-to-b from-white/22 via-emerald-400/20 to-cyan-400/15 border border-white/30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.45),0_4px_16px_rgba(16,185,129,0.2)]"
+                    className="absolute inset-0 rounded-[20px] sp-tab-active"
                   />
                 )}
                 <div className="relative z-10">
-                  <Icon className={`w-4 h-4 ${active ? 'text-emerald-300' : ''}`} />
+                  <Icon className="w-4 h-4" />
                   {hasLiveRooms && (
-                    <span className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+                    <span
+                      className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full"
+                      style={{ backgroundColor: 'var(--sp-accent)' }}
+                    />
                   )}
                 </div>
                 <span className="text-[10px] font-bold relative z-10">{item.label}</span>
@@ -1485,6 +1536,7 @@ export function App() {
       <AnimatePresence>
         {showCompleteModal && (
           <SessionCompleteModal
+            themeId={themeId}
             user={user}
             subject={activeSubject}
             mode={mode}
@@ -1501,6 +1553,17 @@ export function App() {
               setPurityPct(100);
               setFocusTask('');
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Theme Selector Modal */}
+      <AnimatePresence>
+        {showThemeModal && (
+          <ThemeSelectorModal
+            themeId={themeId}
+            onSelectTheme={setThemeId}
+            onClose={() => setShowThemeModal(false)}
           />
         )}
       </AnimatePresence>

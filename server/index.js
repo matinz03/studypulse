@@ -265,7 +265,7 @@ app.post('/api/auth/register', (req, res) => {
   const displayName = String(req.body?.displayName || '').trim() || usernameRaw;
   const password = String(req.body?.password || '');
   const avatar = String(req.body?.avatar || '🔥').slice(0, 8);
-  const themeColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.themeColor || '') ? req.body.themeColor : '#10B981';
+  const themeColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.themeColor || '') ? req.body.themeColor : '#FAFAFA';
 
   if (!/^[a-z0-9_]{3,20}$/.test(usernameRaw)) {
     return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscore).' });
@@ -712,7 +712,7 @@ app.post('/api/timer/cancel', authMiddleware, (req, res) => {
 
 app.post('/api/subjects', authMiddleware, (req, res) => {
   const name = String(req.body?.name || '').trim().slice(0, 32);
-  const color = /^#[0-9a-fA-F]{6}$/.test(req.body?.color || '') ? req.body.color : '#10B981';
+  const color = /^#[0-9a-fA-F]{6}$/.test(req.body?.color || '') ? req.body.color : '#FAFAFA';
   const icon = String(req.body?.icon || '📘').slice(0, 8);
   if (!name) return res.status(400).json({ error: 'Subject name is required' });
 

@@ -154,11 +154,11 @@ if (!userCols.has('tasks_seeded')) {
 }
 
 export const DEFAULT_SUBJECTS = [
-  { name: 'Rust & Systems', color: '#F97316', icon: '🦀' },
-  { name: 'Algorithms', color: '#06B6D4', icon: '⚡' },
-  { name: 'Machine Learning', color: '#8B5CF6', icon: '🧠' },
-  { name: 'Calculus', color: '#10B981', icon: '📐' },
-  { name: 'UI Engineering', color: '#EC4899', icon: '✨' },
+  { name: 'Rust & Systems', color: '#FAFAFA', icon: '🦀' },
+  { name: 'Algorithms', color: '#E4E4E7', icon: '⚡' },
+  { name: 'Machine Learning', color: '#D4D4D8', icon: '🧠' },
+  { name: 'Calculus', color: '#A1A1AA', icon: '📐' },
+  { name: 'UI Engineering', color: '#71717A', icon: '✨' },
 ];
 
 export function createStarterSubjects(userId) {
@@ -178,10 +178,10 @@ function seedDefaultRooms() {
 
   const now = Date.now();
   const rooms = [
-    ['Late Night Rust & Code 💻', 'Systems, Web & Compilers', '💻', '#10B981'],
-    ['Deep Work Library 🏛️', 'Zero-distraction silent focus', '🏛️', '#06B6D4'],
-    ['Pomodoro Sprint Arena ⚡', '25m sprints + 5m stretch', '⚡', '#F97316'],
-    ['Finals Crunch Squad 🔥', 'Exam prep, math & flashcards', '🔥', '#8B5CF6'],
+    ['Late Night Rust & Code 💻', 'Systems, Web & Compilers', '💻', '#FAFAFA'],
+    ['Deep Work Library 🏛️', 'Zero-distraction silent focus', '🏛️', '#D4D4D8'],
+    ['Pomodoro Sprint Arena ⚡', '25m sprints + 5m stretch', '⚡', '#A1A1AA'],
+    ['Finals Crunch Squad 🔥', 'Exam prep, math & flashcards', '🔥', '#71717A'],
   ];
   const insertRoom = db.prepare(
     'INSERT INTO study_rooms (name, topic, icon, accent, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?)'

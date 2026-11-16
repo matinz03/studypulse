@@ -22,9 +22,11 @@ import {
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
 import { Room, StudyTask, Subject, TimerMode } from '../types';
+import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { SoundPreset } from '../utils/soundEngine';
 
 interface FocusViewProps {
+  themeId?: ThemeId;
   mode: TimerMode;
   onChangeMode: (m: TimerMode) => void;
   customMins: number;
@@ -87,7 +89,7 @@ const SOUNDS: { key: SoundPreset; label: string; icon: string }[] = [
 ];
 
 const SUBJECT_EMOJIS = ['📚', '💻', '🧠', '📐', '🦀', '⚡', '🎨', '🔬'];
-const SUBJECT_COLORS = ['#10B981', '#06B6D4', '#8B5CF6', '#F97316', '#EC4899', '#3B82F6'];
+const SUBJECT_COLORS = ['#FAFAFA', '#E4E4E7', '#D4D4D8', '#A1A1AA', '#71717A', '#52525B'];
 
 export function formatClock(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -101,6 +103,7 @@ export function formatClock(totalSeconds: number) {
 }
 
 export function FocusView({
+  themeId = 'shadcn-dark',
   mode,
   onChangeMode,
   customMins,
@@ -145,7 +148,7 @@ export function FocusView({
   const [addingSubject, setAddingSubject] = useState(false);
   const [newSubName, setNewSubName] = useState('');
   const [newSubIcon, setNewSubIcon] = useState('📚');
-  const [newSubColor, setNewSubColor] = useState('#10B981');
+  const [newSubColor, setNewSubColor] = useState('#FAFAFA');
   const [savingSub, setSavingSub] = useState(false);
 
   const [loggingManual, setLoggingManual] = useState(false);
@@ -158,6 +161,9 @@ export function FocusView({
   const [newTaskPomos, setNewTaskPomos] = useState(2);
   const [savingTask, setSavingTask] = useState(false);
 
+  const themeMeta = getThemeMeta(themeId);
+  const resolvedSubAccent = resolveAccent(activeSubject?.color, themeId);
+
   const isStopwatch = mode === 'stopwatch';
   const displayedSeconds = isStopwatch ? elapsedSec : Math.max(0, targetSec - elapsedSec);
   const progress = isStopwatch
@@ -169,11 +175,11 @@ export function FocusView({
   const radius = 114;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - progress);
-  const angleRad = (progress * 2 * Math.PI) - Math.PI / 2;
+  const angleRad = progress * 2 * Math.PI - Math.PI / 2;
   const dotX = 132 + radius * Math.cos(angleRad);
   const dotY = 132 + radius * Math.sin(angleRad);
 
-  const stage = getSpiritStage(elapsedSec, spiritSkin);
+  const stage = getSpiritStage(elapsedSec, spiritSkin, themeId);
 
   async function submitSubject(e: React.FormEvent) {
     e.preventDefault();
@@ -222,31 +228,31 @@ export function FocusView({
       <div className="liquid-card rounded-3xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-200">
-            <Target className="w-3.5 h-3.5 text-emerald-400" />
+            <Target className="w-3.5 h-3.5 opacity-80" />
             Today&apos;s Focus Goal
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="font-mono-num text-[11px] font-extrabold text-emerald-300">
+            <span className="font-mono-num text-[11px] font-extrabold text-white">
               {todayMins}m
             </span>
             <span className="text-[11px] text-slate-400 font-mono-num">/ {dailyGoalMins}m</span>
-            <span className="liquid-pill px-2 py-0.5 rounded-full font-mono-num text-[10px] font-bold text-cyan-200">
+            <span className="sp-badge px-2 py-0.5 rounded-full font-mono-num text-[10px] font-bold">
               {goalPct}%
             </span>
             <button
               type="button"
               onClick={() => setLoggingManual((v) => !v)}
-              className="liquid-pill px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+              className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
               title="Log offline study session"
             >
               <Clock className="w-2.5 h-2.5" /> +Log
             </button>
           </div>
         </div>
-        <div className="w-full h-1.5 rounded-full bg-white/8 overflow-hidden">
+        <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400 transition-all duration-500"
-            style={{ width: `${goalPct}%` }}
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
           />
         </div>
         <input
@@ -255,7 +261,7 @@ export function FocusView({
           placeholder="🎯 What are you focusing on?"
           value={focusTask}
           onChange={(e) => onChangeFocusTask(e.target.value)}
-          className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-950/55 border border-white/10 text-xs font-medium text-white placeholder-slate-400 focus:outline-none focus:border-emerald-400/55 transition"
+          className="w-full px-3.5 py-2.5 rounded-2xl sp-input text-xs font-medium transition"
         />
 
         <AnimatePresence>
@@ -269,7 +275,7 @@ export function FocusView({
             >
               <div className="flex items-center justify-between text-[11px] text-slate-300">
                 <span>Log Offline {activeSubject.name} Block</span>
-                <span className="font-mono-num font-bold text-emerald-300">{manualMins} mins</span>
+                <span className="font-mono-num font-bold text-white">{manualMins} mins</span>
               </div>
               <input
                 type="range"
@@ -278,7 +284,7 @@ export function FocusView({
                 step={5}
                 value={manualMins}
                 onChange={(e) => setManualMins(Number(e.target.value))}
-                className="w-full accent-emerald-400"
+                className="w-full accent-current"
               />
               <div className="flex gap-2">
                 <input
@@ -287,12 +293,12 @@ export function FocusView({
                   placeholder="Optional note (e.g. textbook reading)"
                   value={manualNote}
                   onChange={(e) => setManualNote(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-white focus:outline-none"
+                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
                 />
                 <button
                   type="submit"
                   disabled={savingManual}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-extrabold cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
                 >
                   {savingManual ? '...' : 'Save'}
                 </button>
@@ -302,7 +308,7 @@ export function FocusView({
         </AnimatePresence>
       </div>
 
-      {/* Mode Switcher Pills */}
+      {/* Mode Switcher Segmented Control */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 p-1 rounded-2xl glass-card">
         {MODES.map((m) => {
           const active = mode === m.key;
@@ -320,7 +326,7 @@ export function FocusView({
                 <motion.div
                   layoutId="focusModePill"
                   transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-0 rounded-xl bg-gradient-to-br from-emerald-500/25 to-cyan-500/20 border border-emerald-400/35"
+                  className="absolute inset-0 rounded-xl sp-tab-active"
                 />
               )}
               <div className="relative z-10 text-xs font-bold leading-tight">{m.label}</div>
@@ -335,7 +341,7 @@ export function FocusView({
         <div className="glass-card rounded-2xl p-3 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold text-slate-200">Custom Timer Length</span>
-            <span className="font-mono-num font-extrabold text-cyan-300">{customMins} mins</span>
+            <span className="font-mono-num font-extrabold text-white">{customMins} mins</span>
           </div>
           <input
             type="range"
@@ -344,7 +350,7 @@ export function FocusView({
             step={5}
             value={customMins}
             onChange={(e) => onChangeCustomMins(Number(e.target.value))}
-            className="w-full accent-cyan-400"
+            className="w-full accent-current"
           />
           <div className="flex items-center gap-1.5">
             {[15, 35, 45, 60, 90].map((m) => (
@@ -353,7 +359,7 @@ export function FocusView({
                 type="button"
                 onClick={() => onChangeCustomMins(m)}
                 className={`flex-1 py-1 rounded-lg font-mono-num text-[11px] font-bold cursor-pointer transition ${
-                  customMins === m ? 'bg-cyan-400/25 border border-cyan-300/60 text-white' : 'liquid-pill text-slate-300'
+                  customMins === m ? 'sp-tab-active' : 'sp-badge text-slate-300'
                 }`}
               >
                 {m}m
@@ -374,17 +380,8 @@ export function FocusView({
               type="button"
               onClick={() => onSelectSubject(sub)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer border ${
-                selected ? 'text-white shadow-md' : 'text-slate-300 bg-slate-900/60 border-white/10 hover:border-white/25'
+                selected ? 'sp-tab-active font-bold' : 'sp-inset text-slate-300 hover:border-white/25'
               }`}
-              style={
-                selected
-                  ? {
-                      backgroundColor: `${sub.color}28`,
-                      borderColor: `${sub.color}88`,
-                      boxShadow: `0 0 16px ${sub.color}26`,
-                    }
-                  : undefined
-              }
             >
               <span>{sub.icon}</span>
               <span>{sub.name}</span>
@@ -394,7 +391,7 @@ export function FocusView({
         <button
           type="button"
           onClick={() => setAddingSubject((v) => !v)}
-          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold glass-pill text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
         >
           {addingSubject ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
           <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
@@ -419,12 +416,12 @@ export function FocusView({
                 placeholder="New subject (e.g. Organic Chem)"
                 value={newSubName}
                 onChange={(e) => setNewSubName(e.target.value)}
-                className="flex-1 px-3 py-2 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-400/60"
+                className="flex-1 px-3 py-2 rounded-xl sp-input text-xs"
               />
               <button
                 type="submit"
                 disabled={savingSub}
-                className="px-3.5 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold cursor-pointer"
+                className="px-3.5 py-2 rounded-xl sp-btn-primary text-xs font-bold cursor-pointer"
               >
                 Add
               </button>
@@ -436,7 +433,9 @@ export function FocusView({
                     key={em}
                     type="button"
                     onClick={() => setNewSubIcon(em)}
-                    className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${newSubIcon === em ? 'bg-white/15 ring-1 ring-emerald-400' : 'opacity-65'}`}
+                    className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${
+                      newSubIcon === em ? 'sp-tab-active' : 'opacity-65'
+                    }`}
                   >
                     {em}
                   </button>
@@ -448,7 +447,9 @@ export function FocusView({
                     key={c}
                     type="button"
                     onClick={() => setNewSubColor(c)}
-                    className={`w-5 h-5 rounded-full cursor-pointer ${newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'}`}
+                    className={`w-5 h-5 rounded-full border border-white/25 cursor-pointer ${
+                      newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'
+                    }`}
                     style={{ backgroundColor: c }}
                   />
                 ))}
@@ -460,11 +461,11 @@ export function FocusView({
 
       {/* Main Circular Timer & Focus Spirit Dial */}
       <div className="glass-card rounded-3xl p-5 flex flex-col items-center relative overflow-hidden">
-        {/* Top micro telemetry & smart purity pills */}
+        {/* Top micro telemetry & smart purity badges */}
         <div className="w-full flex flex-wrap items-center justify-between gap-1.5 text-[11px] mb-1">
           <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/25 text-emerald-300 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5" />
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full sp-badge font-semibold">
+              <ShieldCheck className="w-3.5 h-3.5 opacity-80" />
               Purity {purityPct}%
             </span>
             <button
@@ -476,9 +477,7 @@ export function FocusView({
                   : 'Multi-App PiP: Use external apps freely with PiP without Purity penalty'
               }
               className={`inline-flex items-center gap-1 px-2 py-1 rounded-full font-bold cursor-pointer border transition ${
-                strictMode
-                  ? 'bg-orange-500/20 border-orange-400/45 text-orange-200'
-                  : 'liquid-pill text-slate-300 hover:text-white'
+                strictMode ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
               }`}
             >
               {strictMode ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -487,7 +486,7 @@ export function FocusView({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="liquid-pill px-2 py-1 rounded-full text-[10px] font-mono-num font-bold text-amber-200">
+            <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold">
               🍅 {(pomoCycleCount % 4) + 1}/4
             </span>
             {pipSupported && (
@@ -495,9 +494,7 @@ export function FocusView({
                 type="button"
                 onClick={onTogglePip}
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
-                  pipActive
-                    ? 'bg-cyan-400/25 border-cyan-300/60 text-cyan-100'
-                    : 'liquid-pill text-slate-300 hover:text-white'
+                  pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
                 }`}
               >
                 <PictureInPicture2 className="w-3 h-3" />
@@ -505,12 +502,12 @@ export function FocusView({
               </button>
             )}
             {wakeLocked ? (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/10 border border-amber-400/25 text-amber-300 font-medium">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge font-medium">
                 <Sun className="w-3 h-3" /> Awake
               </span>
             ) : (
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400">
-                <Sparkles className="w-3 h-3 text-cyan-400" /> {stage.label}
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge text-slate-400">
+                <Sparkles className="w-3 h-3" /> {stage.label}
               </span>
             )}
           </div>
@@ -520,13 +517,13 @@ export function FocusView({
         <div className="relative w-[264px] h-[264px] flex items-center justify-center my-1">
           <svg width="264" height="264" viewBox="0 0 264 264" className="transform">
             <defs>
-              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor={activeSubject?.color || '#10B981'} />
-                <stop offset="55%" stopColor="#06B6D4" />
-                <stop offset="100%" stopColor="#8B5CF6" />
+              <linearGradient id={`ringGrad-${themeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor={themeMeta.colors.accent} />
+                <stop offset="60%" stopColor={themeMeta.colors.accent2} />
+                <stop offset="100%" stopColor={themeMeta.colors.accent} />
               </linearGradient>
               <filter id="glowRing" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feGaussianBlur stdDeviation="3" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
                   <feMergeNode in="SourceGraphic" />
@@ -535,25 +532,25 @@ export function FocusView({
             </defs>
 
             {/* Background track */}
-            <circle cx="132" cy="132" r={radius} stroke="rgba(255,255,255,0.07)" strokeWidth="11" fill="none" />
+            <circle cx="132" cy="132" r={radius} stroke={themeMeta.colors.track} strokeWidth="11" fill="none" />
 
             {/* Subtle tick marks */}
             <circle
               cx="132"
               cy="132"
               r={radius - 13}
-              stroke="rgba(255,255,255,0.06)"
+              stroke={themeMeta.colors.track}
               strokeWidth="1.5"
               strokeDasharray="2 9"
               fill="none"
             />
 
-            {/* Active glowing arc */}
+            {/* Active monochrome / theme arc */}
             <circle
               cx="132"
               cy="132"
               r={radius}
-              stroke="url(#ringGrad)"
+              stroke={`url(#ringGrad-${themeId})`}
               strokeWidth="11"
               strokeLinecap="round"
               fill="none"
@@ -570,8 +567,8 @@ export function FocusView({
                 cx={dotX}
                 cy={dotY}
                 r="6.5"
-                fill="#FFFFFF"
-                stroke={activeSubject?.color || '#10B981'}
+                fill={themeMeta.light ? '#ffffff' : '#09090b'}
+                stroke={themeMeta.colors.accent}
                 strokeWidth="3"
                 filter="url(#glowRing)"
               />
@@ -580,12 +577,13 @@ export function FocusView({
 
           {/* Center Content: Concentric Refractive Glass Orb + Focus Spirit + Live Clock */}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-[190px] h-[190px] rounded-full liquid-pill flex flex-col items-center justify-center p-2 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
+            <div className="w-[190px] h-[190px] rounded-full liquid-pill flex flex-col items-center justify-center p-2 shadow-[0_12px_32px_rgba(0,0,0,0.35)]">
               <FocusSpirit
                 elapsedSec={elapsedSec}
                 isRunning={isRunning}
-                accentColor={activeSubject?.color || '#10B981'}
+                accentColor={resolvedSubAccent}
                 spiritSkin={spiritSkin}
+                themeId={themeId}
               />
               <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tight text-white mt-1">
                 {formatClock(displayedSeconds)}
@@ -593,7 +591,7 @@ export function FocusView({
               <div className="text-[11px] font-medium text-slate-300 mt-1 flex items-center gap-1.5 max-w-[140px] truncate">
                 <span
                   className="w-2 h-2 rounded-full inline-block shrink-0"
-                  style={{ backgroundColor: activeSubject?.color || '#10B981' }}
+                  style={{ backgroundColor: resolvedSubAccent }}
                 />
                 <span className="truncate">{activeSubject?.name || 'Focus'}</span>
               </div>
@@ -608,20 +606,18 @@ export function FocusView({
             type="button"
             onClick={onBoost5m}
             title="Add +5m focus boost"
-            className="whitespace-nowrap shrink-0 px-3 py-3 rounded-2xl glass-pill text-xs font-bold text-cyan-300 hover:text-cyan-200 cursor-pointer"
+            className="whitespace-nowrap shrink-0 px-3 py-3 rounded-2xl sp-badge text-xs font-bold hover:opacity-90 cursor-pointer"
           >
             +5m
           </motion.button>
 
           <motion.button
             whileTap={{ scale: 0.92 }}
-            whileHover={{ scale: 1.03 }}
+            whileHover={{ scale: 1.02 }}
             type="button"
             onClick={onToggleRun}
-            className={`px-7 py-3.5 rounded-2xl font-extrabold text-sm flex items-center gap-2 shadow-lg cursor-pointer transition ${
-              isRunning
-                ? 'bg-amber-400 text-slate-950 shadow-amber-500/25'
-                : 'liquid-btn-primary'
+            className={`px-7 py-3.5 rounded-2xl font-extrabold text-sm flex items-center gap-2 cursor-pointer transition ${
+              isRunning ? 'sp-tab-active ring-1 ring-current' : 'sp-btn-primary'
             }`}
           >
             {isRunning ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
@@ -635,8 +631,8 @@ export function FocusView({
             onClick={onFinishSession}
             className={`px-3.5 py-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
               elapsedSec >= 5
-                ? 'bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 hover:bg-emerald-500/30'
-                : 'glass-pill text-slate-500 opacity-50 cursor-not-allowed'
+                ? 'sp-btn-primary'
+                : 'sp-badge text-slate-500 opacity-50 cursor-not-allowed'
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
@@ -651,13 +647,10 @@ export function FocusView({
           whileTap={{ scale: 0.98 }}
           type="button"
           onClick={onGoToRooms}
-          className="w-full glass-card rounded-2xl p-3.5 flex items-center justify-between text-left cursor-pointer hover:border-emerald-400/30 transition"
+          className="w-full glass-card rounded-2xl p-3.5 flex items-center justify-between text-left cursor-pointer hover:border-white/25 transition"
         >
           <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
-              style={{ backgroundColor: `${currentRoom.accent}22`, border: `1px solid ${currentRoom.accent}55` }}
-            >
+            <div className="w-10 h-10 rounded-xl sp-inset flex items-center justify-center text-lg shrink-0">
               {currentRoom.icon}
             </div>
             <div className="min-w-0">
@@ -667,8 +660,11 @@ export function FocusView({
               </div>
             </div>
           </div>
-          <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full sp-badge text-xs font-bold">
+            <span
+              className="w-2 h-2 rounded-full animate-pulse"
+              style={{ backgroundColor: themeMeta.colors.accent }}
+            />
             <Users className="w-3.5 h-3.5" />
             <span>{currentRoom.activeCount}</span>
           </div>
@@ -679,13 +675,13 @@ export function FocusView({
       <div className="glass-card rounded-3xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <ListTodo className="w-3.5 h-3.5 text-emerald-400" />
+            <ListTodo className="w-3.5 h-3.5 opacity-80" />
             Study Task Queue
           </span>
           <button
             type="button"
             onClick={() => setAddingTask((v) => !v)}
-            className="px-2.5 py-1 rounded-full liquid-pill text-[11px] font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
+            className="px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1 cursor-pointer"
           >
             {addingTask ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
             <span>{addingTask ? 'Close' : 'Add Task'}</span>
@@ -709,12 +705,12 @@ export function FocusView({
                   placeholder="New task (e.g. Ch. 5 Practice Set)"
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-400/50"
+                  className="flex-1 px-3 py-2 rounded-xl sp-input text-xs"
                 />
                 <select
                   value={newTaskPomos}
                   onChange={(e) => setNewTaskPomos(Number(e.target.value))}
-                  className="px-2 py-2 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-amber-200 font-mono-num"
+                  className="px-2 py-2 rounded-xl sp-input text-xs font-mono-num"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
@@ -725,7 +721,7 @@ export function FocusView({
                 <button
                   type="submit"
                   disabled={savingTask}
-                  className="px-3 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-extrabold cursor-pointer"
+                  className="px-3 py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
                 >
                   {savingTask ? '...' : 'Add'}
                 </button>
@@ -741,9 +737,7 @@ export function FocusView({
               <div
                 key={task.id}
                 className={`flex items-center justify-between gap-2 p-2.5 rounded-2xl border transition ${
-                  pinned
-                    ? 'bg-emerald-500/15 border-emerald-400/45'
-                    : 'bg-slate-950/45 border-white/8'
+                  pinned ? 'sp-tab-active' : 'sp-inset border-white/8'
                 }`}
               >
                 <button
@@ -751,9 +745,7 @@ export function FocusView({
                   onClick={() => onToggleTaskDone(task)}
                   aria-label={task.done ? 'Mark incomplete' : 'Mark complete'}
                   className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 cursor-pointer transition ${
-                    task.done
-                      ? 'bg-emerald-400 border-emerald-300 text-slate-950'
-                      : 'border-white/25 hover:border-emerald-400'
+                    task.done ? 'sp-btn-primary' : 'border-white/25 hover:border-white/50'
                   }`}
                 >
                   {task.done && <Check className="w-3.5 h-3.5 stroke-[3]" />}
@@ -795,7 +787,7 @@ export function FocusView({
       <div className="glass-card rounded-2xl p-3 space-y-2.5">
         <div className="flex items-center justify-between px-1">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+            <Volume2 className="w-3.5 h-3.5" />
             Focus Soundscape
           </span>
           <div className="flex items-center gap-2">
@@ -806,7 +798,8 @@ export function FocusView({
                     key={bar}
                     animate={{ height: ['35%', '100%', '45%'] }}
                     transition={{ duration: 0.7 + bar * 0.15, repeat: Infinity, ease: 'easeInOut' }}
-                    className="w-1 rounded-full bg-cyan-400"
+                    className="w-1 rounded-full"
+                    style={{ backgroundColor: themeMeta.colors.accent }}
                   />
                 ))}
               </div>
@@ -826,9 +819,7 @@ export function FocusView({
                 type="button"
                 onClick={() => onChangeSound(s.key)}
                 className={`py-2 px-1 rounded-xl text-center transition cursor-pointer border ${
-                  active
-                    ? 'bg-cyan-500/20 border-cyan-400/50 text-white'
-                    : 'bg-slate-900/50 border-white/5 text-slate-400 hover:text-slate-200'
+                  active ? 'sp-tab-active font-bold' : 'sp-inset text-slate-400 hover:text-slate-200'
                 }`}
               >
                 <div className="text-sm">{s.icon}</div>
@@ -845,7 +836,7 @@ export function FocusView({
           value={soundVolume}
           onChange={(e) => onChangeSoundVolume(Number(e.target.value))}
           aria-label="Soundscape volume"
-          className="w-full h-1.5 accent-cyan-400 cursor-pointer"
+          className="w-full h-1.5 accent-current cursor-pointer"
         />
       </div>
     </div>

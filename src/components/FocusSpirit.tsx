@@ -1,19 +1,23 @@
 import { motion } from 'framer-motion';
+import { ThemeId, getThemeMeta } from '../themes';
 
 interface FocusSpiritProps {
   elapsedSec: number;
   isRunning: boolean;
   accentColor: string;
   spiritSkin?: string;
+  themeId?: ThemeId;
 }
 
-export function getSpiritStage(elapsedSec: number, spiritSkin = 'default') {
+export function getSpiritStage(elapsedSec: number, spiritSkin = 'default', themeId: ThemeId = 'shadcn-dark') {
   const mins = elapsedSec / 60;
+  const meta = getThemeMeta(themeId);
+
   let stage;
-  if (mins >= 50) stage = { key: 'cosmic', label: 'Cosmic Flame', tier: 4, primary: '#8B5CF6', secondary: '#06B6D4' };
-  else if (mins >= 30) stage = { key: 'nova', label: 'Nova Spirit', tier: 3, primary: '#F97316', secondary: '#EC4899' };
-  else if (mins >= 15) stage = { key: 'ember', label: 'Ember Fox', tier: 2, primary: '#10B981', secondary: '#34D399' };
-  else stage = { key: 'spark', label: 'Focus Spark', tier: 1, primary: '#06B6D4', secondary: '#10B981' };
+  if (mins >= 50) stage = { key: 'cosmic', label: 'Cosmic Flame', tier: 4 };
+  else if (mins >= 30) stage = { key: 'nova', label: 'Nova Spirit', tier: 3 };
+  else if (mins >= 15) stage = { key: 'ember', label: 'Ember Spark', tier: 2 };
+  else stage = { key: 'spark', label: 'Focus Spark', tier: 1 };
 
   if (spiritSkin === 'spirit_phoenix') {
     return { ...stage, primary: '#F97316', secondary: '#FB7185' };
@@ -21,25 +25,39 @@ export function getSpiritStage(elapsedSec: number, spiritSkin = 'default') {
   if (spiritSkin === 'spirit_cyber') {
     return { ...stage, primary: '#22D3EE', secondary: '#A855F7' };
   }
-  return stage;
+
+  return {
+    ...stage,
+    primary: meta.colors.accent,
+    secondary: meta.colors.accent2,
+  };
 }
 
-export function FocusSpirit({ elapsedSec, isRunning, accentColor, spiritSkin = 'default' }: FocusSpiritProps) {
-  const stage = getSpiritStage(elapsedSec, spiritSkin);
+export function FocusSpirit({
+  elapsedSec,
+  isRunning,
+  accentColor,
+  spiritSkin = 'default',
+  themeId = 'shadcn-dark',
+}: FocusSpiritProps) {
+  const meta = getThemeMeta(themeId);
+  const stage = getSpiritStage(elapsedSec, spiritSkin, themeId);
   const scaleBoost = Math.min(1.16, 0.92 + (stage.tier - 1) * 0.08);
+  const eyeInk = meta.light ? '#fafafa' : '#09090b';
+  const auraColor = spiritSkin === 'default' && meta.mono ? meta.colors.accent : accentColor || stage.primary;
 
   return (
     <div className="relative flex flex-col items-center justify-center select-none pointer-events-none">
-      {/* Ambient aura behind spirit */}
+      {/* Subtle monochrome / theme aura behind spirit */}
       <motion.div
         animate={
           isRunning
-            ? { scale: [0.95, 1.12, 0.95], opacity: [0.35, 0.65, 0.35] }
-            : { scale: [0.96, 1.02, 0.96], opacity: [0.18, 0.28, 0.18] }
+            ? { scale: [0.95, 1.1, 0.95], opacity: [0.22, 0.42, 0.22] }
+            : { scale: [0.96, 1.02, 0.96], opacity: [0.12, 0.2, 0.12] }
         }
         transition={{ duration: isRunning ? 2.6 : 4, repeat: Infinity, ease: 'easeInOut' }}
         className="absolute w-24 h-24 rounded-full blur-xl"
-        style={{ background: `radial-gradient(circle, ${accentColor || stage.primary}66, transparent 70%)` }}
+        style={{ background: `radial-gradient(circle, ${auraColor}44, transparent 70%)` }}
       />
 
       {/* Orbital rings unlocked at tier 2+ */}
@@ -48,11 +66,11 @@ export function FocusSpirit({ elapsedSec, isRunning, accentColor, spiritSkin = '
           animate={{ rotate: 360 }}
           transition={{ duration: isRunning ? 6 : 16, repeat: Infinity, ease: 'linear' }}
           className="absolute w-24 h-24 rounded-full border border-dashed"
-          style={{ borderColor: `${stage.primary}55` }}
+          style={{ borderColor: `${stage.primary}45` }}
         >
           <span
-            className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full shadow-lg"
-            style={{ backgroundColor: stage.secondary, boxShadow: `0 0 8px ${stage.secondary}` }}
+            className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full shadow"
+            style={{ backgroundColor: stage.primary }}
           />
         </motion.div>
       )}
@@ -61,16 +79,20 @@ export function FocusSpirit({ elapsedSec, isRunning, accentColor, spiritSkin = '
         <motion.div
           animate={{ rotate: -360 }}
           transition={{ duration: 9, repeat: Infinity, ease: 'linear' }}
-          className="absolute w-28 h-28 rounded-full border border-dotted border-violet-400/40"
+          className="absolute w-28 h-28 rounded-full border border-dotted"
+          style={{ borderColor: `${stage.secondary}55` }}
         >
-          <span className="absolute bottom-0 right-2 w-2 h-2 rounded-full bg-cyan-300 shadow-[0_0_10px_#67e8f9]" />
+          <span
+            className="absolute bottom-0 right-2 w-2 h-2 rounded-full"
+            style={{ backgroundColor: stage.primary }}
+          />
         </motion.div>
       )}
 
       {/* Main animated SVG mascot */}
       <motion.svg
-        width="74"
-        height="74"
+        width="72"
+        height="72"
         viewBox="0 0 96 96"
         animate={
           isRunning
@@ -78,52 +100,48 @@ export function FocusSpirit({ elapsedSec, isRunning, accentColor, spiritSkin = '
             : { y: [0, -1.5, 0], scale: scaleBoost }
         }
         transition={{ duration: isRunning ? 2.2 : 3.5, repeat: Infinity, ease: 'easeInOut' }}
-        className="relative z-10 drop-shadow-[0_6px_18px_rgba(16,185,129,0.35)]"
+        className="relative z-10 drop-shadow-[0_6px_16px_rgba(0,0,0,0.35)]"
       >
         <defs>
-          <linearGradient id="spiritBody" x1="48" y1="10" x2="48" y2="86" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor={stage.secondary} />
-            <stop offset="55%" stopColor={stage.primary} />
-            <stop offset="100%" stopColor={accentColor || '#0F766E'} />
+          <linearGradient id={`spiritBody-${themeId}`} x1="48" y1="10" x2="48" y2="86" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor={stage.primary} />
+            <stop offset="60%" stopColor={stage.secondary} />
+            <stop offset="100%" stopColor={meta.mono ? (meta.light ? '#3f3f46' : '#52525b') : accentColor || '#3f3f46'} />
           </linearGradient>
         </defs>
 
-        {/* Crown crystal at Tier 3+ */}
         {stage.tier >= 3 && (
-          <path d="M48 4 L54 15 L48 19 L42 15 Z" fill="#FBBF24" stroke="#FEF3C7" strokeWidth="1.2" />
+          <path d="M48 4 L54 15 L48 19 L42 15 Z" fill={stage.primary} stroke={eyeInk} strokeWidth="1.2" />
         )}
 
-        {/* Flame Spirit Body */}
         <path
           d="M48 14 C37 28 24 41 24 58 C24 72 34.7 83 48 83 C61.3 83 72 72 72 58 C72 41 59 28 48 14 Z"
-          fill="url(#spiritBody)"
+          fill={`url(#spiritBody-${themeId})`}
         />
-        {/* Inner glow core */}
         <path
           d="M48 34 C41 44 35 51 35 61 C35 69.5 40.8 76 48 76 C55.2 76 61 69.5 61 61 C61 51 55 44 48 34 Z"
-          fill="#FFFFFF"
-          fillOpacity="0.22"
+          fill={meta.light ? '#FFFFFF' : '#FFFFFF'}
+          fillOpacity={meta.light ? 0.16 : 0.25}
         />
 
-        {/* Expressive Eyes */}
         {isRunning ? (
           <>
-            <ellipse cx="40.5" cy="56" rx="3.2" ry="4" fill="#080B12" />
-            <ellipse cx="55.5" cy="56" rx="3.2" ry="4" fill="#080B12" />
-            <circle cx="41.6" cy="54.6" r="1.2" fill="#FFFFFF" />
-            <circle cx="56.6" cy="54.6" r="1.2" fill="#FFFFFF" />
-            <path d="M43.5 63.5 Q48 67 52.5 63.5" stroke="#080B12" strokeWidth="2.3" strokeLinecap="round" fill="none" />
+            <ellipse cx="40.5" cy="56" rx="3.2" ry="4" fill={eyeInk} />
+            <ellipse cx="55.5" cy="56" rx="3.2" ry="4" fill={eyeInk} />
+            <circle cx="41.6" cy="54.6" r="1.2" fill={stage.primary} />
+            <circle cx="56.6" cy="54.6" r="1.2" fill={stage.primary} />
+            <path d="M43.5 63.5 Q48 67 52.5 63.5" stroke={eyeInk} strokeWidth="2.3" strokeLinecap="round" fill="none" />
           </>
         ) : (
           <>
-            <path d="M37 56 Q40.5 53.5 44 56" stroke="#080B12" strokeWidth="2.4" strokeLinecap="round" fill="none" />
-            <path d="M52 56 Q55.5 53.5 59 56" stroke="#080B12" strokeWidth="2.4" strokeLinecap="round" fill="none" />
-            <circle cx="48" cy="64" r="1.8" fill="#080B12" />
+            <path d="M37 56 Q40.5 53.5 44 56" stroke={eyeInk} strokeWidth="2.4" strokeLinecap="round" fill="none" />
+            <path d="M52 56 Q55.5 53.5 59 56" stroke={eyeInk} strokeWidth="2.4" strokeLinecap="round" fill="none" />
+            <circle cx="48" cy="64" r="1.8" fill={eyeInk} />
           </>
         )}
       </motion.svg>
 
-      <span className="mt-0.5 text-[10px] font-semibold tracking-wider uppercase text-slate-300/80">
+      <span className="mt-0.5 text-[10px] font-semibold tracking-wider uppercase text-slate-400">
         {stage.label}
       </span>
     </div>
