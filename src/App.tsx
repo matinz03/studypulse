@@ -26,7 +26,7 @@ import { ProfileView } from './components/ProfileView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { BootstrapData, FloatingEmoji, StudyTask, Subject, TabKey, TimerMode, User } from './types';
-import { ThemeId, THEME_STORAGE_KEY, isValidThemeId, resolveAccent } from './themes';
+import { ThemeId, THEME_STORAGE_KEY, getThemeMeta, isValidThemeId, resolveAccent } from './themes';
 import { soundEngine, SoundPreset } from './utils/soundEngine';
 import { pipEngine } from './utils/pipEngine';
 
@@ -137,6 +137,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeId);
+    document.documentElement.setAttribute('data-light', String(getThemeMeta(themeId).light));
     localStorage.setItem(THEME_STORAGE_KEY, themeId);
   }, [themeId]);
 
