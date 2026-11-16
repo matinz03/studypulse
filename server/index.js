@@ -997,6 +997,29 @@ app.post('/api/rooms', authMiddleware, (req, res) => {
   res.status(201).json({ id: Number(info.lastInsertRowid), name, topic, icon, accent });
 });
 
+app.delete('/api/rooms/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  const room = db.prepare('SELECT * FROM study_rooms WHERE id = ?').get(id);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+
+  const count = db.prepare('SELECT COUNT(*) AS c FROM study_rooms').get().c;
+  if (count <= 1) {
+    return res.status(400).json({ error: 'Keep at least one active study room' });
+  }
+
+  db.prepare('DELETE FROM study_rooms WHERE id = ?').run(id);
+  const fallbackRoom = db.prepare('SELECT id FROM study_rooms ORDER BY id ASC LIMIT 1').get();
+  const fallbackRoomId = fallbackRoom?.id || 1;
+
+  for (const [uid, pres] of livePresence.entries()) {
+    if (pres.roomId === id) {
+      livePresence.set(uid, { ...pres, roomId: fallbackRoomId });
+    }
+  }
+  broadcastPresence();
+  res.json({ ok: true, deletedId: id, fallbackRoomId });
+});
+
 app.patch('/api/profile', authMiddleware, (req, res) => {
   const displayName = req.body?.displayName ? String(req.body.displayName).trim().slice(0, 32) : req.user.display_name;
   const bio = req.body?.bio !== undefined ? String(req.body.bio).trim().slice(0, 140) : req.user.bio;

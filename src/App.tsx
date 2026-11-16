@@ -934,6 +934,15 @@ export function App() {
     pushToast(`Opened room "${created.name}"`);
   }
 
+  async function handleDeleteRoom(roomId: number) {
+    const res = await apiFetch(`/api/rooms/${roomId}`, { method: 'DELETE' });
+    await refreshBootstrap();
+    if (selectedRoomId === roomId && res.fallbackRoomId) {
+      setSelectedRoomId(res.fallbackRoomId);
+    }
+    pushToast('Room deleted 🗑️');
+  }
+
   function handleSendCheer(emoji: string) {
     if (!data?.user) return;
     spawnEmoji(emoji, data.user.displayName);
@@ -1276,6 +1285,7 @@ export function App() {
                       pushToast('Switched desk seat! 🪑');
                     }}
                     onCreateRoom={handleCreateRoom}
+                    onDeleteRoom={handleDeleteRoom}
                     floatingEmojis={floatingEmojis}
                     onSendCheer={handleSendCheer}
                     currentUserId={user.id}
