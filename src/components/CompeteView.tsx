@@ -152,9 +152,9 @@ export function CompeteView({
         </button>
       </div>
 
-      {/* Horizontal Subject Filter Pills */}
+      {/* Wrapping Subject Filter Pills */}
       {availableSubjects.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+        <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
           <button
             type="button"
             onClick={() => setSubjectFilter('all')}

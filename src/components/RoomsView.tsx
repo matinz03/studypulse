@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Users, Sparkles, Flame, X } from 'lucide-react';
+import { Plus, Users, Sparkles, Flame, X, ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 import { FloatingEmoji, Room, RoomOccupant } from '../types';
 import { formatClock } from './FocusView';
 
@@ -40,16 +40,52 @@ export function RoomsView({
 }: RoomsViewProps) {
   const [nowMs, setNowMs] = useState(Date.now());
   const [creating, setCreating] = useState(false);
+  const [showAllGrid, setShowAllGrid] = useState(false);
   const [name, setName] = useState('');
   const [topic, setTopic] = useState('');
   const [icon, setIcon] = useState('🚀');
   const [accent, setAccent] = useState('#10B981');
   const [busy, setBusy] = useState(false);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ down: boolean; startX: number; scrollLeft: number; dragged: boolean }>({
+    down: false,
+    startX: 0,
+    scrollLeft: 0,
+    dragged: false,
+  });
 
   useEffect(() => {
     const t = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, []);
+
+  // Scroll vertical mouse wheel horizontally when hovering the room rail on desktop/laptop
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el || showAllGrid) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [showAllGrid, rooms.length]);
+
+  // Keep selected/newly-created room card scrolled into view
+  useEffect(() => {
+    if (showAllGrid || !railRef.current) return;
+    const target = railRef.current.querySelector<HTMLElement>(`[data-room-id="${selectedRoomId}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [selectedRoomId, rooms.length, showAllGrid]);
+
+  function scrollRail(dir: -1 | 1) {
+    railRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' });
+  }
 
   const currentRoom = rooms.find((r) => r.id === selectedRoomId) || rooms[0];
 
@@ -69,20 +105,54 @@ export function RoomsView({
 
   return (
     <div className="space-y-4">
-      {/* Room Selector Rail */}
-      <div className="flex items-center justify-between px-0.5">
+      {/* Room Selector Rail Header & Desktop Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
         <div>
           <h2 className="text-base font-extrabold text-white">Live Study Rooms</h2>
           <p className="text-xs text-slate-400">Sit at a desk & focus together in real time</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreating((v) => !v)}
-          className="px-3 py-1.5 rounded-full glass-pill text-xs font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
-        >
-          {creating ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-          <span>{creating ? 'Close' : 'New Room'}</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {!showAllGrid && (
+            <>
+              <button
+                type="button"
+                aria-label="Scroll rooms left"
+                onClick={() => scrollRail(-1)}
+                className="w-7 h-7 rounded-full glass-pill text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Scroll rooms right"
+                onClick={() => scrollRail(1)}
+                className="w-7 h-7 rounded-full glass-pill text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAllGrid((v) => !v)}
+            className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 cursor-pointer border transition ${
+              showAllGrid
+                ? 'bg-cyan-400/20 border-cyan-300/60 text-cyan-100'
+                : 'glass-pill border-white/10 text-slate-200 hover:text-white'
+            }`}
+          >
+            <LayoutGrid className="w-3 h-3" />
+            <span>{showAllGrid ? 'Rail' : `All (${rooms.length})`}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreating((v) => !v)}
+            className="px-3 py-1.5 rounded-full glass-pill text-xs font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
+          >
+            {creating ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>{creating ? 'Close' : 'New Room'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Room Creator Drawer */}
@@ -148,17 +218,53 @@ export function RoomsView({
         )}
       </AnimatePresence>
 
-      {/* Scrollable Room Cards */}
-      <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1">
+      {/* Scrollable / Draggable Room Cards Rail OR Full Wrap Grid */}
+      <div
+        ref={railRef}
+        onMouseDown={(e) => {
+          if (showAllGrid || !railRef.current) return;
+          dragRef.current = {
+            down: true,
+            startX: e.pageX - railRef.current.offsetLeft,
+            scrollLeft: railRef.current.scrollLeft,
+            dragged: false,
+          };
+        }}
+        onMouseMove={(e) => {
+          if (showAllGrid || !dragRef.current.down || !railRef.current) return;
+          const x = e.pageX - railRef.current.offsetLeft;
+          const dx = x - dragRef.current.startX;
+          if (Math.abs(dx) > 5) dragRef.current.dragged = true;
+          railRef.current.scrollLeft = dragRef.current.scrollLeft - dx;
+        }}
+        onMouseUp={() => {
+          dragRef.current.down = false;
+        }}
+        onMouseLeave={() => {
+          dragRef.current.down = false;
+        }}
+        className={
+          showAllGrid
+            ? 'grid grid-cols-2 gap-2.5'
+            : 'flex gap-2.5 overflow-x-auto glass-scroll pb-2 cursor-grab active:cursor-grabbing select-none'
+        }
+      >
         {rooms.map((room) => {
           const active = room.id === currentRoom?.id;
           return (
             <motion.button
               key={room.id}
+              data-room-id={room.id}
               whileTap={{ scale: 0.96 }}
               type="button"
-              onClick={() => onSelectRoom(room.id)}
-              className={`shrink-0 w-52 text-left rounded-2xl p-3.5 transition cursor-pointer border ${
+              onClick={() => {
+                if (dragRef.current.dragged) {
+                  dragRef.current.dragged = false;
+                  return;
+                }
+                onSelectRoom(room.id);
+              }}
+              className={`${showAllGrid ? 'w-full' : 'shrink-0 w-48'} text-left rounded-2xl p-3.5 transition cursor-pointer border ${
                 active
                   ? 'glass-card border-emerald-400/50 shadow-[0_0_24px_rgba(16,185,129,0.18)]'
                   : 'bg-slate-900/50 border-white/8 hover:border-white/20'

@@ -91,6 +91,8 @@ interface PersistedTimerState {
   strictMode: boolean;
   focusTask: string;
   activeTaskId: number | null;
+  selectedRoomId?: number;
+  selectedSubjectId?: number | null;
 }
 
 function loadPersistedTimer(): Partial<PersistedTimerState> & { initialElapsed: number; finishedOffline: boolean; finishedSec: number } {
@@ -136,8 +138,8 @@ export function App() {
   const [purityPct, setPurityPct] = useState<number>(restored.purityPct ?? 100);
   const [strictMode, setStrictMode] = useState<boolean>(Boolean(restored.strictMode));
   const [wakeLocked, setWakeLocked] = useState(false);
-  const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(restored.selectedSubjectId ?? null);
+  const [selectedRoomId, setSelectedRoomId] = useState<number>(restored.selectedRoomId || 1);
   const [soundPreset, setSoundPreset] = useState<SoundPreset>('off');
   const [soundVolume, setSoundVolume] = useState<number>(0.45);
   const [showCompleteModal, setShowCompleteModal] = useState<boolean>(Boolean(restored.finishedOffline));
@@ -340,12 +342,26 @@ export function App() {
         strictMode,
         focusTask,
         activeTaskId,
+        selectedRoomId,
+        selectedSubjectId,
       };
       localStorage.setItem(TIMER_STATE_KEY, JSON.stringify(payload));
     } catch {
       // ignore storage quota
     }
-  }, [mode, customMins, pomoCycleCount, isRunning, elapsedSec, purityPct, strictMode, focusTask, activeTaskId]);
+  }, [
+    mode,
+    customMins,
+    pomoCycleCount,
+    isRunning,
+    elapsedSec,
+    purityPct,
+    strictMode,
+    focusTask,
+    activeTaskId,
+    selectedRoomId,
+    selectedSubjectId,
+  ]);
 
   const syncServerSchedule = useCallback(
     async (running: boolean, curMode: TimerMode, curElapsed: number, targetSecVal: number, subName: string, task: string) => {
@@ -385,7 +401,7 @@ export function App() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'auth', token }));
+        ws.send(JSON.stringify({ type: 'auth', token, roomId: selectedRoomId }));
       };
 
       ws.onmessage = (evt) => {
@@ -1330,29 +1346,36 @@ export function App() {
                 {data.onlineCount} studying now
               </span>
             </div>
-            <div className="space-y-2">
-              {data.rooms.slice(0, 3).map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedRoomId(r.id);
-                    setTab('rooms');
-                  }}
-                  className="w-full p-2.5 rounded-2xl bg-slate-950/60 border border-white/5 hover:border-emerald-400/30 flex items-center justify-between text-left cursor-pointer transition"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-lg">{r.icon}</span>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">{r.name}</div>
-                      <div className="text-[10px] text-slate-400 truncate">{r.topic}</div>
+            <div className="space-y-2 max-h-64 overflow-y-auto glass-scroll pr-1">
+              {data.rooms.map((r) => {
+                const selected = r.id === selectedRoomId;
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedRoomId(r.id);
+                      setTab('rooms');
+                    }}
+                    className={`w-full p-2.5 rounded-2xl border flex items-center justify-between text-left cursor-pointer transition ${
+                      selected
+                        ? 'bg-emerald-950/30 border-emerald-400/50'
+                        : 'bg-slate-950/60 border-white/5 hover:border-emerald-400/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-lg">{r.icon}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">{r.name}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{r.topic}</div>
+                      </div>
                     </div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono-num text-[11px] font-bold shrink-0">
-                    {r.activeCount} live
-                  </span>
-                </button>
-              ))}
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-mono-num text-[11px] font-bold shrink-0">
+                      {r.activeCount} live
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

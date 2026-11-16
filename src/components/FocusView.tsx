@@ -363,8 +363,8 @@ export function FocusView({
         </div>
       )}
 
-      {/* Horizontal Subject Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+      {/* Wrapping Subject Pills */}
+      <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
         {subjects.map((sub) => {
           const selected = activeSubject?.id === sub.id;
           return (
@@ -816,7 +816,7 @@ export function FocusView({
             </span>
           </div>
         </div>
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
           {SOUNDS.map((s) => {
             const active = soundPreset === s.key;
             return (
@@ -825,7 +825,7 @@ export function FocusView({
                 whileTap={{ scale: 0.94 }}
                 type="button"
                 onClick={() => onChangeSound(s.key)}
-                className={`shrink-0 min-w-[54px] py-2 px-2 rounded-xl text-center transition cursor-pointer border ${
+                className={`py-2 px-1 rounded-xl text-center transition cursor-pointer border ${
                   active
                     ? 'bg-cyan-500/20 border-cyan-400/50 text-white'
                     : 'bg-slate-900/50 border-white/5 text-slate-400 hover:text-slate-200'

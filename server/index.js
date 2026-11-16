@@ -1066,7 +1066,13 @@ wss.on('connection', (ws) => {
       if (!user) return;
       ws.userId = user.id;
       ws.userMeta = user;
-      const defaultRoom = db.prepare('SELECT id FROM study_rooms ORDER BY id ASC LIMIT 1').get();
+      const requestedRoomId = Number(msg.roomId);
+      const validRequestedRoom =
+        Number.isInteger(requestedRoomId) && requestedRoomId > 0
+          ? db.prepare('SELECT id FROM study_rooms WHERE id = ?').get(requestedRoomId)
+          : null;
+      const defaultRoom =
+        validRequestedRoom || db.prepare('SELECT id FROM study_rooms ORDER BY id ASC LIMIT 1').get();
       livePresence.set(user.id, {
         userId: user.id,
         username: user.username,
