@@ -549,14 +549,37 @@ export function App() {
     pipEngine.updateState({
       clockText: clock,
       subjectName: activeSubject.name,
-      subjectColor: activeSubject.color,
+      subjectColor: resolveAccent(activeSubject.color, themeId),
       taskTitle: focusTask,
       modeLabel: getModeLabel(mode),
       isRunning,
       progress,
       purityPct,
+      timerMode: mode,
+      elapsedSec,
+      themeId,
+      heroClass: data?.game?.profile?.heroClass || 'hero_scholar',
+      companionSpriteKey: data?.game?.equippedBySlot?.companion?.spriteKey || null,
+      heroLevel: data?.game?.heroStats?.heroLevel || 1,
+      focusFever: Boolean(data?.game?.heroStats?.studyBonuses?.focusFever),
+      biomeKey: data?.game?.biome?.key || 'moss_library',
     });
-  }, [isRunning, elapsedSec, mode, customMins, activeSubject.name, activeSubject.color, focusTask, purityPct]);
+  }, [
+    isRunning,
+    elapsedSec,
+    mode,
+    customMins,
+    activeSubject.name,
+    activeSubject.color,
+    focusTask,
+    purityPct,
+    themeId,
+    data?.game?.profile?.heroClass,
+    data?.game?.equippedBySlot?.companion?.spriteKey,
+    data?.game?.heroStats?.heroLevel,
+    data?.game?.heroStats?.studyBonuses?.focusFever,
+    data?.game?.biome?.key,
+  ]);
 
   // Smart Focus Purity Shield (Page Visibility)
   useEffect(() => {
