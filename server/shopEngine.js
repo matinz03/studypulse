@@ -726,12 +726,12 @@ export function purchaseShopItem(db, user, userStats, itemKey) {
       message = 'Armed +2 Streak Freeze Shields 🧊';
       break;
     case 'energy':
-      db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 3), updated_at = ? WHERE user_id = ?').run(now, user.id);
-      message = '+3 Adventure Energy restored ⚡';
+      db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 3), torches = torches + 1, updated_at = ? WHERE user_id = ?').run(now, user.id);
+      message = '+3 Adventure Energy & +1 Dungeon Torch 🔥';
       break;
     case 'energy_5':
-      db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 5), updated_at = ? WHERE user_id = ?').run(now, user.id);
-      message = '+5 Adventure Energy restored ⚡';
+      db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 5), torches = torches + 2, updated_at = ? WHERE user_id = ?').run(now, user.id);
+      message = '+5 Adventure Energy & +2 Dungeon Torches 🔥';
       break;
     case 'weekly_energy':
       db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 15), potions = potions + 3, updated_at = ? WHERE user_id = ?').run(now, user.id);

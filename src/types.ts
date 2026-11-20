@@ -103,6 +103,112 @@ export interface GameItem {
   createdAt: number;
 }
 
+export type EnemyIntent = 'STRIKE' | 'HEAVY' | 'SHELL' | 'RITUAL' | 'HEX' | 'STUNNED';
+export type GameMode = 'village' | 'dungeon';
+
+export interface NpcDialogueOption {
+  id: string;
+  label: string;
+  desc: string;
+  style: 'primary' | 'tab' | 'badge';
+  craftKey?: string;
+  targetItemId?: number;
+  disabled?: boolean;
+}
+
+export interface NpcSummary {
+  id: string;
+  name: string;
+  role: string;
+  x: number;
+  y: number;
+  spriteKey: string;
+  trustedPerk: string;
+  affinity: number;
+  rankLabel: string;
+  hasAction: boolean;
+  dialogue: {
+    npcId: string;
+    greeting: string;
+    options: NpcDialogueOption[];
+  };
+}
+
+export interface QuestProgressEntry {
+  id: string;
+  npcId: string;
+  title: string;
+  desc: string;
+  target: number;
+  progress: number;
+  claimed: boolean;
+  type: 'side' | 'bounty';
+}
+
+export interface StoryChapterInfo {
+  chapter: number;
+  title: string;
+  floorReq: number;
+  bossFlag: string;
+  villageUpgrade: string;
+  upgradeLabel: string;
+  synopsis: string;
+  objective: string;
+  rewards: { coins: number; shards: number; xp: number; loreId: string };
+  completed: boolean;
+  bossDefeated: boolean;
+  active: boolean;
+}
+
+export interface LoreEntry {
+  id: string;
+  title: string;
+  text: string;
+  unlocked: boolean;
+}
+
+export interface DungeonEntity {
+  id: string;
+  type: 'boss' | 'monster' | 'key' | 'chest' | 'trap' | 'riddle' | 'brazier' | 'herb' | 'lore' | 'shrine';
+  x: number;
+  y: number;
+  key?: string;
+  name?: string;
+  hp?: number;
+  maxHp?: number;
+  detected?: boolean;
+  disarmed?: boolean;
+  triggered?: boolean;
+  isSecretVault?: boolean;
+  done: boolean;
+}
+
+export interface DungeonSatchel {
+  shards: number;
+  coins: number;
+  herbs: number;
+  items: Array<{ name: string; icon: string; rarity: ItemRarity }>;
+  questRelics: string[];
+}
+
+export interface DungeonState {
+  floor: number;
+  tiles: string[][];
+  fov: number[][];
+  playerX: number;
+  playerY: number;
+  entranceX: number;
+  entranceY: number;
+  bossGate: { x: number; y: number } | null;
+  torch: number;
+  keys: number;
+  steps: number;
+  bossDefeated: boolean;
+  sensedHint: string | null;
+  entities: DungeonEntity[];
+  satchel: DungeonSatchel;
+}
+
 export interface GameDropOdds {
   common: number;
   uncommon: number;
@@ -124,6 +230,7 @@ export interface GameStudyBonuses {
   streakLuck: number;
   purityCrit: number;
   purityDodge: number;
+  purityIntuition?: number;
   focusFever: boolean;
   feverLuck: number;
   feverAtkPct: number;
@@ -146,6 +253,8 @@ export interface GameHeroStats {
   luck: number;
   critPct: number;
   dodgePct: number;
+  intuition: number;
+  visionRadius: number;
   dropOdds: GameDropOdds;
   studyBonuses: GameStudyBonuses;
   luckBreakdown: {
@@ -159,12 +268,23 @@ export interface GameHeroStats {
 }
 
 export interface GameEncounter {
-  type: 'combat' | 'chest' | 'shrine' | 'merchant';
+  type: 'combat' | 'chest' | 'shrine' | 'merchant' | 'riddle';
+  entityId?: string;
   isBoss?: boolean;
+  isSecretVault?: boolean;
   turn?: number;
   charging?: boolean;
   lockpickChance?: number;
   gambleChance?: number;
+  riddleId?: string;
+  title?: string;
+  prompt?: string;
+  hint?: string | null;
+  options?: string[];
+  heroStatuses?: {
+    poisonTurns: number;
+    poisonDmg: number;
+  };
   enemy?: {
     key: string;
     name: string;
@@ -174,6 +294,12 @@ export interface GameEncounter {
     def: number;
     xpReward: number;
     shardReward: number;
+    intent?: EnemyIntent;
+    intentValue?: number;
+    stunned?: boolean;
+    vulnerableTurns?: number;
+    armorBrokenTurns?: number;
+    atkBonus?: number;
   };
 }
 
@@ -194,6 +320,8 @@ export interface GameProfileData {
   energy: number;
   shards: number;
   potions: number;
+  herbs: number;
+  torches: number;
   focusCharge: number;
   luckBuffCharges: number;
   luckBuffAmount: number;
@@ -216,12 +344,31 @@ export interface GameProfileData {
 }
 
 export interface GameState {
+  mode: GameMode;
   profile: GameProfileData;
   heroStats: GameHeroStats;
   biome: {
     key: string;
     name: string;
     minFloor: number;
+  };
+  village: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    map: string[];
+    upgrades: string[];
+    npcs: NpcSummary[];
+  };
+  dungeon: DungeonState | null;
+  story: {
+    chapter: number;
+    chapters: StoryChapterInfo[];
+    flags: Record<string, unknown>;
+    npcAffinity: Record<string, number>;
+    quests: QuestProgressEntry[];
+    loreCodex: LoreEntry[];
   };
   items: GameItem[];
   equippedBySlot: Record<GearSlot, GameItem | null>;
@@ -255,6 +402,10 @@ export interface GameActionResponse {
   droppedItem?: GameItem | null;
   shardsGained?: number;
   greatSuccess?: boolean;
+  interactedNpcId?: string;
+  atGate?: boolean;
+  atNoticeBoard?: boolean;
+  message?: string;
 }
 
 export interface Subject {

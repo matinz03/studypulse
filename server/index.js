@@ -16,15 +16,24 @@ import {
 } from './db.js';
 import {
   buildGameState,
+  craftAtNpc,
+  dungeonExtract,
+  dungeonMove,
+  dungeonSearch,
+  dungeonUseTorch,
   ensureGameProfile,
+  enterDungeon,
   equipGameItem,
   exploreRoom,
   grantStudyRewardsToGame,
+  moveInVillage,
   resolveCombatAction,
   resolveEventChoice,
+  resolvePuzzleChoice,
   restAtCamp,
   salvageGameItem,
   selectFloor,
+  talkToNpc,
   upgradeGameItem,
   upgradeHeroStat,
 } from './gameEngine.js';
@@ -854,6 +863,15 @@ app.post('/api/game/salvage', authMiddleware, withGameHandler((req, user, stats)
 app.post('/api/game/upgrade-stat', authMiddleware, withGameHandler((req, user, stats) => upgradeHeroStat(db, user, stats, String(req.body?.stat || ''))));
 app.post('/api/game/camp-rest', authMiddleware, withGameHandler((_req, user, stats) => restAtCamp(db, user, stats)));
 app.post('/api/game/floor-select', authMiddleware, withGameHandler((req, user, stats) => selectFloor(db, user, stats, Number(req.body?.floor))));
+app.post('/api/game/village/move', authMiddleware, withGameHandler((req, user, stats) => moveInVillage(db, user, stats, Number(req.body?.dx || 0), Number(req.body?.dy || 0))));
+app.post('/api/game/npc/talk', authMiddleware, withGameHandler((req, user, stats) => talkToNpc(db, user, stats, String(req.body?.npcId || ''), req.body?.choiceId ? String(req.body.choiceId) : undefined)));
+app.post('/api/game/npc/craft', authMiddleware, withGameHandler((req, user, stats) => craftAtNpc(db, user, stats, String(req.body?.craftKey || ''), req.body?.targetItemId ? Number(req.body.targetItemId) : undefined)));
+app.post('/api/game/dungeon/enter', authMiddleware, withGameHandler((req, user, stats) => enterDungeon(db, user, stats, req.body?.floor ? Number(req.body.floor) : undefined)));
+app.post('/api/game/dungeon/move', authMiddleware, withGameHandler((req, user, stats) => dungeonMove(db, user, stats, Number(req.body?.dx || 0), Number(req.body?.dy || 0))));
+app.post('/api/game/dungeon/search', authMiddleware, withGameHandler((_req, user, stats) => dungeonSearch(db, user, stats)));
+app.post('/api/game/dungeon/torch', authMiddleware, withGameHandler((_req, user, stats) => dungeonUseTorch(db, user, stats)));
+app.post('/api/game/dungeon/extract', authMiddleware, withGameHandler((_req, user, stats) => dungeonExtract(db, user, stats)));
+app.post('/api/game/dungeon/puzzle', authMiddleware, withGameHandler((req, user, stats) => resolvePuzzleChoice(db, user, stats, Number(req.body?.optionIndex ?? -1))));
 
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const subjectName = String(req.body?.subjectName || 'Focus Block').trim().slice(0, 40);

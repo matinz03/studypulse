@@ -177,6 +177,16 @@ db.exec(`
     daily_shop_rerolls INTEGER NOT NULL DEFAULT 0,
     active_encounter_json TEXT,
     last_log_json TEXT,
+    mode TEXT NOT NULL DEFAULT 'village',
+    village_x INTEGER NOT NULL DEFAULT 4,
+    village_y INTEGER NOT NULL DEFAULT 4,
+    story_chapter INTEGER NOT NULL DEFAULT 1,
+    story_flags_json TEXT NOT NULL DEFAULT '{}',
+    npc_affinity_json TEXT NOT NULL DEFAULT '{"rowan":0,"bram":0,"lyra":0,"pip":0}',
+    active_quests_json TEXT NOT NULL DEFAULT '[]',
+    herbs INTEGER NOT NULL DEFAULT 1,
+    torches INTEGER NOT NULL DEFAULT 2,
+    dungeon_state_json TEXT,
     updated_at INTEGER NOT NULL
   );
 
@@ -215,6 +225,25 @@ if (!userCols.has('equipped_spirit')) {
 }
 if (!userCols.has('tasks_seeded')) {
   db.exec('ALTER TABLE users ADD COLUMN tasks_seeded INTEGER NOT NULL DEFAULT 0');
+}
+
+const gpCols = new Set(db.prepare('PRAGMA table_info(game_profiles)').all().map((c) => c.name));
+const gpMigrations = [
+  ['mode', "TEXT NOT NULL DEFAULT 'village'"],
+  ['village_x', 'INTEGER NOT NULL DEFAULT 4'],
+  ['village_y', 'INTEGER NOT NULL DEFAULT 4'],
+  ['story_chapter', 'INTEGER NOT NULL DEFAULT 1'],
+  ['story_flags_json', "TEXT NOT NULL DEFAULT '{}'"],
+  ['npc_affinity_json', "TEXT NOT NULL DEFAULT '{\"rowan\":0,\"bram\":0,\"lyra\":0,\"pip\":0}'"],
+  ['active_quests_json', "TEXT NOT NULL DEFAULT '[]'"],
+  ['herbs', 'INTEGER NOT NULL DEFAULT 1'],
+  ['torches', 'INTEGER NOT NULL DEFAULT 2'],
+  ['dungeon_state_json', 'TEXT'],
+];
+for (const [col, def] of gpMigrations) {
+  if (!gpCols.has(col)) {
+    db.exec(`ALTER TABLE game_profiles ADD COLUMN ${col} ${def}`);
+  }
 }
 
 export const DEFAULT_SUBJECTS = [

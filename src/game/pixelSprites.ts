@@ -661,6 +661,156 @@ export const PROP_SPRITES: Record<string, SpriteFrames> = {
   },
 };
 
+export const NPC_SPRITES: Record<string, SpriteFrames> = {
+  npc_rowan: {
+    palette: { K: '#09090b', B: '#e2e8f0', R: '#6366f1', G: '#fbbf24', S: '#fed7aa', W: '#78350f' },
+    frames: [
+      [
+        '...KKKKKK...',
+        '..KRRRRRRK..',
+        '.KRRRRRRRRK.',
+        '..KSSKKSSK..',
+        '..KBBBBBBK..',
+        '...KBBBBK.G.',
+        '..KRRGGRRK..',
+        '..KRRRRRRKW.',
+        '..KRRRRRRKW.',
+        '...KK..KK...',
+      ],
+      [
+        '............',
+        '...KKKKKK...',
+        '..KRRRRRRK..',
+        '.KRRRRRRRRK.',
+        '..KSSKKSSK..',
+        '..KBBBBBBKG.',
+        '...KBBBBK.W.',
+        '..KRRGGRRKW.',
+        '..KRRRRRRK..',
+        '...KK..KK...',
+      ],
+    ],
+  },
+  npc_bram: {
+    palette: { K: '#09090b', H: '#78350f', B: '#94a3b8', A: '#dc2626', S: '#fde68a', D: '#334155' },
+    frames: [
+      [
+        '...KKKKKK...',
+        '..KHHHHHHK..',
+        '..KSSKKSSK..',
+        '..KHHHHHHK..',
+        '.KKAAAAAADK.',
+        'KBBAAAAAADK.',
+        'KBBKDDDDDK..',
+        '..KDDDDDDK..',
+        '...KD..DK...',
+        '...KK..KK...',
+      ],
+      [
+        '............',
+        '...KKKKKK...',
+        '..KHHHHHHK..',
+        '..KSSKKSSK..',
+        '..KHHHHHHK..',
+        '.KKAAAAAADK.',
+        '.KKAAAAAADK.',
+        'KBBKDDDDDK..',
+        '...KD..DK...',
+        '...KK..KK...',
+      ],
+    ],
+  },
+  npc_lyra: {
+    palette: { K: '#09090b', G: '#10b981', L: '#6ee7b7', P: '#c084fc', S: '#fed7aa', E: '#0f172a' },
+    frames: [
+      [
+        '....KKKK....',
+        '...KLLLLK...',
+        '..KLLGGLLK..',
+        '..KSSEESSK..',
+        '..KSSSSSSK..',
+        '...KGGGGK.P.',
+        '..KGGPPGGKP.',
+        '..KGGGGGGK..',
+        '...KG..GK...',
+        '...KK..KK...',
+      ],
+      [
+        '............',
+        '....KKKK....',
+        '...KLLLLK...',
+        '..KLLGGLLK..',
+        '..KSSEESSK..',
+        '..KSSSSSSKP.',
+        '...KGGGGK.P.',
+        '..KGGPPGGK..',
+        '...KG..GK...',
+        '...KK..KK...',
+      ],
+    ],
+  },
+  npc_pip: {
+    palette: { K: '#09090b', C: '#f59e0b', Y: '#fef08a', T: '#0f766e', S: '#fed7aa', E: '#0f172a' },
+    frames: [
+      [
+        '...KKKKKK...',
+        '..KCCCCCCK..',
+        '.KCCYYYYCCK.',
+        '..KSSEESSK..',
+        '...KTTTTK...',
+        '..KTTYYTTK..',
+        '..KTTTTTTK..',
+        '...KT..TK...',
+        '...KK..KK...',
+        '............',
+      ],
+      [
+        '............',
+        '...KKKKKK...',
+        '..KCCCCCCK..',
+        '.KCCYYYYCCK.',
+        '..KSSEESSK..',
+        '...KTTTTK...',
+        '..KTTYYTTK..',
+        '...KT..TK...',
+        '...KK..KK...',
+        '............',
+      ],
+    ],
+  },
+};
+
+export const MINI_ICONS: Record<string, { palette: PixelPalette; rows: string[] }> = {
+  icon_key: {
+    palette: { K: '#09090b', G: '#fbbf24', L: '#fef08a' },
+    rows: ['.KKK....', 'KGLGK...', 'KGGGK...', '.KKKKKKKK', '......K.K', '......K..'],
+  },
+  icon_herb: {
+    palette: { K: '#09090b', G: '#22c55e', L: '#86efac', C: '#38bdf8' },
+    rows: ['..K.CK..', '.KGLGGK.', 'KGGLLGGK', '.KGGGGK.', '..KGGK..', '...KK...'],
+  },
+  icon_brazier: {
+    palette: { K: '#09090b', O: '#f97316', Y: '#fde047', S: '#64748b' },
+    rows: ['..KYK...', '.KOYOK..', 'KOYYOOK.', 'KKKKKKKK', '.KSSSSK.', '..KKKK..'],
+  },
+  icon_riddle: {
+    palette: { K: '#09090b', S: '#94a3b8', C: '#22d3ee', B: '#475569' },
+    rows: ['.KKKKKK.', 'KSSCCSSK', 'KSCCCCSK', 'KSSCCSSK', 'KBBBBBBK', 'KKKKKKKK'],
+  },
+  icon_lore: {
+    palette: { K: '#09090b', P: '#fde68a', R: '#a855f7' },
+    rows: ['.KKKKKK.', 'KPPPPPPK', 'KPRRRPPK', 'KPPPPPPK', 'KPPRRPPK', '.KKKKKK.'],
+  },
+  icon_chest_mini: {
+    palette: { K: '#09090b', W: '#b45309', G: '#fbbf24' },
+    rows: ['KKKKKKKK', 'KWWWWWWK', 'KGGGGGGK', 'KWWGGWWK', 'KWWWWWWK', 'KKKKKKKK'],
+  },
+  icon_stairs: {
+    palette: { K: '#09090b', S: '#38bdf8', D: '#1e293b', L: '#cbd5e1' },
+    rows: ['KKKKKKKK', 'KLLLLLLK', 'KSSDDDDK', 'KDDDDSSK', 'KSSSSSSK', 'KKKKKKKK'],
+  },
+};
+
 export function drawPixelMatrix(
   ctx: CanvasRenderingContext2D,
   matrix: string[],

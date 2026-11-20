@@ -989,6 +989,8 @@ export function App() {
       applyServerStatePatch(res);
       if (res.greatSuccess) {
         pushToast('🍀 Lucky Great Success (+2 Forge Levels)!');
+      } else if (res.message) {
+        pushToast(res.message);
       } else if (typeof res.shardsGained === 'number' && res.shardsGained > 0) {
         pushToast(`♻️ Salvaged for +${res.shardsGained} Arcane Shards`);
       }
@@ -1000,7 +1002,15 @@ export function App() {
     }
   }
 
-  const handleGameExplore = () => callGameApi('/api/game/explore');
+  const handleVillageMove = (dx: number, dy: number) => callGameApi('/api/game/village/move', { dx, dy });
+  const handleNpcTalk = (npcId: string, choiceId?: string) => callGameApi('/api/game/npc/talk', { npcId, choiceId });
+  const handleNpcCraft = (craftKey: string, targetItemId?: number) => callGameApi('/api/game/npc/craft', { craftKey, targetItemId });
+  const handleDungeonEnter = (floor?: number) => callGameApi('/api/game/dungeon/enter', floor ? { floor } : {});
+  const handleDungeonMove = (dx: number, dy: number) => callGameApi('/api/game/dungeon/move', { dx, dy });
+  const handleDungeonSearch = () => callGameApi('/api/game/dungeon/search');
+  const handleDungeonTorch = () => callGameApi('/api/game/dungeon/torch');
+  const handleDungeonExtract = () => callGameApi('/api/game/dungeon/extract');
+  const handleDungeonPuzzle = (optionIndex: number) => callGameApi('/api/game/dungeon/puzzle', { optionIndex });
   const handleGameCombat = (action: 'attack' | 'skill' | 'guard' | 'potion' | 'flee') =>
     callGameApi('/api/game/combat', { action });
   const handleGameChoice = (choice: string) => callGameApi('/api/game/choice', { choice });
@@ -1010,7 +1020,6 @@ export function App() {
     callGameApi('/api/game/salvage', payload);
   const handleGameUpgradeStat = (stat: 'atk' | 'vit' | 'luck' | 'crit') =>
     callGameApi('/api/game/upgrade-stat', { stat });
-  const handleGameCampRest = () => callGameApi('/api/game/camp-rest');
   const handleGameSelectFloor = (floor: number) => callGameApi('/api/game/floor-select', { floor });
 
   async function handleCreateRoom(name: string, topic: string, icon: string, accent: string) {
@@ -1403,14 +1412,21 @@ export function App() {
                     user={user}
                     game={data.game}
                     shop={data.shop}
-                    onExplore={handleGameExplore}
+                    onVillageMove={handleVillageMove}
+                    onNpcTalk={handleNpcTalk}
+                    onNpcCraft={handleNpcCraft}
+                    onDungeonEnter={handleDungeonEnter}
+                    onDungeonMove={handleDungeonMove}
+                    onDungeonSearch={handleDungeonSearch}
+                    onDungeonTorch={handleDungeonTorch}
+                    onDungeonExtract={handleDungeonExtract}
+                    onDungeonPuzzle={handleDungeonPuzzle}
                     onCombatAction={handleGameCombat}
                     onEventChoice={handleGameChoice}
                     onEquipItem={handleGameEquip}
                     onUpgradeItem={handleGameUpgradeItem}
                     onSalvageItem={handleGameSalvage}
                     onUpgradeStat={handleGameUpgradeStat}
-                    onCampRest={handleGameCampRest}
                     onSelectFloor={handleGameSelectFloor}
                     onBuyShopItem={handleBuyShopItem}
                     onRerollDailyShop={handleRerollDailyShop}
@@ -1577,15 +1593,15 @@ export function App() {
                 <Swords className="w-3.5 h-3.5" /> Pixel Spire Hero
               </span>
               <span className="font-mono-num text-[11px] font-bold text-slate-300">
-                F{data.game.profile.floor} (Best F{data.game.profile.bestFloor})
+                {data.game.mode === 'dungeon' ? `Delving F${data.game.dungeon?.floor || data.game.profile.floor}` : `Oakhaven • Ch.${data.game.story.chapter}`}
               </span>
             </div>
             <div className="grid grid-cols-3 gap-1.5 text-center mb-2.5">
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-mono-num text-xs font-extrabold text-white">
-                  {data.game.heroStats.hp}/{data.game.heroStats.maxHp}
+                  👁️ {data.game.heroStats.intuition}
                 </div>
-                <div className="text-[9px] text-slate-400">HP</div>
+                <div className="text-[9px] text-slate-400">Intuition</div>
               </div>
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-mono-num text-xs font-extrabold text-white">

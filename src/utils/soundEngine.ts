@@ -100,6 +100,30 @@ class AmbientSoundEngine {
     }
   }
 
+  playPixelParry() {
+    this.playToneSequence([
+      { freq: 587.33, dur: 0.06, delay: 0, type: 'square', vol: 0.06 },
+      { freq: 880, dur: 0.11, delay: 0.04, type: 'triangle', vol: 0.07 },
+      { freq: 1174.66, dur: 0.14, delay: 0.09, type: 'triangle', vol: 0.06 },
+    ]);
+  }
+
+  playPixelSecret() {
+    this.playToneSequence([
+      { freq: 392, dur: 0.07, delay: 0, type: 'triangle', vol: 0.06 },
+      { freq: 493.88, dur: 0.07, delay: 0.07, type: 'triangle', vol: 0.06 },
+      { freq: 587.33, dur: 0.07, delay: 0.14, type: 'triangle', vol: 0.06 },
+      { freq: 783.99, dur: 0.16, delay: 0.21, type: 'square', vol: 0.06 },
+    ]);
+  }
+
+  playPixelTrap() {
+    this.playToneSequence([
+      { freq: 180, dur: 0.09, delay: 0, type: 'sawtooth', vol: 0.06 },
+      { freq: 140, dur: 0.14, delay: 0.07, type: 'sawtooth', vol: 0.05 },
+    ]);
+  }
+
   setPreset(preset: SoundPreset, volume = this.volume) {
     this.stop();
     this.currentPreset = preset;
