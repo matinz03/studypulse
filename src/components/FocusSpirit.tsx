@@ -25,6 +25,15 @@ export function getSpiritStage(elapsedSec: number, spiritSkin = 'default', theme
   if (spiritSkin === 'spirit_cyber') {
     return { ...stage, primary: '#22D3EE', secondary: '#A855F7' };
   }
+  if (spiritSkin === 'spirit_emerald') {
+    return { ...stage, primary: '#10B981', secondary: '#F59E0B' };
+  }
+  if (spiritSkin === 'spirit_void') {
+    return { ...stage, primary: '#818CF8', secondary: '#C084FC' };
+  }
+  if (spiritSkin === 'monthly_spirit_aurora') {
+    return { ...stage, primary: '#2DD4BF', secondary: '#FBBF24' };
+  }
 
   return {
     ...stage,

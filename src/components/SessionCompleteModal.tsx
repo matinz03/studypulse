@@ -40,6 +40,8 @@ export function SessionCompleteModal({
   const purityBonus = purityPct >= 95 ? 35 : purityPct >= 80 ? 15 : 0;
   const baseXp = Math.max(20, mins * 12 + purityBonus);
   const estXp = strictMode && purityPct >= 95 ? Math.round(baseXp * 1.25) : baseXp;
+  const estEnergy = Math.max(2, Math.min(20, Math.round(mins / 5) + (strictMode && purityPct >= 95 ? 2 : 0)));
+  const estShards = Math.max(6, Math.round(mins * 0.9 + (purityPct >= 95 ? 5 : 0)));
 
   useEffect(() => {
     try {
@@ -186,7 +188,14 @@ export function SessionCompleteModal({
             </div>
           </div>
 
-          <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
+          <div className="mt-2.5 px-2.5 py-1.5 rounded-xl sp-badge text-[10px] font-bold flex items-center justify-between gap-2">
+            <span>🎮 Pixel Spire Bonus</span>
+            <span className="font-mono-num">
+              +{estEnergy} ⚡ • +{estShards} ✦ • {durationSec >= 1200 ? '🎁 Loot Drop' : '🎲 Luck Roll'}
+            </span>
+          </div>
+
+          <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
             <span className="text-[10px] text-slate-400">
               {strictMode && purityPct >= 95 ? '🔒 Strict Lock 1.25x XP active' : 'Shareable card ready'}
             </span>

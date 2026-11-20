@@ -16,16 +16,29 @@ import {
   Pause,
   Download,
   Palette,
+  Swords,
 } from 'lucide-react';
 import { AuthScreen } from './components/AuthScreen';
 import { FocusView, formatClock } from './components/FocusView';
+import { QuestView } from './components/QuestView';
 import { RoomsView } from './components/RoomsView';
 import { CompeteView } from './components/CompeteView';
 import { FeedView } from './components/FeedView';
 import { ProfileView } from './components/ProfileView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
-import { BootstrapData, FloatingEmoji, StudyTask, Subject, TabKey, TimerMode, User } from './types';
+import {
+  BootstrapData,
+  FloatingEmoji,
+  GameActionResponse,
+  SessionGameRewards,
+  ShopBuyResponse,
+  StudyTask,
+  Subject,
+  TabKey,
+  TimerMode,
+  User,
+} from './types';
 import { ThemeId, THEME_STORAGE_KEY, getThemeMeta, isValidThemeId, resolveAccent } from './themes';
 import { soundEngine, SoundPreset } from './utils/soundEngine';
 import { pipEngine } from './utils/pipEngine';
@@ -840,7 +853,11 @@ export function App() {
     await refreshBootstrap();
 
     const freezeNote = res.usedFreeze ? ' • Streak Freeze used ❄️' : '';
-    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned} Coins! Streak: ${res.newStreak}d 🔥${freezeNote}`);
+    const gr: SessionGameRewards | undefined = res.gameRewards;
+    const gameNote = gr
+      ? ` • +${gr.energyGained}⚡ +${gr.shardsGained}✦${gr.droppedItem ? ` • 🎁 ${gr.droppedItem.name}` : ''}`
+      : '';
+    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned}🪙! Streak: ${res.newStreak}d 🔥${freezeNote}${gameNote}`);
 
     if (startBreakAfter) {
       setMode('break');
@@ -869,7 +886,9 @@ export function App() {
       }),
     });
     await refreshBootstrap();
-    pushToast(`Offline session logged: +${res.xpEarned} XP & +${res.coinsEarned} Coins! 📝`);
+    const gr: SessionGameRewards | undefined = res.gameRewards;
+    const gameNote = gr ? ` • +${gr.energyGained}⚡ +${gr.shardsGained}✦${gr.droppedItem ? ` • 🎁 ${gr.droppedItem.name}` : ''}` : '';
+    pushToast(`Offline study logged: +${res.xpEarned} XP & +${res.coinsEarned}🪙${gameNote}`);
   }
 
   async function handleCreateTask(title: string, subjectName: string, targetPomos: number) {
@@ -923,20 +942,76 @@ export function App() {
     pushToast('Subject removed');
   }
 
-  async function handleBuyShopItem(itemKey: string) {
-    const res = await apiFetch('/api/shop/buy', {
-      method: 'POST',
-      body: JSON.stringify({ itemKey }),
-    });
-    await refreshBootstrap();
-    if (res.action === 'equipped') {
-      pushToast('Equipped item! ✨');
-    } else if (res.action === 'purchased_and_equipped') {
-      pushToast('Unlocked & equipped! 🎉');
-    } else {
-      pushToast('Purchased! Your Streak Freeze is armed ❄️');
+  function applyServerStatePatch(res: { user?: User; shop?: BootstrapData['shop']; game?: BootstrapData['game'] }) {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            user: res.user || prev.user,
+            shop: res.shop || prev.shop,
+            shopItems: res.shop ? res.shop.sections.permanent : prev.shopItems,
+            game: res.game || prev.game,
+          }
+        : prev
+    );
+  }
+
+  async function handleBuyShopItem(itemKey: string): Promise<ShopBuyResponse | void> {
+    try {
+      const res: ShopBuyResponse = await apiFetch('/api/shop/buy', {
+        method: 'POST',
+        body: JSON.stringify({ itemKey }),
+      });
+      applyServerStatePatch(res);
+      pushToast(res.message || 'Purchase complete! ✨');
+      return res;
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Purchase failed');
     }
   }
+
+  async function handleRerollDailyShop() {
+    try {
+      const res = await apiFetch('/api/shop/reroll-daily', { method: 'POST' });
+      applyServerStatePatch(res);
+      pushToast(res.message || 'Daily stock rerolled! 🔄');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Reroll failed');
+    }
+  }
+
+  async function callGameApi(url: string, body?: Record<string, unknown>): Promise<GameActionResponse> {
+    try {
+      const res: GameActionResponse = await apiFetch(url, {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      applyServerStatePatch(res);
+      if (res.greatSuccess) {
+        pushToast('🍀 Lucky Great Success (+2 Forge Levels)!');
+      } else if (typeof res.shardsGained === 'number' && res.shardsGained > 0) {
+        pushToast(`♻️ Salvaged for +${res.shardsGained} Arcane Shards`);
+      }
+      return res;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Action failed';
+      pushToast(msg);
+      return { game: data!.game, user: data!.user };
+    }
+  }
+
+  const handleGameExplore = () => callGameApi('/api/game/explore');
+  const handleGameCombat = (action: 'attack' | 'skill' | 'guard' | 'potion' | 'flee') =>
+    callGameApi('/api/game/combat', { action });
+  const handleGameChoice = (choice: string) => callGameApi('/api/game/choice', { choice });
+  const handleGameEquip = (itemId: number) => callGameApi('/api/game/equip', { itemId });
+  const handleGameUpgradeItem = (itemId: number) => callGameApi('/api/game/upgrade-item', { itemId });
+  const handleGameSalvage = (payload: { itemId?: number; maxRarity?: string }) =>
+    callGameApi('/api/game/salvage', payload);
+  const handleGameUpgradeStat = (stat: 'atk' | 'vit' | 'luck' | 'crit') =>
+    callGameApi('/api/game/upgrade-stat', { stat });
+  const handleGameCampRest = () => callGameApi('/api/game/camp-rest');
+  const handleGameSelectFloor = (floor: number) => callGameApi('/api/game/floor-select', { floor });
 
   async function handleCreateRoom(name: string, topic: string, icon: string, accent: string) {
     const created = await apiFetch('/api/rooms', {
@@ -1050,6 +1125,7 @@ export function App() {
 
   const navItems: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { key: 'focus', label: 'Focus', icon: Timer },
+    { key: 'quest', label: 'Quest', icon: Swords },
     { key: 'rooms', label: 'Rooms', icon: Users },
     { key: 'compete', label: 'Compete', icon: Trophy },
     { key: 'feed', label: 'Feed', icon: Flame },
@@ -1322,6 +1398,26 @@ export function App() {
                   />
                 )}
 
+                {tab === 'quest' && (
+                  <QuestView
+                    user={user}
+                    game={data.game}
+                    shop={data.shop}
+                    onExplore={handleGameExplore}
+                    onCombatAction={handleGameCombat}
+                    onEventChoice={handleGameChoice}
+                    onEquipItem={handleGameEquip}
+                    onUpgradeItem={handleGameUpgradeItem}
+                    onSalvageItem={handleGameSalvage}
+                    onUpgradeStat={handleGameUpgradeStat}
+                    onCampRest={handleGameCampRest}
+                    onSelectFloor={handleGameSelectFloor}
+                    onBuyShopItem={handleBuyShopItem}
+                    onRerollDailyShop={handleRerollDailyShop}
+                    onGoToFocus={() => setTab('focus')}
+                  />
+                )}
+
                 {tab === 'rooms' && (
                   <RoomsView
                     themeId={themeId}
@@ -1382,8 +1478,11 @@ export function App() {
                     peakWindowLabel={data.peakWindowLabel}
                     achievements={data.achievements}
                     subjects={data.subjects}
-                    shopItems={data.shopItems}
+                    shop={data.shop}
+                    game={data.game}
                     onBuyShopItem={handleBuyShopItem}
+                    onRerollDailyShop={handleRerollDailyShop}
+                    onEquipGameItem={(id) => handleGameEquip(id).then(() => undefined)}
                     onDeleteSubject={handleDeleteSubject}
                     onUpdateProfile={handleUpdateProfile}
                     onLogout={handleLogout}
@@ -1472,6 +1571,44 @@ export function App() {
             </div>
           </div>
 
+          <div className="glass-card rounded-3xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
+                <Swords className="w-3.5 h-3.5" /> Pixel Spire Hero
+              </span>
+              <span className="font-mono-num text-[11px] font-bold text-slate-300">
+                F{data.game.profile.floor} (Best F{data.game.profile.bestFloor})
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 text-center mb-2.5">
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-white">
+                  {data.game.heroStats.hp}/{data.game.heroStats.maxHp}
+                </div>
+                <div className="text-[9px] text-slate-400">HP</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-white">
+                  ⚡ {data.game.profile.energy}
+                </div>
+                <div className="text-[9px] text-slate-400">Energy</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-white">
+                  🍀 {data.game.heroStats.luck}
+                </div>
+                <div className="text-[9px] text-slate-400">Luck</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTab('quest')}
+              className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
+            >
+              Enter Pixel Dungeon ⚔️
+            </button>
+          </div>
+
           {isRunning && (
             <div className="glass-card rounded-3xl p-4 border sp-tab-active">
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
@@ -1496,7 +1633,7 @@ export function App() {
         aria-label="Primary Navigation"
         className="fixed bottom-3 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[440px]"
       >
-        <div className="liquid-dock liquid-dock-lens rounded-xl p-1.5 grid grid-cols-5 gap-1">
+        <div className="liquid-dock liquid-dock-lens rounded-xl p-1 grid grid-cols-6 gap-0.5">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = tab === item.key;
@@ -1506,7 +1643,7 @@ export function App() {
                 key={item.key}
                 type="button"
                 onClick={() => setTab(item.key)}
-                className={`relative py-2 rounded-lg flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
+                className={`relative py-2 px-0.5 rounded-lg flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
                   active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -1526,7 +1663,7 @@ export function App() {
                     />
                   )}
                 </div>
-                <span className="text-[10px] font-bold relative z-10">{item.label}</span>
+                <span className="text-[9.5px] font-bold relative z-10 truncate max-w-full">{item.label}</span>
               </button>
             );
           })}

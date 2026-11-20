@@ -137,8 +137,72 @@ db.exec(`
     PRIMARY KEY (user_id, item_key)
   );
 
+  CREATE TABLE IF NOT EXISTS shop_purchases (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_key TEXT NOT NULL,
+    period_key TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, item_key, period_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS game_profiles (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    hero_class TEXT NOT NULL DEFAULT 'hero_scholar',
+    hero_xp INTEGER NOT NULL DEFAULT 0,
+    floor INTEGER NOT NULL DEFAULT 1,
+    room_index INTEGER NOT NULL DEFAULT 1,
+    best_floor INTEGER NOT NULL DEFAULT 1,
+    hp INTEGER NOT NULL DEFAULT 110,
+    energy INTEGER NOT NULL DEFAULT 12,
+    last_energy_regen_ms INTEGER NOT NULL DEFAULT 0,
+    shards INTEGER NOT NULL DEFAULT 25,
+    potions INTEGER NOT NULL DEFAULT 2,
+    focus_charge INTEGER NOT NULL DEFAULT 50,
+    luck_buff_charges INTEGER NOT NULL DEFAULT 0,
+    luck_buff_amount INTEGER NOT NULL DEFAULT 0,
+    upg_atk INTEGER NOT NULL DEFAULT 0,
+    upg_vit INTEGER NOT NULL DEFAULT 0,
+    upg_luck INTEGER NOT NULL DEFAULT 0,
+    upg_crit INTEGER NOT NULL DEFAULT 0,
+    bonus_atk INTEGER NOT NULL DEFAULT 0,
+    bonus_def INTEGER NOT NULL DEFAULT 0,
+    bonus_hp INTEGER NOT NULL DEFAULT 0,
+    bonus_luck INTEGER NOT NULL DEFAULT 0,
+    monsters_slain INTEGER NOT NULL DEFAULT 0,
+    bosses_slain INTEGER NOT NULL DEFAULT 0,
+    chests_opened INTEGER NOT NULL DEFAULT 0,
+    legendaries_found INTEGER NOT NULL DEFAULT 0,
+    daily_shop_date TEXT NOT NULL DEFAULT '',
+    daily_shop_rerolls INTEGER NOT NULL DEFAULT 0,
+    active_encounter_json TEXT,
+    last_log_json TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS game_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot TEXT NOT NULL,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    sprite_key TEXT NOT NULL,
+    rarity TEXT NOT NULL,
+    affix TEXT NOT NULL DEFAULT '',
+    level INTEGER NOT NULL DEFAULT 1,
+    upgrade_level INTEGER NOT NULL DEFAULT 0,
+    atk INTEGER NOT NULL DEFAULT 0,
+    def INTEGER NOT NULL DEFAULT 0,
+    hp INTEGER NOT NULL DEFAULT 0,
+    luck INTEGER NOT NULL DEFAULT 0,
+    crit INTEGER NOT NULL DEFAULT 0,
+    equipped INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_user_time ON study_sessions(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON study_sessions(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_game_items_user ON game_items(user_id, equipped DESC, created_at DESC);
 `);
 
 // Safe migrations for existing production DBs

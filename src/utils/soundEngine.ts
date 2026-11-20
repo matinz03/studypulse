@@ -6,6 +6,99 @@ class AmbientSoundEngine {
   private activeNodes: AudioNode[] = [];
   private currentPreset: SoundPreset = 'off';
   private volume = 0.45;
+  private sfxMuted = false;
+
+  setSfxMuted(muted: boolean) {
+    this.sfxMuted = muted;
+  }
+
+  isSfxMuted() {
+    return this.sfxMuted;
+  }
+
+  private playToneSequence(notes: Array<{ freq: number; dur: number; delay: number; type?: OscillatorType; vol?: number }>) {
+    if (this.sfxMuted) return;
+    try {
+      const AudioCtx =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.ctx) this.ctx = new AudioCtx();
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      const ctx = this.ctx;
+      const base = ctx.currentTime + 0.01;
+      for (const n of notes) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = n.type || 'square';
+        osc.frequency.setValueAtTime(n.freq, base + n.delay);
+        const start = base + n.delay;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(n.vol ?? 0.06, start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + n.dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + n.dur + 0.02);
+      }
+    } catch {
+      // ignore blocked audio
+    }
+  }
+
+  playPixelHit() {
+    this.playToneSequence([
+      { freq: 340, dur: 0.06, delay: 0, type: 'square', vol: 0.05 },
+      { freq: 190, dur: 0.08, delay: 0.04, type: 'sawtooth', vol: 0.04 },
+    ]);
+  }
+
+  playPixelCrit() {
+    this.playToneSequence([
+      { freq: 520, dur: 0.06, delay: 0, type: 'square', vol: 0.06 },
+      { freq: 780, dur: 0.08, delay: 0.05, type: 'square', vol: 0.06 },
+      { freq: 1040, dur: 0.12, delay: 0.1, type: 'triangle', vol: 0.07 },
+    ]);
+  }
+
+  playPixelGuard() {
+    this.playToneSequence([
+      { freq: 290, dur: 0.08, delay: 0, type: 'triangle', vol: 0.06 },
+      { freq: 440, dur: 0.12, delay: 0.05, type: 'sine', vol: 0.06 },
+    ]);
+  }
+
+  playPixelStep() {
+    this.playToneSequence([
+      { freq: 240, dur: 0.045, delay: 0, type: 'triangle', vol: 0.04 },
+      { freq: 310, dur: 0.055, delay: 0.04, type: 'triangle', vol: 0.04 },
+    ]);
+  }
+
+  playPixelDefeat() {
+    this.playToneSequence([
+      { freq: 260, dur: 0.12, delay: 0, type: 'sawtooth', vol: 0.05 },
+      { freq: 195, dur: 0.14, delay: 0.11, type: 'sawtooth', vol: 0.05 },
+      { freq: 130, dur: 0.22, delay: 0.23, type: 'sawtooth', vol: 0.05 },
+    ]);
+  }
+
+  playPixelLoot(rarity = 'common') {
+    if (rarity === 'legendary' || rarity === 'epic') {
+      this.playToneSequence([
+        { freq: 523.25, dur: 0.08, delay: 0, type: 'square', vol: 0.06 },
+        { freq: 659.25, dur: 0.08, delay: 0.07, type: 'square', vol: 0.06 },
+        { freq: 783.99, dur: 0.09, delay: 0.14, type: 'square', vol: 0.06 },
+        { freq: 1046.5, dur: 0.18, delay: 0.21, type: 'square', vol: 0.07 },
+      ]);
+    } else {
+      this.playToneSequence([
+        { freq: 440, dur: 0.07, delay: 0, type: 'triangle', vol: 0.05 },
+        { freq: 659.25, dur: 0.12, delay: 0.06, type: 'triangle', vol: 0.06 },
+      ]);
+    }
+  }
 
   setPreset(preset: SoundPreset, volume = this.volume) {
     this.stop();

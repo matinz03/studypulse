@@ -1,5 +1,8 @@
-export type TabKey = 'focus' | 'rooms' | 'compete' | 'feed' | 'me';
+export type TabKey = 'focus' | 'quest' | 'rooms' | 'compete' | 'feed' | 'me';
 export type TimerMode = 'pomodoro' | 'deep' | 'custom' | 'stopwatch' | 'sprint' | 'break';
+export type ShopTier = 'daily' | 'weekly' | 'monthly' | 'permanent';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+export type GearSlot = 'weapon' | 'armor' | 'charm' | 'companion';
 
 export interface User {
   id: number;
@@ -40,14 +43,218 @@ export interface StudyTask {
 
 export interface ShopItem {
   key: string;
-  category: 'consumable' | 'spirit' | 'title';
+  tier: ShopTier;
+  category: string;
+  rarity: ItemRarity;
   name: string;
   desc: string;
+  effectBadge?: string;
   icon: string;
   price: number;
+  origPrice?: number;
   titleValue?: string;
+  heroKey?: string;
   unlocked: boolean;
   equipped: boolean;
+  maxPerPeriod: number | null;
+  purchasedCount: number;
+  remaining: number | null;
+}
+
+export interface ShopState {
+  periodKeys: {
+    daily: string;
+    weekly: string;
+    monthly: string;
+  };
+  resetsInSec: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+  };
+  dailyRerollsUsed: number;
+  nextRerollCost: number;
+  sections: {
+    daily: ShopItem[];
+    weekly: ShopItem[];
+    monthly: ShopItem[];
+    permanent: ShopItem[];
+  };
+}
+
+export interface GameItem {
+  id: number;
+  userId: number;
+  slot: GearSlot;
+  name: string;
+  icon: string;
+  spriteKey: string;
+  rarity: ItemRarity;
+  affix: string;
+  level: number;
+  upgradeLevel: number;
+  atk: number;
+  def: number;
+  hp: number;
+  luck: number;
+  crit: number;
+  equipped: boolean;
+  salvageValue: number;
+  createdAt: number;
+}
+
+export interface GameDropOdds {
+  common: number;
+  uncommon: number;
+  rare: number;
+  epic: number;
+  legendary: number;
+}
+
+export interface GameStudyBonuses {
+  scholarLevel: number;
+  streakDays: number;
+  avgPurity: number;
+  todayMins: number;
+  dailyGoalMins: number;
+  totalMins: number;
+  studyAtk: number;
+  studyDef: number;
+  studyHp: number;
+  streakLuck: number;
+  purityCrit: number;
+  purityDodge: number;
+  focusFever: boolean;
+  feverLuck: number;
+  feverAtkPct: number;
+  todayEnergyTier: string;
+}
+
+export interface GameHeroStats {
+  heroLevel: number;
+  heroXp: number;
+  currentHeroMinXp: number;
+  nextHeroXp: number;
+  heroProgressPct: number;
+  classKey: string;
+  className: string;
+  classPerk: string;
+  maxHp: number;
+  hp: number;
+  atk: number;
+  def: number;
+  luck: number;
+  critPct: number;
+  dodgePct: number;
+  dropOdds: GameDropOdds;
+  studyBonuses: GameStudyBonuses;
+  luckBreakdown: {
+    base: number;
+    gear: number;
+    upgrades: number;
+    streak: number;
+    fever: number;
+    buff: number;
+  };
+}
+
+export interface GameEncounter {
+  type: 'combat' | 'chest' | 'shrine' | 'merchant';
+  isBoss?: boolean;
+  turn?: number;
+  charging?: boolean;
+  lockpickChance?: number;
+  gambleChance?: number;
+  enemy?: {
+    key: string;
+    name: string;
+    hp: number;
+    maxHp: number;
+    atk: number;
+    def: number;
+    xpReward: number;
+    shardReward: number;
+  };
+}
+
+export interface GameTurnEvent {
+  kind: string;
+  target: string;
+  value?: number;
+  text?: string;
+}
+
+export interface GameProfileData {
+  heroClass: string;
+  floor: number;
+  roomIndex: number;
+  bestFloor: number;
+  hp: number;
+  maxHp: number;
+  energy: number;
+  shards: number;
+  potions: number;
+  focusCharge: number;
+  luckBuffCharges: number;
+  luckBuffAmount: number;
+  monstersSlain: number;
+  bossesSlain: number;
+  chestsOpened: number;
+  legendariesFound: number;
+  upgrades: {
+    atk: number;
+    vit: number;
+    luck: number;
+    crit: number;
+  };
+  upgradeCosts: {
+    atk: number;
+    vit: number;
+    luck: number;
+    crit: number;
+  };
+}
+
+export interface GameState {
+  profile: GameProfileData;
+  heroStats: GameHeroStats;
+  biome: {
+    key: string;
+    name: string;
+    minFloor: number;
+  };
+  items: GameItem[];
+  equippedBySlot: Record<GearSlot, GameItem | null>;
+  encounter: GameEncounter | null;
+  recentLogs: string[];
+}
+
+export interface SessionGameRewards {
+  energyGained: number;
+  shardsGained: number;
+  droppedItem: GameItem | null;
+  focusFeverActive: boolean;
+}
+
+export interface ShopBuyResponse {
+  ok: boolean;
+  action: string;
+  itemKey: string;
+  message: string;
+  droppedItem: GameItem | null;
+  user: User;
+  shop: ShopState;
+  game: GameState;
+}
+
+export interface GameActionResponse {
+  game: GameState;
+  user: User;
+  shop?: ShopState;
+  events?: GameTurnEvent[];
+  droppedItem?: GameItem | null;
+  shardsGained?: number;
+  greatSuccess?: boolean;
 }
 
 export interface Subject {
@@ -194,6 +401,8 @@ export interface BootstrapData {
   subjects: Subject[];
   tasks: StudyTask[];
   shopItems: ShopItem[];
+  shop: ShopState;
+  game: GameState;
   vapidPublicKey: string;
   directory: PeerUser[];
   leaderboards: {

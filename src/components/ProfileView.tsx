@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Award, Calendar, Flame, LogOut, Settings2, Check, Target, ShoppingBag, Clock, Trash2, Coins } from 'lucide-react';
-import { Achievement, HeatmapDay, ShopItem, Subject, SubjectStat, User, WeekDay } from '../types';
+import { Award, Calendar, Flame, LogOut, Settings2, Check, Target, Clock, Trash2 } from 'lucide-react';
+import { Achievement, GameState, HeatmapDay, ShopBuyResponse, ShopState, Subject, SubjectStat, User, WeekDay } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
+import { StorePanel } from './StorePanel';
 
 interface ProfileViewProps {
   themeId?: ThemeId;
@@ -13,10 +14,13 @@ interface ProfileViewProps {
   peakWindowLabel: string;
   subjectBreakdown: SubjectStat[];
   subjects: Subject[];
-  shopItems: ShopItem[];
+  shop: ShopState;
+  game: GameState;
   achievements: Achievement[];
   onUpdateProfile: (payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) => Promise<void>;
-  onBuyShopItem: (itemKey: string) => Promise<void>;
+  onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
+  onRerollDailyShop: () => Promise<void>;
+  onEquipGameItem: (itemId: number) => Promise<void>;
   onDeleteSubject: (subjectId: number) => Promise<void>;
   onLogout: () => void;
 }
@@ -38,10 +42,13 @@ export function ProfileView({
   peakWindowLabel,
   subjectBreakdown,
   subjects,
-  shopItems,
+  shop,
+  game,
   achievements,
   onUpdateProfile,
   onBuyShopItem,
+  onRerollDailyShop,
+  onEquipGameItem,
   onDeleteSubject,
   onLogout,
 }: ProfileViewProps) {
@@ -50,21 +57,11 @@ export function ProfileView({
   const [bio, setBio] = useState(user.bio);
   const [dailyGoalMins, setDailyGoalMins] = useState(user.dailyGoalMins);
   const [saving, setSaving] = useState(false);
-  const [buyingKey, setBuyingKey] = useState<string | null>(null);
 
   const themeMeta = getThemeMeta(themeId);
   const goalPct = Math.min(100, Math.round((user.todayMins / Math.max(1, user.dailyGoalMins)) * 100));
   const maxTrend = Math.max(30, ...weekTrend.map((d) => d.minutes));
   const maxHour = Math.max(15, ...(hourlyDistribution.length ? hourlyDistribution : [15]));
-
-  async function handleBuy(key: string) {
-    setBuyingKey(key);
-    try {
-      await onBuyShopItem(key);
-    } finally {
-      setBuyingKey(null);
-    }
-  }
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
@@ -354,65 +351,15 @@ export function ProfileView({
         </div>
       </div>
 
-      {/* Focus Coin Shop & Streak Freeze */}
-      <div className="glass-card rounded-3xl p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <ShoppingBag className="w-3.5 h-3.5" />
-            Focus Coin Shop
-          </h3>
-          <div className="flex items-center gap-1.5">
-            <span className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-bold">
-              🧊 {user.streakFreezes} Freeze{user.streakFreezes === 1 ? '' : 's'}
-            </span>
-            <span className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-mono-num font-extrabold flex items-center gap-1">
-              <Coins className="w-3 h-3" /> {user.coins}
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          {shopItems.map((item) => {
-            const canAfford = user.coins >= item.price;
-            return (
-              <div key={item.key} className="flex items-center justify-between gap-2.5 p-2.5 rounded-2xl sp-inset">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
-                    {item.icon}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{item.name}</div>
-                    <div className="text-[10px] text-slate-400 line-clamp-1">{item.desc}</div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={buyingKey === item.key || item.equipped || (!item.unlocked && !canAfford)}
-                  onClick={() => handleBuy(item.key)}
-                  className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-extrabold cursor-pointer transition border ${
-                    item.equipped
-                      ? 'sp-badge opacity-75 cursor-default'
-                      : item.unlocked
-                        ? 'sp-tab-active'
-                        : canAfford
-                          ? 'sp-btn-primary'
-                          : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
-                  }`}
-                >
-                  {buyingKey === item.key
-                    ? '...'
-                    : item.equipped
-                      ? 'Equipped'
-                      : item.unlocked
-                        ? 'Equip'
-                        : `🪙 ${item.price}`}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Rotating Focus Coin Shop (Daily / Weekly / Monthly / Permanent) */}
+      <StorePanel
+        user={user}
+        shop={shop}
+        game={game}
+        onBuyShopItem={onBuyShopItem}
+        onRerollDailyShop={onRerollDailyShop}
+        onEquipLoot={onEquipGameItem}
+      />
 
       {/* Achievements Grid */}
       <div className="glass-card rounded-3xl p-4">

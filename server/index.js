@@ -14,6 +14,21 @@ import {
   createStarterSubjects,
   dateKeyUTC,
 } from './db.js';
+import {
+  buildGameState,
+  ensureGameProfile,
+  equipGameItem,
+  exploreRoom,
+  grantStudyRewardsToGame,
+  resolveCombatAction,
+  resolveEventChoice,
+  restAtCamp,
+  salvageGameItem,
+  selectFloor,
+  upgradeGameItem,
+  upgradeHeroStat,
+} from './gameEngine.js';
+import { buildShopState, purchaseShopItem, rerollDailyShop } from './shopEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -45,50 +60,23 @@ if (fs.existsSync(VAPID_FILE)) {
 }
 webpush.setVapidDetails('mailto:focus@study.matinz03.tech', vapidKeys.publicKey, vapidKeys.privateKey);
 
-const SHOP_CATALOG = [
-  {
-    key: 'freeze_1',
-    category: 'consumable',
-    name: 'Streak Freeze Shield',
-    desc: 'Automatically saves your daily streak if you miss a day.',
-    icon: '🧊',
-    price: 120,
-  },
-  {
-    key: 'spirit_phoenix',
-    category: 'spirit',
-    name: 'Solar Phoenix Spirit',
-    desc: 'Unlocks fiery amber-rose luminescence for your Focus Spirit.',
-    icon: '🔥',
-    price: 200,
-  },
-  {
-    key: 'spirit_cyber',
-    category: 'spirit',
-    name: 'Cyber Prism Spirit',
-    desc: 'Unlocks holographic neon cyan-violet Spirit aura.',
-    icon: '💎',
-    price: 250,
-  },
-  {
-    key: 'title_archmage',
-    category: 'title',
-    name: 'Focus Archmage Title',
-    desc: 'Sets your peer badge title to "Focus Archmage".',
-    icon: '🧙',
-    price: 180,
-    titleValue: 'Focus Archmage',
-  },
-  {
-    key: 'title_titan',
-    category: 'title',
-    name: 'Deep Work Titan Title',
-    desc: 'Sets your peer badge title to "Deep Work Titan".',
-    icon: '⚡',
-    price: 300,
-    titleValue: 'Deep Work Titan',
-  },
-];
+function getUserStudyStats(userId) {
+  const now = Date.now();
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const todayStartMs = startOfToday.getTime();
+  const weekStartMs = now - 7 * 86400_000;
+
+  return db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN created_at >= ? THEN duration_sec ELSE 0 END), 0) AS today_sec,
+      COALESCE(SUM(CASE WHEN created_at >= ? THEN duration_sec ELSE 0 END), 0) AS week_sec,
+      COALESCE(SUM(duration_sec), 0) AS total_sec,
+      COUNT(*) AS sessions_count,
+      COALESCE(AVG(purity_pct), 100) AS avg_purity
+    FROM study_sessions WHERE user_id = ?
+  `).get(todayStartMs, weekStartMs, userId);
+}
 
 function signToken(payload) {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -313,6 +301,21 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ token, user: sanitizeUser(user) });
 });
 
+function buildFullUser(userId) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user) return null;
+  const userStats = getUserStudyStats(userId);
+  const totalSec = userStats.total_sec || 0;
+  return {
+    ...sanitizeUser(user),
+    todayMins: Math.round((userStats.today_sec || 0) / 60),
+    weekMins: Math.round((userStats.week_sec || 0) / 60),
+    totalMins: Math.round(totalSec / 60),
+    sessionsCount: userStats.sessions_count || 0,
+    avgPurity: Math.round(userStats.avg_purity || 100),
+  };
+}
+
 function buildBootstrap(userId) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const now = Date.now();
@@ -321,15 +324,7 @@ function buildBootstrap(userId) {
   const todayStartMs = startOfToday.getTime();
   const weekStartMs = now - 7 * 86400_000;
 
-  const userStats = db.prepare(`
-    SELECT
-      COALESCE(SUM(CASE WHEN created_at >= ? THEN duration_sec ELSE 0 END), 0) AS today_sec,
-      COALESCE(SUM(CASE WHEN created_at >= ? THEN duration_sec ELSE 0 END), 0) AS week_sec,
-      COALESCE(SUM(duration_sec), 0) AS total_sec,
-      COUNT(*) AS sessions_count,
-      COALESCE(AVG(purity_pct), 100) AS avg_purity
-    FROM study_sessions WHERE user_id = ?
-  `).get(todayStartMs, weekStartMs, userId);
+  const userStats = getUserStudyStats(userId);
 
   const subjects = db.prepare('SELECT id, name, color, icon FROM subjects WHERE user_id = ? ORDER BY id ASC').all(userId);
   const friendRows = db.prepare('SELECT friend_id FROM friendships WHERE user_id = ?').all(userId);
@@ -604,16 +599,9 @@ function buildBootstrap(userId) {
     createdAt: t.created_at,
   }));
 
-  const unlockSet = new Set(
-    db.prepare('SELECT item_key FROM user_unlocks WHERE user_id = ?').all(userId).map((r) => r.item_key)
-  );
-  const shopItems = SHOP_CATALOG.map((item) => ({
-    ...item,
-    unlocked: item.category !== 'consumable' && unlockSet.has(item.key),
-    equipped:
-      (item.category === 'spirit' && (user.equipped_spirit || 'default') === item.key) ||
-      (item.category === 'title' && user.title === item.titleValue),
-  }));
+  const gameProfileRaw = ensureGameProfile(db, userId);
+  const shop = buildShopState(db, user, gameProfileRaw);
+  const game = buildGameState(db, user, userStats);
 
   return {
     user: {
@@ -626,7 +614,9 @@ function buildBootstrap(userId) {
     },
     subjects,
     tasks,
-    shopItems,
+    shopItems: shop.sections.permanent,
+    shop,
+    game,
     vapidPublicKey: vapidKeys.publicKey,
     directory,
     leaderboards: {
@@ -772,6 +762,8 @@ app.patch('/api/tasks/:id', authMiddleware, (req, res) => {
     bonusCoins = 3;
     nextRewarded = 1;
     db.prepare('UPDATE users SET xp = xp + ?, coins = coins + ? WHERE id = ?').run(bonusXp, bonusCoins, req.user.id);
+    ensureGameProfile(db, req.user.id);
+    db.prepare('UPDATE game_profiles SET energy = MIN(99, energy + 1), shards = shards + 8, updated_at = ? WHERE user_id = ?').run(Date.now(), req.user.id);
   }
 
   db.prepare('UPDATE study_tasks SET title = ?, done = ?, completed_pomos = ?, rewarded = ? WHERE id = ? AND user_id = ?').run(
@@ -806,36 +798,62 @@ app.delete('/api/tasks/:id', authMiddleware, (req, res) => {
 });
 
 app.post('/api/shop/buy', authMiddleware, (req, res) => {
-  const itemKey = String(req.body?.itemKey || '').trim();
-  const item = SHOP_CATALOG.find((x) => x.key === itemKey);
-  if (!item) return res.status(404).json({ error: 'Shop item not found' });
-
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (item.category === 'consumable') {
-    if (user.coins < item.price) return res.status(400).json({ error: `Need ${item.price} Focus Coins` });
-    db.prepare('UPDATE users SET coins = coins - ?, streak_freezes = streak_freezes + 1 WHERE id = ?').run(item.price, user.id);
-    const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    return res.json({ ok: true, action: 'purchased', itemKey, user: sanitizeUser(updated) });
+  try {
+    const itemKey = String(req.body?.itemKey || '').trim();
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const result = purchaseShopItem(db, user, getUserStudyStats(req.user.id), itemKey);
+    res.json({ ...result, user: buildFullUser(req.user.id) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Purchase failed' });
   }
-
-  const alreadyUnlocked = db.prepare('SELECT 1 FROM user_unlocks WHERE user_id = ? AND item_key = ?').get(user.id, itemKey);
-  let action = 'equipped';
-  if (!alreadyUnlocked) {
-    if (user.coins < item.price) return res.status(400).json({ error: `Need ${item.price} Focus Coins` });
-    db.prepare('UPDATE users SET coins = coins - ? WHERE id = ?').run(item.price, user.id);
-    db.prepare('INSERT INTO user_unlocks (user_id, item_key, created_at) VALUES (?, ?, ?)').run(user.id, itemKey, Date.now());
-    action = 'purchased_and_equipped';
-  }
-
-  if (item.category === 'spirit') {
-    db.prepare('UPDATE users SET equipped_spirit = ? WHERE id = ?').run(item.key, user.id);
-  } else if (item.category === 'title' && item.titleValue) {
-    db.prepare('UPDATE users SET title = ? WHERE id = ?').run(item.titleValue, user.id);
-  }
-
-  const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-  res.json({ ok: true, action, itemKey, user: sanitizeUser(updated) });
 });
+
+app.post('/api/shop/reroll-daily', authMiddleware, (req, res) => {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const result = rerollDailyShop(db, user, getUserStudyStats(req.user.id));
+    res.json({ ...result, user: buildFullUser(req.user.id) });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || 'Reroll failed' });
+  }
+});
+
+app.get('/api/game/state', authMiddleware, (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({
+    game: buildGameState(db, user, getUserStudyStats(req.user.id)),
+    user: buildFullUser(req.user.id),
+  });
+});
+
+function withGameHandler(fn) {
+  return (req, res) => {
+    try {
+      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+      const userStats = getUserStudyStats(req.user.id);
+      const result = fn(req, user, userStats);
+      const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+      const gameProfileRaw = ensureGameProfile(db, req.user.id);
+      res.json({
+        ...result,
+        user: buildFullUser(req.user.id),
+        shop: buildShopState(db, refreshedUser, gameProfileRaw),
+      });
+    } catch (err) {
+      res.status(err.status || 400).json({ error: err.message || 'Game action failed' });
+    }
+  };
+}
+
+app.post('/api/game/explore', authMiddleware, withGameHandler((_req, user, stats) => exploreRoom(db, user, stats)));
+app.post('/api/game/combat', authMiddleware, withGameHandler((req, user, stats) => resolveCombatAction(db, user, stats, String(req.body?.action || ''))));
+app.post('/api/game/choice', authMiddleware, withGameHandler((req, user, stats) => resolveEventChoice(db, user, stats, String(req.body?.choice || ''))));
+app.post('/api/game/equip', authMiddleware, withGameHandler((req, user, stats) => equipGameItem(db, user, stats, Number(req.body?.itemId))));
+app.post('/api/game/upgrade-item', authMiddleware, withGameHandler((req, user, stats) => upgradeGameItem(db, user, stats, Number(req.body?.itemId))));
+app.post('/api/game/salvage', authMiddleware, withGameHandler((req, user, stats) => salvageGameItem(db, user, stats, { itemId: Number(req.body?.itemId), maxRarity: req.body?.maxRarity })));
+app.post('/api/game/upgrade-stat', authMiddleware, withGameHandler((req, user, stats) => upgradeHeroStat(db, user, stats, String(req.body?.stat || ''))));
+app.post('/api/game/camp-rest', authMiddleware, withGameHandler((_req, user, stats) => restAtCamp(db, user, stats)));
+app.post('/api/game/floor-select', authMiddleware, withGameHandler((req, user, stats) => selectFloor(db, user, stats, Number(req.body?.floor))));
 
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const subjectName = String(req.body?.subjectName || 'Focus Block').trim().slice(0, 40);
@@ -891,6 +909,16 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   db.prepare('DELETE FROM scheduled_timers WHERE user_id = ?').run(req.user.id);
 
   const session = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(Number(info.lastInsertRowid));
+  const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const gameRewards = grantStudyRewardsToGame(
+    db,
+    updatedUser,
+    getUserStudyStats(req.user.id),
+    durationSec,
+    purityPct,
+    strictMode
+  );
+
   broadcast({
     type: 'session_completed',
     userId: req.user.id,
@@ -906,6 +934,7 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     coinsEarned,
     newStreak: nextStreak,
     usedFreeze,
+    gameRewards,
   });
 });
 
