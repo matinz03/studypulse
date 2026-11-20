@@ -377,29 +377,62 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
       const tw = 26;
       const th = 20;
 
+      const isWall = (tx: number, ty: number) => {
+        const cell = d.tiles[ty]?.[tx];
+        return cell === 'W' || cell === 'S' || cell === undefined;
+      };
+
       for (let y = 0; y < d.tiles.length; y++) {
         for (let x = 0; x < d.tiles[0].length; x++) {
           const vis = d.fov[y]?.[x] ?? 0;
           const px = offX + x * tw;
           const py = offY + y * th;
           if (vis === 0) {
-            ctx!.fillStyle = '#06080f';
+            ctx!.fillStyle = '#04060b';
             ctx!.fillRect(px, py, tw, th);
             continue;
           }
 
           const ch = d.tiles[y][x];
           if (ch === 'W' || ch === 'S') {
-            ctx!.fillStyle = (x + y) % 2 === 0 ? biome.brickDark : biome.brickLight;
+            // Solid recessed 3D stone masonry wall block
+            ctx!.fillStyle = biome.brickDark;
             ctx!.fillRect(px, py, tw, th);
+
+            // Staggered 2-course stone bricks + top highlights
+            ctx!.fillStyle = biome.brickLight;
+            ctx!.fillRect(px + 1, py + 1, 11, 5);
+            ctx!.fillRect(px + 14, py + 1, 11, 5);
+            ctx!.fillRect(px + 1, py + 8, 5, 5);
+            ctx!.fillRect(px + 8, py + 8, 11, 5);
+            ctx!.fillRect(px + 21, py + 8, 4, 5);
+            ctx!.fillRect(px + 1, py + 15, 11, 4);
+            ctx!.fillRect(px + 14, py + 15, 11, 4);
+
+            // Dark mortar seams
             ctx!.fillStyle = biome.mortar;
-            ctx!.fillRect(px, py + th - 2, tw, 2);
+            ctx!.fillRect(px, py + 6, tw, 1);
+            ctx!.fillRect(px, py + 13, tw, 1);
+            ctx!.fillRect(px, py + th - 1, tw, 1);
+            ctx!.fillRect(px + 12, py, 2, 6);
+            ctx!.fillRect(px + 6, py + 7, 2, 6);
+            ctx!.fillRect(px + 19, py + 7, 2, 6);
+            ctx!.fillRect(px + 12, py + 14, 2, 6);
+
+            // Crisp corridor rim edge wherever a wall meets an open path
+            const rimColor = vis === 2 ? '#94a3b8' : '#475569';
+            ctx!.fillStyle = rimColor;
+            if (!isWall(x, y - 1)) ctx!.fillRect(px, py, tw, 2);
+            if (!isWall(x, y + 1)) ctx!.fillRect(px, py + th - 2, tw, 2);
+            if (!isWall(x - 1, y)) ctx!.fillRect(px, py, 2, th);
+            if (!isWall(x + 1, y)) ctx!.fillRect(px + tw - 2, py, 2, th);
+
             if (ch === 'S') {
-              // Subtle hairline crack on Secret Wall!
-              ctx!.fillStyle = g.heroStats.intuition >= 14 ? '#38bdf8' : '#0b0d14';
+              // High-visibility cracked fissure hint on Secret Wall
+              ctx!.fillStyle = g.heroStats.intuition >= 14 ? '#38bdf8' : '#cbd5e1';
               ctx!.fillRect(px + 9, py + 4, 2, 5);
-              ctx!.fillRect(px + 11, py + 8, 3, 2);
-              ctx!.fillRect(px + 13, py + 10, 2, 6);
+              ctx!.fillRect(px + 11, py + 8, 4, 2);
+              ctx!.fillRect(px + 14, py + 10, 2, 6);
             }
           } else if (ch === 'L') {
             ctx!.fillStyle = biome.floorA;
@@ -410,11 +443,36 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
             ctx!.fillRect(px + 18, py + 2, 3, th - 4);
             ctx!.fillRect(px + 2, py + 8, tw - 4, 3);
           } else {
+            // Open bright flagstone walkway
             ctx!.fillStyle = (x + y) % 2 === 0 ? biome.floorA : biome.floorB;
             ctx!.fillRect(px, py, tw, th);
+
+            // Subtle flagstone bevel + paving speck so open path reads as ground
+            ctx!.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(px + 0.5, py + 0.5, tw - 1, th - 1);
+            ctx!.fillStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx!.fillRect(px + 12, py + 9, 2, 2);
+
+            // Drop shadow below adjacent northern wall for 3D corridor depth
+            if (isWall(x, y - 1)) {
+              ctx!.fillStyle = 'rgba(0, 0, 0, 0.42)';
+              ctx!.fillRect(px, py, tw, 3);
+            }
+
             if (ch === 'E') {
               const st = MINI_ICONS.icon_stairs;
               drawPixelMatrix(ctx!, st.rows, st.palette, px + 5, py + 4, 2);
+            }
+
+            // Adjacent walkable step indicator around the hero
+            const manhattan = Math.abs(x - d.playerX) + Math.abs(y - d.playerY);
+            if (vis === 2 && manhattan === 1) {
+              ctx!.strokeStyle = 'rgba(74, 222, 128, 0.60)';
+              ctx!.lineWidth = 1;
+              ctx!.strokeRect(px + 2, py + 2, tw - 4, th - 4);
+              ctx!.fillStyle = 'rgba(250, 250, 250, 0.55)';
+              ctx!.fillRect(px + 12, py + 9, 2, 2);
             }
           }
 

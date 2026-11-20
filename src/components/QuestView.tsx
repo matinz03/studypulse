@@ -702,59 +702,70 @@ export function QuestView({
             </div>
 
             {/* Tactile D-Pad + Search / Torch / Extract */}
-            <div className="flex items-center justify-between gap-3">
-              <div className="grid grid-cols-3 gap-1 w-32 shrink-0">
-                <div />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onDungeonMove(0, -1))}
-                  aria-label="Move North"
-                  className="h-9 rounded-xl sp-badge flex items-center justify-center cursor-pointer active:scale-95"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <div />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onDungeonMove(-1, 0))}
-                  aria-label="Move West"
-                  className="h-9 rounded-xl sp-badge flex items-center justify-center cursor-pointer active:scale-95"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(onDungeonSearch)}
-                  aria-label="Search area"
-                  title="Search for hidden traps & cracked secret walls (E)"
-                  className="h-9 rounded-xl sp-tab-active border flex items-center justify-center cursor-pointer active:scale-95"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onDungeonMove(1, 0))}
-                  aria-label="Move East"
-                  className="h-9 rounded-xl sp-badge flex items-center justify-center cursor-pointer active:scale-95"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-                <div />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onDungeonMove(0, 1))}
-                  aria-label="Move South"
-                  className="h-9 rounded-xl sp-badge flex items-center justify-center cursor-pointer active:scale-95"
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <div />
-              </div>
+            {(() => {
+              const isDirOpen = (dx: number, dy: number) => {
+                const ch = dungeon.tiles[dungeon.playerY + dy]?.[dungeon.playerX + dx];
+                return Boolean(ch && ch !== 'W' && ch !== 'S');
+              };
+              const dirCls = (dx: number, dy: number) =>
+                isDirOpen(dx, dy)
+                  ? 'sp-tab-active border border-emerald-400/50 text-white'
+                  : 'sp-inset border border-white/10 opacity-35 text-slate-500';
+
+              return (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="grid grid-cols-3 gap-1 w-32 shrink-0">
+                    <div />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onDungeonMove(0, -1))}
+                      aria-label="Move North"
+                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(0, -1)}`}
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                    <div />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onDungeonMove(-1, 0))}
+                      aria-label="Move West"
+                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(-1, 0)}`}
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(onDungeonSearch)}
+                      aria-label="Search area"
+                      title="Search for hidden traps & cracked secret walls (E)"
+                      className="h-9 rounded-xl sp-tab-active border flex items-center justify-center cursor-pointer active:scale-95"
+                    >
+                      <Search className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onDungeonMove(1, 0))}
+                      aria-label="Move East"
+                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(1, 0)}`}
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                    <div />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onDungeonMove(0, 1))}
+                      aria-label="Move South"
+                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(0, 1)}`}
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
+                    <div />
+                  </div>
 
               <div className="flex-1 flex flex-col gap-1.5">
                 <button
@@ -786,6 +797,8 @@ export function QuestView({
                 </button>
               </div>
             </div>
+              );
+            })()}
           </div>
         ) : (
           /* Oakhaven Village Hub Controls */
