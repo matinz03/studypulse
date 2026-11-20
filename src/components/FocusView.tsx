@@ -292,52 +292,55 @@ export function FocusView({
       {/* 1. UNIFIED CHRONOMETER COCKPIT HERO (Above-the-Fold Primary Focus Surface) */}
       <div className="glass-card rounded-3xl p-4 space-y-3 relative overflow-hidden">
         {/* Top Row: Daily Goal Progress Ribbon + Seated Room Pill + Offline Log */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-white/10">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-200 shrink-0">
-              <Target className="w-3.5 h-3.5 opacity-80" />
-              <span>Goal</span>
-            </span>
-            <div className="w-20 sm:w-28 h-1.5 rounded-full bg-white/10 overflow-hidden shrink-0">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
-              />
+        <div className="space-y-2 pb-2.5 border-b border-white/10">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-200">
+                <Target className="w-3.5 h-3.5 opacity-80" />
+                <span>Goal</span>
+              </span>
+              <span className="font-mono-num text-[11px] font-extrabold text-white">
+                {todayMins}m<span className="text-slate-400 font-normal">/{dailyGoalMins}m</span>
+              </span>
+              <span className="sp-badge px-1.5 py-0.5 rounded-full font-mono-num text-[10px] font-bold">
+                {goalPct}%
+              </span>
             </div>
-            <span className="font-mono-num text-[11px] font-extrabold text-white shrink-0">
-              {todayMins}m<span className="text-slate-400 font-normal">/{dailyGoalMins}m</span>
-            </span>
-            <span className="sp-badge px-1.5 py-0.5 rounded-full font-mono-num text-[10px] font-bold shrink-0">
-              {goalPct}%
-            </span>
-          </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {currentRoom && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {currentRoom && (
+                <button
+                  type="button"
+                  onClick={onGoToRooms}
+                  title={`Seated in ${currentRoom.name} — tap to open room`}
+                  className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: themeMeta.colors.accent }}
+                  />
+                  <span>{currentRoom.icon}</span>
+                  <span className="max-w-[96px] truncate hidden sm:inline">{currentRoom.name}</span>
+                  <Users className="w-3 h-3 opacity-75" />
+                  <span className="font-mono-num">{currentRoom.activeCount}</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={onGoToRooms}
-                title={`Seated in ${currentRoom.name} — tap to open room`}
-                className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+                onClick={() => setLoggingManual((v) => !v)}
+                className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
+                title="Log offline study session"
               >
-                <span
-                  className="w-1.5 h-1.5 rounded-full animate-pulse"
-                  style={{ backgroundColor: themeMeta.colors.accent }}
-                />
-                <span>{currentRoom.icon}</span>
-                <span className="max-w-[96px] truncate hidden sm:inline">{currentRoom.name}</span>
-                <Users className="w-3 h-3 opacity-75" />
-                <span className="font-mono-num">{currentRoom.activeCount}</span>
+                <Clock className="w-2.5 h-2.5" /> +Log
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setLoggingManual((v) => !v)}
-              className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
-              title="Log offline study session"
-            >
-              <Clock className="w-2.5 h-2.5" /> +Log
-            </button>
+            </div>
+          </div>
+
+          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
+            />
           </div>
         </div>
 
