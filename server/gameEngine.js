@@ -1,8 +1,11 @@
 import {
   BOUNTY_DEFINITIONS,
   DUNGEON_RIDDLES,
+  HEROIC_DEEDS,
   LORE_CODEX,
+  MYTHIC_SIDE_STORIES,
   NPCS,
+  PARTY_ALLIES,
   SIDE_QUESTS,
   STORY_CHAPTERS,
   VILLAGE_HEIGHT,
@@ -25,6 +28,7 @@ export const RARITIES = {
   rare: { key: 'rare', label: 'Rare', weight: 12, mult: 1.8, salvage: 28 },
   epic: { key: 'epic', label: 'Epic', weight: 4.8, mult: 2.45, salvage: 55 },
   legendary: { key: 'legendary', label: 'Legendary', weight: 1.2, mult: 3.4, salvage: 110 },
+  mythic: { key: 'mythic', label: 'Mythic', weight: 0.25, mult: 4.6, salvage: 250 },
 };
 
 export const HERO_CLASSES = {
@@ -413,7 +417,8 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
   const items = rawItems.map(formatGameItem);
   const equipped = items.filter((i) => i.equipped);
   const equippedCompanion = equipped.find((i) => i.slot === 'companion') || null;
-  const evolScore = (studyBonuses.totalMins || 0) + (equippedCompanion ? equippedCompanion.upgradeLevel * 60 : 0);
+  const isMythicCompanion = equippedCompanion?.rarity === 'mythic';
+  const evolScore = (studyBonuses.totalMins || 0) + (equippedCompanion ? equippedCompanion.upgradeLevel * 60 : 0) + (isMythicCompanion ? 360 : 0);
   const companionEvolution = !equippedCompanion
     ? { stage: 0, label: 'No Companion Equipped', nextMins: 60 }
     : evolScore >= 360
@@ -423,6 +428,11 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
         : { stage: 1, label: 'Stage I · Hatchling', nextMins: Math.max(0, 120 - evolScore) };
   const evolAtkBonus = companionEvolution.stage >= 3 ? 4 : companionEvolution.stage === 2 ? 2 : 0;
   const evolLuckBonus = companionEvolution.stage >= 3 ? 6 : companionEvolution.stage === 2 ? 3 : 0;
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const recruitedAllies = Array.isArray(flags.recruitedAllies) ? flags.recruitedAllies : [];
+  const activeAlly = PARTY_ALLIES.find((a) => a.id === flags.activeAllyId && recruitedAllies.includes(a.id)) || null;
+  const allyBonus = activeAlly?.passiveBonuses || { atk: 0, def: 0, hp: 0, luck: 0, crit: 0 };
 
   const gearAtk = equipped.reduce((a, b) => a + b.atk, 0);
   const gearDef = equipped.reduce((a, b) => a + b.def, 0);
@@ -436,10 +446,10 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
   const upgLuck = (profile.upg_luck || 0) * 4;
   const upgCrit = (profile.upg_crit || 0) * 2;
 
-  const bonusAtk = (profile.bonus_atk || 0) + activeSpec.bonusAtk + evolAtkBonus;
-  const bonusDef = (profile.bonus_def || 0) + activeSpec.bonusDef;
-  const bonusHp = (profile.bonus_hp || 0) + activeSpec.bonusHp;
-  const bonusLuck = (profile.bonus_luck || 0) + activeSpec.bonusLuck + evolLuckBonus;
+  const bonusAtk = (profile.bonus_atk || 0) + activeSpec.bonusAtk + evolAtkBonus + (allyBonus.atk || 0);
+  const bonusDef = (profile.bonus_def || 0) + activeSpec.bonusDef + (allyBonus.def || 0);
+  const bonusHp = (profile.bonus_hp || 0) + activeSpec.bonusHp + (allyBonus.hp || 0);
+  const bonusLuck = (profile.bonus_luck || 0) + activeSpec.bonusLuck + evolLuckBonus + (allyBonus.luck || 0);
 
   const buffLuck = (profile.luck_buff_charges || 0) > 0 ? profile.luck_buff_amount || 0 : 0;
   const levelAtk = lvlInfo.heroLevel - 1;
@@ -450,8 +460,8 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
   const def = cls.def + upgDef + gearDef + studyBonuses.studyDef + bonusDef;
   const maxHp = cls.hp + levelHp + upgHp + gearHp + studyBonuses.studyHp + bonusHp;
   const luck = cls.luck + upgLuck + gearLuck + bonusLuck + studyBonuses.streakLuck + studyBonuses.feverLuck + buffLuck;
-  const critPct = Math.min(80, cls.crit + upgCrit + gearCrit + activeSpec.bonusCrit + studyBonuses.purityCrit);
-  const dodgePct = Math.min(40, Math.round(studyBonuses.purityDodge + Math.min(12, luck * 0.15)));
+  const critPct = Math.min(85, cls.crit + upgCrit + gearCrit + activeSpec.bonusCrit + studyBonuses.purityCrit + (allyBonus.crit || 0));
+  const dodgePct = Math.min(45, Math.round(studyBonuses.purityDodge + Math.min(12, luck * 0.15)));
 
   const affinity = parseJsonSafe(profile.npc_affinity_json, { rowan: 0, bram: 0, lyra: 0, pip: 0 });
   const intuition = Math.max(
@@ -469,6 +479,8 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
     activeSpecialization: activeSpec,
     specializations: classSpecs,
     companionEvolution,
+    activeAllyId: activeAlly?.id || null,
+    activeAllyName: activeAlly?.name || null,
     maxHp,
     hp: Math.max(0, Math.min(maxHp, profile.hp)),
     atk,
@@ -501,7 +513,7 @@ function trimBackpackIfNeeded(db, userId) {
   const unequipped = db
     .prepare(
       `SELECT id, rarity FROM game_items WHERE user_id = ? AND equipped = 0
-       ORDER BY CASE rarity WHEN 'common' THEN 1 WHEN 'uncommon' THEN 2 WHEN 'rare' THEN 3 WHEN 'epic' THEN 4 ELSE 5 END ASC, id ASC`
+       ORDER BY CASE rarity WHEN 'common' THEN 1 WHEN 'uncommon' THEN 2 WHEN 'rare' THEN 3 WHEN 'epic' THEN 4 WHEN 'legendary' THEN 5 ELSE 6 END ASC, id ASC`
     )
     .all(userId);
   if (unequipped.length <= 40) return;
@@ -587,7 +599,7 @@ function insertLootSpec(db, userId, spec) {
     INSERT INTO game_items (user_id, slot, name, icon, sprite_key, rarity, affix, level, upgrade_level, atk, def, hp, luck, crit, equipped, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0, ?)
   `).run(userId, spec.slot, spec.name, spec.icon, spec.spriteKey, spec.rarity, spec.affix, spec.level, spec.atk, spec.def, spec.hp, spec.luck, spec.crit, now);
-  if (spec.rarity === 'legendary') {
+  if (spec.rarity === 'legendary' || spec.rarity === 'mythic') {
     db.prepare('UPDATE game_profiles SET legendaries_found = legendaries_found + 1 WHERE user_id = ?').run(userId);
   }
   trimBackpackIfNeeded(db, userId);
@@ -655,7 +667,7 @@ export function buildGameState(db, user, userStats) {
   const rawItems = db
     .prepare(
       `SELECT * FROM game_items WHERE user_id = ?
-       ORDER BY equipped DESC, CASE rarity WHEN 'legendary' THEN 5 WHEN 'epic' THEN 4 WHEN 'rare' THEN 3 WHEN 'uncommon' THEN 2 ELSE 1 END DESC, id DESC`
+       ORDER BY equipped DESC, CASE rarity WHEN 'mythic' THEN 6 WHEN 'legendary' THEN 5 WHEN 'epic' THEN 4 WHEN 'rare' THEN 3 WHEN 'uncommon' THEN 2 ELSE 1 END DESC, id DESC`
     )
     .all(user.id);
   const studyBonuses = computeStudyBonuses(user, userStats);
@@ -674,6 +686,55 @@ export function buildGameState(db, user, userStats) {
   const affinity = parseJsonSafe(profile.npc_affinity_json, { rowan: 0, bram: 0, lyra: 0, pip: 0 });
   const quests = parseJsonSafe(profile.active_quests_json, []);
   const dungeon = profile.mode === 'dungeon' ? parseJsonSafe(profile.dungeon_state_json, null) : null;
+
+  const recruitedAllies = Array.isArray(flags.recruitedAllies) ? flags.recruitedAllies : [];
+  const activeAllyId = recruitedAllies.includes(flags.activeAllyId) ? flags.activeAllyId : recruitedAllies[0] || null;
+  const allies = PARTY_ALLIES.map((a) => {
+    const recruited = recruitedAllies.includes(a.id);
+    const active = a.id === activeAllyId && recruited;
+    const freeByReq =
+      a.recruitCostShards === 0 ||
+      (a.recruitNpcId && (affinity[a.recruitNpcId] || 0) >= (a.recruitTrustReq || 10)) ||
+      (a.recruitFloorReq && profile.best_floor >= a.recruitFloorReq);
+    return {
+      ...a,
+      recruited,
+      active,
+      canRecruitFree: freeByReq,
+      effectiveShardCost: freeByReq ? 0 : a.recruitCostShards,
+    };
+  });
+  const activeAlly = allies.find((a) => a.active) || null;
+
+  const sideStoriesState = flags.sideStories && typeof flags.sideStories === 'object' ? flags.sideStories : {};
+  const mythicSideStories = MYTHIC_SIDE_STORIES.map((st) => {
+    const prog = sideStoriesState[st.id] || { actIndex: 0, choices: [], completed: false };
+    const actIdx = Math.min(st.acts.length, Number(prog.actIndex || 0));
+    const completed = Boolean(prog.completed) || actIdx >= st.acts.length;
+    const currentAct = completed ? null : st.acts[actIdx];
+    return {
+      ...st,
+      actIndex: actIdx,
+      totalActs: st.acts.length,
+      completed,
+      choicesTaken: Array.isArray(prog.choices) ? prog.choices : [],
+      currentAct,
+    };
+  });
+
+  const deedStats = flags.deedStats && typeof flags.deedStats === 'object' ? flags.deedStats : {};
+  const claimedDeeds = Array.isArray(flags.claimedDeeds) ? flags.claimedDeeds : [];
+  const heroicDeeds = HEROIC_DEEDS.map((d) => {
+    const progress = Math.min(d.target, Number(deedStats[d.statKey] || 0));
+    const completed = progress >= d.target;
+    const claimed = claimedDeeds.includes(d.id);
+    return {
+      ...d,
+      progress,
+      completed,
+      claimed,
+    };
+  });
 
   const chapterNum = profile.story_chapter || 1;
   const chapters = STORY_CHAPTERS.map((c) => ({
@@ -765,6 +826,11 @@ export function buildGameState(db, user, userStats) {
       },
     },
     heroStats,
+    party: {
+      activeAllyId,
+      activeAlly,
+      allies,
+    },
     biome: getBiomeForFloor(dungeon ? dungeon.floor : profile.floor),
     village: {
       x: profile.village_x ?? 4,
@@ -785,6 +851,8 @@ export function buildGameState(db, user, userStats) {
       loreCodex,
       sideQuestsAvailable: SIDE_QUESTS,
       bountiesAvailable: BOUNTY_DEFINITIONS,
+      mythicSideStories,
+      heroicDeeds,
     },
     items,
     equippedBySlot,
@@ -1233,6 +1301,7 @@ export function dungeonMove(db, user, userStats, dx, dy) {
     } else if (ent.type === 'monster' || ent.type === 'boss') {
       const cycle = ent.cycle || ['STRIKE', 'HEAVY', 'SHELL'];
       const intent = cycle[0];
+      const maxShields = ent.type === 'boss' ? 3 : 2;
       encounter = {
         type: 'combat',
         entityId: ent.id,
@@ -1251,14 +1320,24 @@ export function dungeonMove(db, user, userStats, dx, dy) {
           intentIndex: 0,
           intent,
           intentValue: computeIntentValue(ent, intent, dungeon.floor),
+          shields: maxShields,
+          maxShields,
           stunned: false,
           vulnerableTurns: 0,
           armorBrokenTurns: 0,
           atkBonus: 0,
         },
-        heroStatuses: { poisonTurns: 0, poisonDmg: 0 },
+        heroStatuses: {
+          poisonTurns: 0,
+          poisonDmg: 0,
+          flankingTurns: 0,
+          evasionActive: false,
+          allyWardTurns: 0,
+          allyCooldown: 0,
+          comboChain: 0,
+        },
       };
-      logLines.push(`${ent.type === 'boss' ? '👑 BOSS BATTLE:' : '⚔️ Encountered'} ${ent.name}!`);
+      logLines.push(`${ent.type === 'boss' ? '👑 BOSS BATTLE:' : '⚔️ Encountered'} ${ent.name} (${maxShields}🛡️ Guard Shields)!`);
     }
   }
 
@@ -1429,17 +1508,53 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
   const heroStats = computeHeroStats(profile, rawItems, studyBonuses);
   const affinity = parseJsonSafe(profile.npc_affinity_json, {});
   const lyraTrusted = (affinity.lyra || 0) >= 25;
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const deedStats = flags.deedStats && typeof flags.deedStats === 'object' ? { ...flags.deedStats } : {};
+  const recruitedAllies = Array.isArray(flags.recruitedAllies) ? flags.recruitedAllies : [];
+  const activeAlly = PARTY_ALLIES.find((a) => a.id === flags.activeAllyId && recruitedAllies.includes(a.id)) || null;
+  const hasMythicWeapon = rawItems.some((i) => i.slot === 'weapon' && i.rarity === 'mythic');
+  const hasMythicArmor = rawItems.some((i) => i.slot === 'armor' && i.rarity === 'mythic');
+  const hasMythicCharm = rawItems.some((i) => i.slot === 'charm' && i.rarity === 'mythic');
 
   let heroHp = heroStats.hp;
   let focusCharge = profile.focus_charge;
   let potions = profile.potions;
-  const enemy = { ...encounter.enemy };
-  const heroStatuses = { poisonTurns: encounter.heroStatuses?.poisonTurns || 0, poisonDmg: encounter.heroStatuses?.poisonDmg || 0 };
+  const enemy = {
+    ...encounter.enemy,
+    maxShields: encounter.enemy?.maxShields || (encounter.isBoss ? 3 : 2),
+    shields: encounter.enemy?.shields !== undefined ? encounter.enemy.shields : (encounter.isBoss ? 3 : 2),
+  };
+  const heroStatuses = {
+    poisonTurns: encounter.heroStatuses?.poisonTurns || 0,
+    poisonDmg: encounter.heroStatuses?.poisonDmg || 0,
+    flankingTurns: encounter.heroStatuses?.flankingTurns || 0,
+    evasionActive: false,
+    allyWardTurns: encounter.heroStatuses?.allyWardTurns || 0,
+    allyCooldown: Math.max(0, (encounter.heroStatuses?.allyCooldown || 0) - 1),
+    comboChain: encounter.heroStatuses?.comboChain || 0,
+  };
   const events = [];
   const logLines = [];
   let guarding = false;
   let potionWard = false;
+  let finisherBonusActive = false;
   let droppedItem = null;
+
+  const damageEnemyShields = (count) => {
+    if (count <= 0 || enemy.shields <= 0) return 0;
+    const broken = Math.min(enemy.shields, count);
+    enemy.shields = Math.max(0, enemy.shields - broken);
+    deedStats.shieldsBroken = (deedStats.shieldsBroken || 0) + broken;
+    if (enemy.shields === 0) {
+      enemy.stunned = true;
+      enemy.vulnerableTurns = Math.max(enemy.vulnerableTurns || 0, 2);
+      enemy.armorBrokenTurns = Math.max(enemy.armorBrokenTurns || 0, 2);
+      focusCharge = Math.min(100, focusCharge + 20);
+      events.push({ kind: 'crit', target: 'enemy', text: '💥 BROKEN!' });
+      logLines.push(`💥 GUARD SHATTERED! ${enemy.name} is BROKEN (+50% DMG taken & Stunned)!`);
+    }
+    return broken;
+  };
 
   if (action === 'flee') {
     if (dungeon && encounter.entityId) {
@@ -1455,57 +1570,160 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
 
   // Player Turn Resolution against Enemy Intent
   if (action === 'attack') {
-    if (enemy.intent === 'SHELL' && !enemy.stunned) {
+    const isFlanking = heroStatuses.flankingTurns > 0;
+    if (enemy.intent === 'SHELL' && !enemy.stunned && !isFlanking) {
       const chip = Math.max(1, Math.round(heroStats.atk * 0.25));
       const recoil = Math.max(3, Math.round((enemy.atk + (enemy.atkBonus || 0)) * 0.45));
       enemy.hp = Math.max(0, enemy.hp - chip);
       heroHp = Math.max(1, heroHp - recoil);
       events.push({ kind: 'hit', target: 'enemy', value: chip, text: `SHELL -${chip}` });
       events.push({ kind: 'enemy_hit', target: 'hero', value: recoil, text: `THORNS -${recoil}` });
-      logLines.push(`🛡️ Clanked off ${enemy.name}’s Iron Shell (-${chip}) & took ${recoil} Thorns recoil! Use ⚡ Focus Break!`);
+      logLines.push(`🛡️ Clanked off ${enemy.name}’s Iron Shell (-${chip}) & took ${recoil} Thorns recoil! Use ⚡ Focus Break or 💨 Dash Flank!`);
     } else {
-      const vulnMult = enemy.vulnerableTurns > 0 ? 1.5 : 1.0;
-      const effDef = enemy.armorBrokenTurns > 0 ? enemy.def * 0.4 : enemy.def * 0.6;
-      const raw = heroStats.atk * (0.94 + Math.random() * 0.16) - effDef;
-      const isCrit = Math.random() * 100 < heroStats.critPct + heroStats.luck * 0.15;
-      const dmg = Math.max(3, Math.round(raw * vulnMult * (isCrit ? 1.7 : 1)));
+      const vulnMult = (enemy.vulnerableTurns > 0 ? 1.5 : 1.0) * (enemy.shields === 0 ? 1.2 : 1.0);
+      const effDef = enemy.armorBrokenTurns > 0 || isFlanking ? enemy.def * 0.3 : enemy.def * 0.6;
+      const raw = heroStats.atk * (0.95 + Math.random() * 0.14) - effDef;
+      const isCrit = isFlanking || Math.random() * 100 < heroStats.critPct + heroStats.luck * 0.15;
+      const flankMult = isFlanking ? 1.25 : 1.0;
+      const dmg = Math.max(4, Math.round(raw * vulnMult * flankMult * (isCrit ? 1.75 : 1)));
       enemy.hp = Math.max(0, enemy.hp - dmg);
-      focusCharge = Math.min(100, focusCharge + 25);
-      events.push({ kind: isCrit ? 'crit' : 'hit', target: 'enemy', value: dmg, text: isCrit ? `CRIT ${dmg}!` : `-${dmg}` });
-      logLines.push(`⚔️ ${isCrit ? 'CRITICAL' : 'Strike'} dealt ${dmg} DMG${vulnMult > 1 ? ' (Vulnerable!)' : ''}.`);
+      focusCharge = Math.min(100, focusCharge + (isFlanking ? 30 : 25));
+      heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 1;
+
+      if (isFlanking) {
+        heroStatuses.flankingTurns = Math.max(0, heroStatuses.flankingTurns - 1);
+        events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `⚡ FLANK CRIT ${dmg}!` });
+        logLines.push(`⚡ FLANKING BACKSTAB dealt ${dmg} critical DMG & bypassed armor!`);
+        damageEnemyShields(hasMythicWeapon ? 2 : 1);
+      } else {
+        events.push({ kind: isCrit ? 'crit' : 'hit', target: 'enemy', value: dmg, text: isCrit ? `CRIT ${dmg}!` : `-${dmg}` });
+        logLines.push(`⚔️ ${isCrit ? 'CRITICAL' : 'Strike'} dealt ${dmg} DMG${vulnMult > 1 ? ' (Broken/Vulnerable!)' : ''}.`);
+        if (isCrit && hasMythicWeapon) {
+          damageEnemyShields(1);
+        }
+      }
       if (isCrit && enemy.intent === 'RITUAL' && !enemy.stunned) {
         enemy.stunned = true;
         enemy.vulnerableTurns = 2;
         logLines.push('⚡ Critical Strike INTERRUPTED Dark Ritual!');
       }
     }
+  } else if (action === 'dash') {
+    heroStatuses.flankingTurns = 2;
+    heroStatuses.evasionActive = true;
+    heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 1;
+    deedStats.dashesUsed = (deedStats.dashesUsed || 0) + 1;
+    const chargeBonus = hasMythicCharm ? 28 : 18;
+    focusCharge = Math.min(100, focusCharge + chargeBonus);
+    const chipDmg = Math.max(3, Math.round(heroStats.atk * 0.45));
+    enemy.hp = Math.max(0, enemy.hp - chipDmg);
+    events.push({ kind: 'dodge', target: 'hero', text: '💨 FLANKING!' });
+    events.push({ kind: 'hit', target: 'enemy', value: chipDmg, text: `FEINT -${chipDmg}` });
+    logLines.push(`💨 Tactical Sidestep! Dealt ${chipDmg} feint cut, gained +45% Evasion & entered FLANKING STANCE (next strike Guaranteed Crit + Shield Break)!`);
   } else if (action === 'skill') {
     if (focusCharge < 40) throw new Error('Need 40% Focus Charge for Focus Break!');
     focusCharge -= 40;
+    heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 1;
     const mageMult = profile.hero_class === 'hero_mage' ? 1.15 : 1.0;
-    const vulnMult = enemy.vulnerableTurns > 0 ? 1.45 : 1.0;
+    const vulnMult = (enemy.vulnerableTurns > 0 ? 1.45 : 1.0) * (heroStatuses.flankingTurns > 0 ? 1.2 : 1.0);
+    if (heroStatuses.flankingTurns > 0) heroStatuses.flankingTurns--;
+
     if (enemy.intent === 'SHELL' && !enemy.stunned) {
-      const dmg = Math.max(8, Math.round(heroStats.atk * 1.8 * mageMult));
+      const dmg = Math.max(9, Math.round(heroStats.atk * 1.85 * mageMult));
       enemy.hp = Math.max(0, enemy.hp - dmg);
       enemy.stunned = true;
       enemy.armorBrokenTurns = 2;
       events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `SHATTER -${dmg}!` });
       logLines.push(`💥 SHATTERED ${enemy.name}’s Iron Shell for ${dmg} DMG! Enemy STUNNED!`);
+      damageEnemyShields(2);
     } else if (enemy.intent === 'RITUAL' && !enemy.stunned) {
-      const dmg = Math.max(8, Math.round(heroStats.atk * 1.65 * mageMult));
+      const dmg = Math.max(9, Math.round(heroStats.atk * 1.7 * mageMult));
       enemy.hp = Math.max(0, enemy.hp - dmg);
       enemy.stunned = true;
       enemy.vulnerableTurns = 2;
       events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `INTERRUPT -${dmg}!` });
       logLines.push(`⚡ INTERRUPTED Dark Ritual for ${dmg} DMG! Enemy STUNNED & Vulnerable!`);
+      damageEnemyShields(2);
     } else {
-      const dmg = Math.max(7, Math.round(heroStats.atk * 1.6 * mageMult * vulnMult));
+      const dmg = Math.max(8, Math.round(heroStats.atk * 1.65 * mageMult * vulnMult));
       enemy.hp = Math.max(0, enemy.hp - dmg);
       events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `BREAK -${dmg}` });
-      logLines.push(`✨ Focus Break pierced armor for ${dmg} DMG!`);
+      logLines.push(`✨ Focus Break pierced armor for ${dmg} DMG & cracked enemy guard!`);
+      damageEnemyShields(2);
     }
+  } else if (action === 'ally_skill') {
+    if (!activeAlly) throw new Error('Recruit & select a Party Ally in the Party tab first!');
+    if (heroStatuses.allyCooldown > 0) throw new Error(`${activeAlly.name} is recovering (ready next turn)!`);
+    heroStatuses.allyCooldown = 2;
+    heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 1;
+    deedStats.allyAssistsUsed = (deedStats.allyAssistsUsed || 0) + 1;
+    focusCharge = Math.min(100, focusCharge + 22);
+
+    if (activeAlly.id === 'ally_kaelen') {
+      const dmg = Math.max(7, Math.round(heroStats.atk * 1.25));
+      enemy.hp = Math.max(0, enemy.hp - dmg);
+      heroStatuses.allyWardTurns = 1;
+      events.push({ kind: 'parry', target: 'hero', text: '🛡️ KAELEN ASSIST!' });
+      events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `AEGIS -${dmg}!` });
+      logLines.push(`🛡️ Sir Kaelen unleashed Aegis Shieldbreaker for ${dmg} DMG & raised Vanguard Ward (+35% DEF)!`);
+      damageEnemyShields(2);
+    } else if (activeAlly.id === 'ally_lyra') {
+      const heal = Math.max(15, Math.round(heroStats.maxHp * 0.28));
+      const dmg = Math.max(5, Math.round(heroStats.atk * 0.95));
+      heroHp = Math.min(heroStats.maxHp, heroHp + heal);
+      heroStatuses.poisonTurns = 0;
+      enemy.hp = Math.max(0, enemy.hp - dmg);
+      enemy.vulnerableTurns = Math.max(enemy.vulnerableTurns || 0, 2);
+      events.push({ kind: 'heal', target: 'hero', value: heal, text: `🧪 LYRA +${heal} HP` });
+      events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `FLASK -${dmg}` });
+      logLines.push(`🧪 Lyra hurled a Starlight Flask: restored +${heal} HP, cleansed Venom, dealt ${dmg} DMG & inflicted Vulnerable!`);
+      damageEnemyShields(1);
+    } else if (activeAlly.id === 'ally_pip') {
+      const dmg = Math.max(7, Math.round(heroStats.atk * 1.2));
+      enemy.hp = Math.max(0, enemy.hp - dmg);
+      heroStatuses.flankingTurns = 2;
+      heroStatuses.evasionActive = true;
+      events.push({ kind: 'dodge', target: 'hero', text: '🏹 PIP GRAPNEL!' });
+      events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `ARROW -${dmg}!` });
+      logLines.push(`🏹 Pip fired Grappling Hook Flank for ${dmg} DMG & pulled you into Flanking Stance (+45% Dodge & Guaranteed Crit)!`);
+      damageEnemyShields(1);
+    } else {
+      // ally_vespera
+      const dmg = Math.max(8, Math.round(heroStats.atk * 1.25));
+      enemy.hp = Math.max(0, enemy.hp - dmg);
+      focusCharge = Math.min(100, focusCharge + 25);
+      events.push({ kind: 'secret', target: 'hero', text: '⏳ CHRONO +45%⚡' });
+      events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `STASIS -${dmg}!` });
+      logLines.push(`⏳ Vespera cast Chrono-Stasis Sigil for ${dmg} Astral DMG & surged +45% Focus Charge!`);
+      damageEnemyShields(2);
+    }
+  } else if (action === 'finisher') {
+    const canExecute = enemy.shields === 0 || enemy.hp <= Math.ceil(enemy.maxHp * 0.35);
+    if (focusCharge < 75 && !canExecute) {
+      throw new Error('Need 75% Focus Charge (or BROKEN / <35% HP enemy) for Ultimate Finisher!');
+    }
+    const cost = canExecute ? Math.min(focusCharge, 45) : 75;
+    focusCharge = Math.max(0, focusCharge - cost);
+    finisherBonusActive = true;
+    deedStats.finishersUsed = (deedStats.finishersUsed || 0) + 1;
+    heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 2;
+
+    const finisherTitle = activeAlly ? activeAlly.finisherName : 'Grand Archivist’s Astral Judgment';
+    const comboMult = 1 + Math.min(0.35, (heroStatuses.comboChain || 0) * 0.06) + (hasMythicCharm ? 0.15 : 0);
+    const dmg = Math.max(18, Math.round(heroStats.atk * 2.75 * comboMult));
+    enemy.hp = Math.max(0, enemy.hp - dmg);
+
+    if (activeAlly?.id === 'ally_lyra') {
+      const heal = Math.round(heroStats.maxHp * 0.2);
+      heroHp = Math.min(heroStats.maxHp, heroHp + heal);
+      events.push({ kind: 'heal', target: 'hero', value: heal, text: `+${heal} HP` });
+    }
+    damageEnemyShields(enemy.shields);
+    events.push({ kind: 'finisher', target: 'enemy', value: dmg, text: `🌟 ${finisherTitle.toUpperCase()} -${dmg}!` });
+    logLines.push(`🌟 ULTIMATE FINISHER [${finisherTitle}]! Unleashed a cinematic multi-hit strike for ${dmg} CRITICAL DMG!`);
   } else if (action === 'guard') {
     guarding = true;
+    deedStats.perfectParries = (deedStats.perfectParries || 0) + 1;
     const heal = Math.max(3, Math.round(heroStats.maxHp * 0.06));
     heroHp = Math.min(heroStats.maxHp, heroHp + heal);
     focusCharge = Math.min(100, focusCharge + (enemy.intent === 'HEAVY' ? 40 : 30));
@@ -1515,7 +1733,7 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     if (potions < 1) throw new Error('No Healing Potions left!');
     potions -= 1;
     potionWard = true;
-    const healRatio = lyraTrusted ? 0.75 : 0.55;
+    const healRatio = lyraTrusted || activeAlly?.id === 'ally_lyra' ? 0.75 : 0.55;
     const heal = Math.max(18, Math.round(heroStats.maxHp * healRatio));
     heroHp = Math.min(heroStats.maxHp, heroHp + heal);
     heroStatuses.poisonTurns = 0;
@@ -1528,12 +1746,14 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     enemy.hp = Math.max(0, enemy.hp - dmg);
     if (studyCastOpts.isCorrect) {
       focusCharge = Math.min(100, focusCharge + 15);
+      heroStatuses.comboChain = (heroStatuses.comboChain || 0) + 1;
       if (enemy.intent === 'SHELL' || enemy.intent === 'RITUAL') {
         enemy.stunned = true;
         enemy.vulnerableTurns = 2;
       }
       events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `RECALL CRIT -${dmg}!` });
       logLines.push(`📖 Study Cast [${studyCastOpts.conceptTitle || 'Vault'}]: Answered right! Dealt ${dmg} Arcane DMG!`);
+      damageEnemyShields(1);
     } else {
       events.push({ kind: 'hit', target: 'enemy', value: dmg, text: `SPARK -${dmg}` });
       logLines.push(`📖 Study Cast miss-spark dealt ${dmg} DMG — review "${studyCastOpts.conceptTitle || 'concept'}"!`);
@@ -1542,19 +1762,24 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     throw new Error('Invalid combat action.');
   }
 
+  flags.deedStats = deedStats;
+
   // Victory Handler
   if (enemy.hp <= 0) {
     const isBoss = Boolean(encounter.isBoss);
-    const xpMult = profile.hero_class === 'hero_scholar' ? 1.1 : 1.0;
+    const xpMult = (profile.hero_class === 'hero_scholar' ? 1.1 : 1.0) * (finisherBonusActive ? 1.25 : 1.0);
     const heroXpGain = Math.round(enemy.xpReward * xpMult);
-    const shardsGain = enemy.shardReward + (isBoss ? Math.round(heroStats.luck * 0.35) : 0);
+    const baseShards = enemy.shardReward + (isBoss ? Math.round(heroStats.luck * 0.35) : 0);
+    const shardsGain = finisherBonusActive ? Math.round(baseShards * 1.35) : baseShards;
     const coinsGain = Math.max(4, Math.round((isBoss ? 18 : 6) + (dungeon?.floor || profile.floor) * 2));
+    if (finisherBonusActive) {
+      logLines.unshift(`🌟 FINISHER EXECUTION BONUS! +35% Shards (${shardsGain}✦) & +25% Hero XP (${heroXpGain} XP)!`);
+    }
 
-    let flags = parseJsonSafe(profile.story_flags_json, {});
     let quests = parseJsonSafe(profile.active_quests_json, []);
     quests = incrementBountyProgress(quests, 'bounty_slayer', 1);
 
-    const dropChance = isBoss ? 1.0 : Math.min(0.9, 0.45 + heroStats.luck * 0.0055);
+    const dropChance = isBoss ? 1.0 : Math.min(0.92, 0.45 + heroStats.luck * 0.0055 + (finisherBonusActive ? 0.15 : 0));
     const curFloor = dungeon ? dungeon.floor : profile.floor;
     if (Math.random() < dropChance) {
       const spec = rollLootSpec(curFloor, heroStats.luck, { minRarity: isBoss ? 'rare' : undefined });
@@ -1585,7 +1810,7 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
 
     const nextBest = isBoss ? Math.max(profile.best_floor, curFloor + 1) : profile.best_floor;
     const nextFloor = isBoss ? curFloor + 1 : curFloor;
-    const nextLogs = appendLogs(profile, logLines.slice(0, 3));
+    const nextLogs = appendLogs(profile, logLines.slice(0, 4));
 
     db.prepare(`
       UPDATE game_profiles
@@ -1618,20 +1843,28 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     return { game: buildGameState(db, user, userStats), events, droppedItem };
   }
 
-  // Enemy Turn (Respects Stun, Heavy Parry, Ritual, Hex)
+  // Enemy Turn (Respects Stun, Heavy Parry, Sidestep Evasion, Ritual, Hex)
   const darkBonus = dungeon && dungeon.torch < 25 ? 1.25 : 1.0;
+  const wardMult = heroStatuses.allyWardTurns > 0 ? 0.65 : 1.0;
+  if (heroStatuses.allyWardTurns > 0) heroStatuses.allyWardTurns--;
+
   if (enemy.stunned) {
     enemy.stunned = false;
+    if (enemy.shields === 0) {
+      enemy.shields = enemy.maxShields;
+    }
     events.push({ kind: 'secret', target: 'enemy', text: 'STUNNED!' });
     logLines.push(`💫 ${enemy.name} is STUNNED and loses its turn!`);
   } else {
     const intent = enemy.intent;
     const effAtk = (enemy.atk + (enemy.atkBonus || 0)) * darkBonus;
+    const effectiveDodgePct = Math.min(80, heroStats.dodgePct + (heroStatuses.evasionActive ? 45 : 0));
 
     if (intent === 'HEAVY') {
       if (guarding) {
-        const enemyDmg = Math.max(1, Math.round(effAtk * 2.1 * 0.15));
-        const riposte = Math.max(5, Math.round(heroStats.atk * 0.8));
+        const enemyDmg = Math.max(1, Math.round(effAtk * 2.1 * 0.15 * wardMult));
+        const riposteMult = hasMythicArmor ? 1.2 : 0.85;
+        const riposte = Math.max(6, Math.round(heroStats.atk * riposteMult));
         heroHp = Math.max(0, heroHp - enemyDmg);
         enemy.hp = Math.max(0, enemy.hp - riposte);
         enemy.stunned = true;
@@ -1639,13 +1872,19 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
         events.push({ kind: 'parry', target: 'hero', text: 'PERFECT PARRY!' });
         events.push({ kind: 'crit', target: 'enemy', value: riposte, text: `RIPOSTE -${riposte}` });
         logLines.push(`⚔️ PERFECT PARRY! Blunted Crushing Blow (-${enemyDmg} HP), STUNNED foe & countered for ${riposte}!`);
+        damageEnemyShields(hasMythicArmor ? 2 : 1);
       } else {
-        const dodged = Math.random() * 100 < heroStats.dodgePct;
+        const dodged = Math.random() * 100 < effectiveDodgePct;
         if (dodged) {
-          events.push({ kind: 'dodge', target: 'hero', text: 'DODGE!' });
-          logLines.push(`💨 Barely dodged ${enemy.name}’s Crushing Blow!`);
+          const counter = heroStatuses.evasionActive ? Math.max(4, Math.round(heroStats.atk * 0.6)) : 0;
+          if (counter > 0) {
+            enemy.hp = Math.max(0, enemy.hp - counter);
+            events.push({ kind: 'crit', target: 'enemy', value: counter, text: `COUNTER -${counter}` });
+          }
+          events.push({ kind: 'dodge', target: 'hero', text: heroStatuses.evasionActive ? '💨 SIDESTEP!' : 'DODGE!' });
+          logLines.push(`💨 Sidestepped ${enemy.name}’s Crushing Blow${counter > 0 ? ` & countered for ${counter} DMG` : ''}!`);
         } else {
-          const red = potionWard ? 0.6 : 1.0;
+          const red = (potionWard ? 0.6 : 1.0) * wardMult;
           const enemyDmg = Math.max(3, Math.round((effAtk * 2.1 - heroStats.def * 0.5) * red));
           heroHp = Math.max(0, heroHp - enemyDmg);
           events.push({ kind: 'enemy_hit', target: 'hero', value: enemyDmg, text: `CRUSH -${enemyDmg}` });
@@ -1657,27 +1896,45 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + healAmt);
       enemy.atkBonus = (enemy.atkBonus || 0) + 4;
       events.push({ kind: 'enemy_hit', target: 'enemy', text: `+${healAmt} HP & +4 ATK` });
-      logLines.push(`🩸 ${enemy.name} finished Dark Ritual (+${healAmt} HP & +4 ATK)! Should have interrupted with ⚡ Focus Break!`);
+      logLines.push(`🩸 ${enemy.name} finished Dark Ritual (+${healAmt} HP & +4 ATK)! Interrupt with ⚡ Focus Break!`);
     } else if (intent === 'HEX') {
-      const dmgRed = guarding ? 0.35 : potionWard ? 0.6 : 1.0;
-      const dmg = Math.max(1, Math.round((effAtk * 0.8 - heroStats.def * 0.4) * dmgRed));
-      heroHp = Math.max(0, heroHp - dmg);
-      events.push({ kind: 'enemy_hit', target: 'hero', value: dmg, text: `-${dmg}` });
-      if (guarding) {
-        logLines.push(`🛡️ Warded off ${enemy.name}’s Venom Hex (-${dmg} HP)!`);
+      const dodged = !guarding && heroStatuses.evasionActive && Math.random() * 100 < effectiveDodgePct;
+      if (dodged) {
+        events.push({ kind: 'dodge', target: 'hero', text: '💨 EVADED HEX!' });
+        logLines.push(`💨 Dashed clear of ${enemy.name}’s Venom Hex!`);
       } else {
-        heroStatuses.poisonTurns = 3;
-        heroStatuses.poisonDmg = Math.max(3, Math.round(heroStats.maxHp * 0.07));
-        logLines.push(`☠️ Hexed! Took ${dmg} DMG + Venom (-${heroStatuses.poisonDmg}/turn)!`);
+        const dmgRed = (guarding ? 0.35 : potionWard ? 0.6 : 1.0) * wardMult;
+        const dmg = Math.max(1, Math.round((effAtk * 0.8 - heroStats.def * 0.4) * dmgRed));
+        heroHp = Math.max(0, heroHp - dmg);
+        events.push({ kind: 'enemy_hit', target: 'hero', value: dmg, text: `-${dmg}` });
+        if (guarding) {
+          logLines.push(`🛡️ Warded off ${enemy.name}’s Venom Hex (-${dmg} HP)!`);
+          damageEnemyShields(1);
+        } else {
+          heroStatuses.poisonTurns = 3;
+          heroStatuses.poisonDmg = Math.max(3, Math.round(heroStats.maxHp * 0.07));
+          logLines.push(`☠️ Hexed! Took ${dmg} DMG + Venom (-${heroStatuses.poisonDmg}/turn)!`);
+        }
       }
     } else {
       // STRIKE or SHELL light hit
-      const mult = intent === 'SHELL' ? 0.6 : 1.0;
-      const dmgRed = guarding ? 0.4 : potionWard ? 0.6 : 1.0;
-      const dmg = Math.max(1, Math.round((effAtk * mult - heroStats.def * 0.55) * dmgRed));
-      heroHp = Math.max(0, heroHp - dmg);
-      events.push({ kind: 'enemy_hit', target: 'hero', value: dmg, text: `-${dmg}` });
-      logLines.push(`💥 ${enemy.name} struck for ${dmg} DMG.`);
+      const dodged = !guarding && Math.random() * 100 < effectiveDodgePct;
+      if (dodged) {
+        const counter = heroStatuses.evasionActive ? Math.max(4, Math.round(heroStats.atk * 0.55)) : 0;
+        if (counter > 0) {
+          enemy.hp = Math.max(0, enemy.hp - counter);
+          events.push({ kind: 'crit', target: 'enemy', value: counter, text: `COUNTER -${counter}` });
+        }
+        events.push({ kind: 'dodge', target: 'hero', text: heroStatuses.evasionActive ? '💨 SIDESTEP!' : 'DODGE!' });
+        logLines.push(`💨 Evaded ${enemy.name}’s strike${counter > 0 ? ` & sliced back for ${counter} DMG` : ''}!`);
+      } else {
+        const mult = intent === 'SHELL' ? 0.6 : 1.0;
+        const dmgRed = (guarding ? 0.4 : potionWard ? 0.6 : 1.0) * wardMult;
+        const dmg = Math.max(1, Math.round((effAtk * mult - heroStats.def * 0.55) * dmgRed));
+        heroHp = Math.max(0, heroHp - dmg);
+        events.push({ kind: 'enemy_hit', target: 'hero', value: dmg, text: `-${dmg}` });
+        logLines.push(`💥 ${enemy.name} struck for ${dmg} DMG.`);
+      }
     }
   }
 
@@ -1688,9 +1945,8 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     events.push({ kind: 'trap', target: 'hero', value: heroStatuses.poisonDmg, text: `VENOM -${heroStatuses.poisonDmg}` });
   }
 
-  // Check if Riposte Killed Enemy
+  // Check if Riposte or Sidestep Counter Killed Enemy
   if (enemy.hp <= 0) {
-    // Re-enter clean defeat branch by running simplified victory
     const curFloor = dungeon ? dungeon.floor : profile.floor;
     const isBoss = Boolean(encounter.isBoss);
     const coinsGain = Math.max(4, Math.round((isBoss ? 18 : 6) + curFloor * 2));
@@ -1710,11 +1966,11 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
       droppedItem = insertLootSpec(db, user.id, spec);
       db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(coinsGain, user.id);
     }
-    const nextLogs = appendLogs(profile, [`⚡ Riposte finished ${enemy.name}! Looted ${spec.name}.`]);
+    const nextLogs = appendLogs(profile, [`⚡ Counter-Riposte finished ${enemy.name}! Looted ${spec.name}.`]);
     db.prepare(`
       UPDATE game_profiles SET hp = ?, potions = ?, focus_charge = ?, monsters_slain = monsters_slain + 1,
-      dungeon_state_json = ?, active_encounter_json = NULL, last_log_json = ?, updated_at = ? WHERE user_id = ?
-    `).run(Math.max(1, heroHp), potions, focusCharge, dungeon ? JSON.stringify(dungeon) : profile.dungeon_state_json, nextLogs, Date.now(), user.id);
+      story_flags_json = ?, dungeon_state_json = ?, active_encounter_json = NULL, last_log_json = ?, updated_at = ? WHERE user_id = ?
+    `).run(Math.max(1, heroHp), potions, focusCharge, JSON.stringify(flags), dungeon ? JSON.stringify(dungeon) : profile.dungeon_state_json, nextLogs, Date.now(), user.id);
     return { game: buildGameState(db, user, userStats), events, droppedItem };
   }
 
@@ -1730,9 +1986,9 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
     db.prepare(`
       UPDATE game_profiles
       SET mode = 'village', hp = ?, potions = ?, focus_charge = 50, shards = shards + ?,
-          dungeon_state_json = NULL, active_encounter_json = NULL, last_log_json = ?, updated_at = ?
+          story_flags_json = ?, dungeon_state_json = NULL, active_encounter_json = NULL, last_log_json = ?, updated_at = ?
       WHERE user_id = ?
-    `).run(reviveHp, potions, keptShards, nextLogs, Date.now(), user.id);
+    `).run(reviveHp, potions, keptShards, JSON.stringify(flags), nextLogs, Date.now(), user.id);
     events.push({ kind: 'defeat', target: 'hero', text: 'RESCUED!' });
     const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     return { game: buildGameState(db, refreshedUser, userStats), events, droppedItem: null };
@@ -1755,10 +2011,10 @@ export function resolveCombatAction(db, user, userStats, action, studyCastOpts =
   enemy.intentValue = computeIntentValue(enemy, nextIntent, dungeon?.floor || profile.floor);
 
   const updatedEncounter = { ...encounter, enemy, heroStatuses, turn: (encounter.turn || 1) + 1 };
-  const nextLogs = appendLogs(profile, logLines.slice(0, 3));
+  const nextLogs = appendLogs(profile, logLines.slice(0, 4));
   db.prepare(`
-    UPDATE game_profiles SET hp = ?, potions = ?, focus_charge = ?, active_encounter_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
-  `).run(heroHp, potions, focusCharge, JSON.stringify(updatedEncounter), nextLogs, Date.now(), user.id);
+    UPDATE game_profiles SET hp = ?, potions = ?, focus_charge = ?, story_flags_json = ?, active_encounter_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(heroHp, potions, focusCharge, JSON.stringify(flags), JSON.stringify(updatedEncounter), nextLogs, Date.now(), user.id);
 
   return { game: buildGameState(db, user, userStats), events, droppedItem: null };
 }
@@ -2262,5 +2518,245 @@ export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, g
     xpGain,
     coinsGain,
     shardsGain,
+  };
+}
+
+// ==========================================
+// PARTY RECRUITMENT, MYTHIC SIDE STORIES, HEROIC DEEDS & VANGUARD TRIAL
+// ==========================================
+
+export function managePartyAlly(db, user, userStats, { allyId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const ally = PARTY_ALLIES.find((a) => a.id === allyId);
+  if (!ally) throw new Error('Party ally not found');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const affinity = parseJsonSafe(profile.npc_affinity_json, {});
+  const recruited = new Set(Array.isArray(flags.recruitedAllies) ? flags.recruitedAllies : []);
+
+  let shardCost = 0;
+  let msg = '';
+  if (!recruited.has(ally.id)) {
+    const freeByReq =
+      ally.recruitCostShards === 0 ||
+      (ally.recruitNpcId && (affinity[ally.recruitNpcId] || 0) >= (ally.recruitTrustReq || 10)) ||
+      (ally.recruitFloorReq && profile.best_floor >= ally.recruitFloorReq);
+    shardCost = freeByReq ? 0 : ally.recruitCostShards;
+    if (profile.shards < shardCost) {
+      throw new Error(`Need ${shardCost} ✦ Arcane Shards (or ${ally.recruitReqLabel}) to recruit ${ally.name}!`);
+    }
+    recruited.add(ally.id);
+    msg = `🤝 Recruited ${ally.name} (${ally.title}) into your Vanguard Party! Unlocked Assist [${ally.skillName}] & Dual-Tech [${ally.finisherName}]!`;
+  } else {
+    msg = `🛡️ Set ${ally.name} as your Active Vanguard Party Ally!`;
+  }
+
+  flags.recruitedAllies = [...recruited];
+  flags.activeAllyId = ally.id;
+  const nextLogs = appendLogs(profile, [msg]);
+
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards - ?, hp = hp + ?, story_flags_json = ?, last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(shardCost, shardCost === 0 && !Array.isArray(flags.recruitedAllies) ? 10 : 0, JSON.stringify(flags), nextLogs, Date.now(), user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg,
+    events: [{ kind: 'secret', target: 'hero', text: `${ally.name.toUpperCase()} JOINED!` }],
+  };
+}
+
+export function advanceMythicSideStory(db, user, userStats, { storyId, choiceId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const story = MYTHIC_SIDE_STORIES.find((s) => s.id === storyId);
+  if (!story) throw new Error('Mythic side story not found');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const sideStories = flags.sideStories && typeof flags.sideStories === 'object' ? { ...flags.sideStories } : {};
+  const prog = sideStories[story.id] || { actIndex: 0, choices: [], completed: false };
+  if (prog.completed || prog.actIndex >= story.acts.length) {
+    throw new Error('This Mythic Side Story is already completed!');
+  }
+
+  const currentAct = story.acts[prog.actIndex];
+  const chosen = currentAct.choices.find((c) => c.id === choiceId) || currentAct.choices[0];
+  const nextActIndex = prog.actIndex + 1;
+  const isNowComplete = nextActIndex >= story.acts.length;
+
+  sideStories[story.id] = {
+    actIndex: nextActIndex,
+    choices: [...(Array.isArray(prog.choices) ? prog.choices : []), chosen.id],
+    completed: isNowComplete,
+  };
+  flags.sideStories = sideStories;
+
+  let shardsGain = chosen.shards || 25;
+  let xpGain = chosen.xp || 35;
+  let droppedItem = null;
+  const logLines = [`📖 ${story.title} (${currentAct.title}): ${chosen.outcome}`];
+  const events = [{ kind: 'secret', target: 'hero', text: isNowComplete ? '👑 MYTHIC FORGED!' : `ACT ${currentAct.act} COMPLETE` }];
+
+  if (isNowComplete) {
+    const deedStats = flags.deedStats && typeof flags.deedStats === 'object' ? { ...flags.deedStats } : {};
+    deedStats.mythicStoriesCompleted = (deedStats.mythicStoriesCompleted || 0) + 1;
+    flags.deedStats = deedStats;
+
+    droppedItem = insertLootSpec(db, user.id, {
+      ...story.mythicReward,
+      level: Math.max(story.mythicReward.level || 5, profile.best_floor),
+    });
+    // Automatically equip the newly forged Mythic Relic if the player prefers or leave ready in inventory and equip if slot is common
+    const curEquipped = db
+      .prepare('SELECT id, rarity FROM game_items WHERE user_id = ? AND slot = ? AND equipped = 1')
+      .get(user.id, story.mythicReward.slot);
+    if (!curEquipped || curEquipped.rarity !== 'mythic') {
+      db.prepare('UPDATE game_items SET equipped = 0 WHERE user_id = ? AND slot = ?').run(user.id, story.mythicReward.slot);
+      db.prepare('UPDATE game_items SET equipped = 1 WHERE id = ? AND user_id = ?').run(droppedItem.id, user.id);
+      droppedItem.equipped = true;
+    }
+    logLines.unshift(`👑 MYTHIC RELIC FORGED & EQUIPPED: [${story.mythicReward.name}] (${story.mythicReward.passiveDesc})!`);
+  }
+
+  const nextLogs = appendLogs(profile, logLines);
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards + ?, hero_xp = hero_xp + ?, story_flags_json = ?, last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(shardsGain, xpGain, JSON.stringify(flags), nextLogs, Date.now(), user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    droppedItem,
+    message: logLines[0],
+    events,
+  };
+}
+
+export function claimHeroicDeed(db, user, userStats, { deedId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const deed = HEROIC_DEEDS.find((d) => d.id === deedId);
+  if (!deed) throw new Error('Heroic deed not found');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const deedStats = flags.deedStats && typeof flags.deedStats === 'object' ? flags.deedStats : {};
+  const claimedDeeds = new Set(Array.isArray(flags.claimedDeeds) ? flags.claimedDeeds : []);
+
+  if (claimedDeeds.has(deed.id)) throw new Error('Heroic deed already claimed');
+  const progress = Number(deedStats[deed.statKey] || 0);
+  if (progress < deed.target) {
+    throw new Error(`Complete deed first (${progress}/${deed.target})!`);
+  }
+
+  claimedDeeds.add(deed.id);
+  flags.claimedDeeds = [...claimedDeeds];
+
+  const r = deed.reward;
+  db.prepare('UPDATE users SET coins = coins + ?, title = ? WHERE id = ?').run(r.coins || 0, deed.heroTitle, user.id);
+  const msg = `🏅 Claimed Heroic Deed [${deed.title}]! +${r.shards}✦, +${r.coins}🪙, ${deed.perkLabel}!`;
+  const nextLogs = appendLogs(profile, [msg]);
+
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards + ?,
+        bonus_atk = bonus_atk + ?,
+        bonus_def = bonus_def + ?,
+        bonus_hp = bonus_hp + ?,
+        bonus_luck = bonus_luck + ?,
+        hp = hp + ?,
+        story_flags_json = ?,
+        last_log_json = ?,
+        updated_at = ?
+    WHERE user_id = ?
+  `).run(
+    r.shards || 0,
+    r.bonusAtk || 0,
+    r.bonusDef || 0,
+    r.bonusHp || 0,
+    r.bonusLuck || 0,
+    r.bonusHp || 0,
+    JSON.stringify(flags),
+    nextLogs,
+    Date.now(),
+    user.id
+  );
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg,
+    events: [{ kind: 'loot', target: 'hero', text: `🏅 ${deed.heroTitle.toUpperCase()}!` }],
+  };
+}
+
+export function startVanguardTrial(db, user, userStats) {
+  const profile = ensureGameProfile(db, user.id);
+  if (profile.active_encounter_json) {
+    return { game: buildGameState(db, user, userStats), events: [] };
+  }
+
+  const floor = Math.max(1, profile.floor || 1);
+  const champions = [
+    { key: 'armor', name: 'Rune-Forged Sentinel', cycle: ['HEAVY', 'SHELL', 'STRIKE'] },
+    { key: 'wraith', name: 'Astral Chronowraith', cycle: ['HEX', 'RITUAL', 'HEAVY'] },
+    { key: 'golem', name: 'Obsidian Spire Golem', cycle: ['SHELL', 'HEAVY', 'STRIKE'] },
+  ];
+  const champ = champions[(floor + (profile.monsters_slain || 0)) % champions.length];
+  const maxHp = 48 + floor * 20;
+  const atk = 9 + floor * 3;
+  const def = 3 + floor;
+  const intent = champ.cycle[0];
+
+  const encounter = {
+    type: 'combat',
+    entityId: null,
+    isBoss: false,
+    turn: 1,
+    enemy: {
+      key: champ.key,
+      name: champ.name,
+      hp: maxHp,
+      maxHp,
+      atk,
+      def,
+      xpReward: 30 + floor * 10,
+      shardReward: 16 + floor * 5,
+      cycle: champ.cycle,
+      intentIndex: 0,
+      intent,
+      intentValue: computeIntentValue({ atk, atkBonus: 0 }, intent, floor),
+      shields: 2,
+      maxShields: 2,
+      stunned: false,
+      vulnerableTurns: 0,
+      armorBrokenTurns: 0,
+      atkBonus: 0,
+    },
+    heroStatuses: {
+      poisonTurns: 0,
+      poisonDmg: 0,
+      flankingTurns: 0,
+      evasionActive: false,
+      allyWardTurns: 0,
+      allyCooldown: 0,
+      comboChain: 0,
+    },
+  };
+
+  const msg = `⚔️ Entered the Vanguard Trial Arena against ${champ.name} (2🛡️ Guard Shields)! Test your Dash Flank, Ally Assist & Ultimate Finisher!`;
+  const nextLogs = appendLogs(profile, [msg]);
+  db.prepare(`
+    UPDATE game_profiles
+    SET active_encounter_json = ?, focus_charge = MAX(focus_charge, 75), last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(JSON.stringify(encounter), nextLogs, Date.now(), user.id);
+
+  return {
+    game: buildGameState(db, user, userStats),
+    message: msg,
+    events: [{ kind: 'step', target: 'hero', text: 'VANGUARD TRIAL!' }],
   };
 }

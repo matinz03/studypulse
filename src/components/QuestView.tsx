@@ -57,7 +57,9 @@ interface QuestViewProps {
   onDungeonTorch: () => Promise<GameActionResponse>;
   onDungeonExtract: () => Promise<GameActionResponse>;
   onDungeonPuzzle: (optionIndex: number) => Promise<GameActionResponse>;
-  onCombatAction: (action: 'attack' | 'skill' | 'guard' | 'potion' | 'flee') => Promise<GameActionResponse>;
+  onCombatAction: (
+    action: 'attack' | 'dash' | 'skill' | 'ally_skill' | 'finisher' | 'guard' | 'potion' | 'flee'
+  ) => Promise<GameActionResponse>;
   onEventChoice: (choice: string) => Promise<GameActionResponse>;
   onEquipItem: (itemId: number) => Promise<GameActionResponse>;
   onUpgradeItem: (itemId: number) => Promise<GameActionResponse>;
@@ -65,6 +67,10 @@ interface QuestViewProps {
   onUpgradeStat: (stat: 'atk' | 'vit' | 'luck' | 'crit') => Promise<GameActionResponse>;
   onSelectFloor: (floor: number) => Promise<GameActionResponse>;
   onSelectSpecialization?: (specKey: string) => Promise<GameActionResponse>;
+  onManagePartyAlly?: (allyId: string) => Promise<GameActionResponse>;
+  onAdvanceMythicStory?: (storyId: string, choiceId: string) => Promise<GameActionResponse>;
+  onClaimHeroicDeed?: (deedId: string) => Promise<GameActionResponse>;
+  onStartVanguardTrial?: () => Promise<GameActionResponse>;
   onStudyCast?: (payload: { cardId: number; selectedIndex?: number; grade?: number }) => Promise<GameActionResponse>;
   flashcards?: FlashcardItem[];
   onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
@@ -72,7 +78,7 @@ interface QuestViewProps {
   onGoToFocus: () => void;
 }
 
-type QuestSubTab = 'story' | 'gear' | 'upgrades' | 'store';
+type QuestSubTab = 'party' | 'story' | 'gear' | 'upgrades' | 'store';
 
 const RARITY_CLASS: Record<ItemRarity, string> = {
   common: 'rarity-common',
@@ -80,6 +86,7 @@ const RARITY_CLASS: Record<ItemRarity, string> = {
   rare: 'rarity-rare',
   epic: 'rarity-epic',
   legendary: 'rarity-legendary',
+  mythic: 'border-rose-500/80 bg-rose-500/15 text-rose-200 shadow-[0_0_16px_rgba(244,63,94,0.22)]',
 };
 
 const SLOT_LABELS: { slot: GearSlot; label: string; emptyIcon: string }[] = [
@@ -155,13 +162,17 @@ export function QuestView({
   onUpgradeStat,
   onSelectFloor,
   onSelectSpecialization,
+  onManagePartyAlly,
+  onAdvanceMythicStory,
+  onClaimHeroicDeed,
+  onStartVanguardTrial,
   onStudyCast,
   flashcards = [],
   onBuyShopItem,
   onRerollDailyShop,
   onGoToFocus,
 }: QuestViewProps) {
-  const [subTab, setSubTab] = useState<QuestSubTab>('story');
+  const [subTab, setSubTab] = useState<QuestSubTab>('party');
   const [busy, setBusy] = useState(false);
   const [activeNpcId, setActiveNpcId] = useState<string | null>(null);
   const [showVillagePad, setShowVillagePad] = useState(false);
@@ -184,10 +195,14 @@ export function QuestView({
 
   function playSfxForEvents(events: GameTurnEvent[] = [], dropped?: GameItem | null) {
     if (dropped) {
-      soundEngine.playPixelLoot(dropped.rarity);
+      soundEngine.playPixelLoot(dropped.rarity === 'mythic' ? 'legendary' : dropped.rarity);
       return;
     }
     for (const ev of events) {
+      if (ev.kind === 'finisher') {
+        soundEngine.playPixelCrit();
+        return;
+      }
       if (ev.kind === 'parry') {
         soundEngine.playPixelParry();
         return;
@@ -465,72 +480,177 @@ export function QuestView({
         {/* CONTEXT CONTROLS: Combat / Riddle / Chest / Shrine / Dungeon Nav / Village Hub */}
         {encounter?.type === 'combat' && encounter.enemy ? (
           <div className="space-y-2">
-            {/* Explicit Enemy Intent Banner */}
+            {/* Explicit Enemy Intent Banner + Guard Shields & Tactical Stance Bar */}
             {(() => {
               const intentKey = (encounter.enemy.intent || 'STRIKE') as EnemyIntent;
               const guide = INTENT_GUIDE[intentKey] || INTENT_GUIDE.STRIKE;
+              const shields = encounter.enemy.shields ?? 0;
+              const maxShields = encounter.enemy.maxShields ?? (encounter.isBoss ? 3 : 2);
+              const flankingTurns = encounter.heroStatuses?.flankingTurns || 0;
+              const allyWardTurns = encounter.heroStatuses?.allyWardTurns || 0;
+              const allyCooldown = encounter.heroStatuses?.allyCooldown || 0;
+              const comboChain = encounter.heroStatuses?.comboChain || 0;
+              const activeAlly = game.party?.activeAlly || null;
+              const canExecuteFinisher =
+                profile.focusCharge >= 75 ||
+                shields === 0 ||
+                encounter.enemy.hp <= Math.ceil(encounter.enemy.maxHp * 0.35);
+
               return (
-                <div className={`p-2.5 rounded-2xl border ${guide.tone}`}>
-                  <div className="flex items-center justify-between gap-2 text-xs font-extrabold text-white">
-                    <span>{guide.title(encounter.enemy.intentValue)}</span>
-                    <span className="font-mono-num text-[10px]">
-                      HP {encounter.enemy.hp}/{encounter.enemy.maxHp}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-200 mt-0.5">{guide.advice}</div>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {encounter.enemy.stunned && <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💫 Stunned</span>}
-                    {(encounter.enemy.vulnerableTurns || 0) > 0 && (
-                      <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">🎯 Vulnerable (+50% DMG)</span>
-                    )}
-                    {(encounter.enemy.armorBrokenTurns || 0) > 0 && (
-                      <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💔 Armor Broken</span>
-                    )}
-                    {(encounter.heroStatuses?.poisonTurns || 0) > 0 && (
-                      <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold text-emerald-400">
-                        ☠️ Venom ({encounter.heroStatuses!.poisonTurns}t)
+                <>
+                  <div className={`p-2.5 rounded-2xl border ${guide.tone}`}>
+                    <div className="flex items-center justify-between gap-2 text-xs font-extrabold text-white">
+                      <span>{guide.title(encounter.enemy.intentValue)}</span>
+                      <span className="font-mono-num text-[10px]">
+                        HP {encounter.enemy.hp}/{encounter.enemy.maxHp}
                       </span>
-                    )}
+                    </div>
+                    <div className="text-[11px] text-slate-200 mt-0.5">{guide.advice}</div>
+                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                      {shields > 0 ? (
+                        <span className="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-400/50 text-sky-200 text-[10px] font-extrabold font-mono-num">
+                          🛡️ Guard Shields: {'🛡️'.repeat(shields)} ({shields}/{maxShields})
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-rose-500/25 border border-rose-400/70 text-amber-200 text-[10px] font-extrabold animate-pulse">
+                          💥 GUARD BROKEN! (+50% DMG & Finisher Ready!)
+                        </span>
+                      )}
+                      {encounter.enemy.stunned && (
+                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💫 Stunned</span>
+                      )}
+                      {(encounter.enemy.vulnerableTurns || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">🎯 Vulnerable (+50% DMG)</span>
+                      )}
+                      {(encounter.enemy.armorBrokenTurns || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💔 Armor Broken</span>
+                      )}
+                      {flankingTurns > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-[9px] font-extrabold">
+                          ⚡ Flanking ({flankingTurns}t: Next Strike Guaranteed Crit + -1🛡️)
+                        </span>
+                      )}
+                      {allyWardTurns > 0 && (
+                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold text-sky-300">
+                          🛡️ Vanguard Ward (+35% DEF)
+                        </span>
+                      )}
+                      {comboChain > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-200 text-[9px] font-extrabold font-mono-num">
+                          🔥 Combo ×{comboChain}
+                        </span>
+                      )}
+                      {(encounter.heroStatuses?.poisonTurns || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold text-emerald-400">
+                          ☠️ Venom ({encounter.heroStatuses!.poisonTurns}t)
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Primary Tactical Movements & Strikes Grid */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onCombatAction('attack'))}
+                      className="py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Swords className="w-3.5 h-3.5" />
+                      <span>{flankingTurns > 0 ? '⚡ Flank Backstab!' : 'Strike'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onCombatAction('dash'))}
+                      title="Tactical Sidestep: +45% Evasion, Feint Cut & enters Flanking Stance (next strike Guaranteed Crit & breaks 1 Shield)"
+                      className="py-2.5 px-3 rounded-xl sp-tab-active border border-cyan-400/45 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <span>💨 Dash Flank (+45% Dodge)</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || profile.focusCharge < 40}
+                      onClick={() => runAction(() => onCombatAction('skill'))}
+                      className="py-2.5 px-3 rounded-xl sp-tab-active border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Focus Break (40% · -2🛡️)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onCombatAction('guard'))}
+                      className="py-2.5 px-3 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Shield className="w-3.5 h-3.5" /> Parry & Ward
+                    </button>
+                  </div>
+
+                  {/* Party Ally Assist & Ultimate Dual-Tech Finisher Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {activeAlly ? (
+                      <button
+                        type="button"
+                        disabled={busy || allyCooldown > 0}
+                        onClick={() => runAction(() => onCombatAction('ally_skill'))}
+                        title={activeAlly.skillDesc}
+                        className="py-2.5 px-3 rounded-xl sp-tab-active border border-sky-400/50 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
+                      >
+                        <span>
+                          {activeAlly.skillIcon} {activeAlly.name}: {activeAlly.skillName}
+                          {allyCooldown > 0 ? ` (${allyCooldown}t)` : ''}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setSubTab('party');
+                          if (onManagePartyAlly) {
+                            runAction(() => onManagePartyAlly('ally_kaelen'));
+                          }
+                        }}
+                        className="py-2.5 px-3 rounded-xl sp-badge border border-dashed border-sky-400/50 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>🤝 Call Sir Kaelen (Free Party Recruit!)</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={busy || !canExecuteFinisher}
+                      onClick={() => runAction(() => onCombatAction('finisher'))}
+                      title={
+                        activeAlly
+                          ? `${activeAlly.finisherName}: ${activeAlly.finisherDesc}`
+                          : 'Unleash Ultimate Finisher (unlocked at 75% Focus Charge, when Enemy is BROKEN, or below 35% HP!)'
+                      }
+                      className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                        canExecuteFinisher
+                          ? 'bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white border border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.35)]'
+                          : 'sp-inset text-slate-400 opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <span>
+                        🌟 {activeAlly ? activeAlly.finisherName : 'Ultimate Finisher'}{' '}
+                        {canExecuteFinisher ? '(READY!)' : '(75%⚡ / Break)'}
+                      </span>
+                    </button>
+                  </div>
+                </>
               );
             })()}
 
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => runAction(() => onCombatAction('attack'))}
-                className="py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Swords className="w-3.5 h-3.5" /> Strike
-              </button>
-              <button
-                type="button"
-                disabled={busy || profile.focusCharge < 40}
-                onClick={() => runAction(() => onCombatAction('skill'))}
-                className="py-2.5 px-3 rounded-xl sp-tab-active border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
-              >
-                <Sparkles className="w-3.5 h-3.5" /> Focus Break (40%)
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => runAction(() => onCombatAction('guard'))}
-                className="py-2.5 px-3 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Shield className="w-3.5 h-3.5" /> Parry & Ward
-              </button>
+            <div className="flex gap-1.5">
               <button
                 type="button"
                 disabled={busy || profile.potions < 1}
                 onClick={() => runAction(() => onCombatAction('potion'))}
-                className="py-2.5 px-3 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
+                className="px-3 py-2 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-45"
               >
                 🧪 Potion ({profile.potions})
               </button>
-            </div>
-            <div className="flex gap-1.5">
               {onStudyCast && activeQuizCard && (
                 <button
                   type="button"
@@ -538,7 +658,7 @@ export function QuestView({
                   onClick={() => setShowStudyCast((v) => !v)}
                   className="flex-1 py-2 rounded-xl sp-tab-active border text-xs font-extrabold cursor-pointer flex items-center justify-center gap-1"
                 >
-                  📖 Study Cast (University Quiz 1.65x)
+                  📖 Study Cast (1.65x + -1🛡️)
                 </button>
               )}
               <button
@@ -824,28 +944,40 @@ export function QuestView({
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 disabled={busy || profile.energy < 2}
                 type="button"
                 onClick={() => runAction(() => onDungeonEnter(profile.floor))}
-                className="flex-1 py-3 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="flex-1 py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <Compass className="w-4 h-4" />
-                <span>
+                <Compass className="w-4 h-4 shrink-0" />
+                <span className="truncate">
                   {profile.energy < 2
-                    ? 'Need 2 ⚡ Study Energy'
-                    : `Enter Spire Floor ${profile.floor} (-2 ⚡)`}
+                    ? 'Need 2 ⚡ Energy'
+                    : `Spire Floor ${profile.floor} (-2 ⚡)`}
                 </span>
               </motion.button>
+              {onStartVanguardTrial && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => runAction(onStartVanguardTrial)}
+                  title="Enter a 0-Energy tactical arena battle to test your Party Allies, Dash Flank, Shield Break & Dual-Tech Finishers!"
+                  className="py-2.5 px-3 rounded-xl sp-tab-active border border-amber-400/50 text-xs font-extrabold flex items-center justify-center gap-1 cursor-pointer shrink-0"
+                >
+                  <Swords className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Trial Battle (0⚡)</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowVillagePad((v) => !v)}
-                className="px-3 py-3 rounded-xl sp-badge text-xs font-bold cursor-pointer"
+                className="px-2.5 py-2.5 rounded-xl sp-badge text-xs font-bold cursor-pointer shrink-0"
                 title="Toggle town walking D-Pad (or tap map / WASD)"
               >
-                {showVillagePad ? 'Hide Pad' : '🕹️ Walk'}
+                {showVillagePad ? 'Hide' : '🕹️'}
               </button>
             </div>
 
@@ -985,11 +1117,12 @@ export function QuestView({
         )}
       </div>
 
-      {/* 4 Sub-Tabs: Story & Quests | Gear & Bag | Study & Upgrades | Store */}
-      <div className="p-1 rounded-2xl sp-inset grid grid-cols-4 gap-1">
+      {/* 5 RPG Command Sub-Tabs: Party & Mythic | Story & Deeds | Gear | Upgrades | Store */}
+      <div className="p-1 rounded-2xl sp-inset grid grid-cols-5 gap-1">
         {(
           [
-            { key: 'story', label: 'Story', icon: ScrollText },
+            { key: 'party', label: 'Party & Mythic', icon: Swords },
+            { key: 'story', label: 'Story & Deeds', icon: ScrollText },
             { key: 'gear', label: 'Gear', icon: Backpack },
             { key: 'upgrades', label: 'Upgrades', icon: TrendingUp },
             { key: 'store', label: 'Store', icon: ShoppingBag },
@@ -1002,7 +1135,7 @@ export function QuestView({
               key={t.key}
               type="button"
               onClick={() => setSubTab(t.key)}
-              className={`py-2 px-1 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition ${
+              className={`py-2 px-1 rounded-xl text-[10px] sm:text-[11px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition ${
                 active ? 'sp-tab-active' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -1013,7 +1146,208 @@ export function QuestView({
         })}
       </div>
 
-      {/* Sub-Tab 1: Story Chronicle, Quests, NPCs & Lore */}
+      {/* Sub-Tab 0: Vanguard Party Recruitment & 3-Act Mythic Side Stories */}
+      {subTab === 'party' && (
+        <div className="space-y-3">
+          {/* Vanguard Party Squad Recruitment & Active Ally Selector */}
+          <div className="glass-card rounded-3xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
+                  🤝 Vanguard Party Squad & Dual-Tech Allies
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Recruited allies fight beside you on the canvas, grant passive auras, and unlock Ally Assists & Dual-Tech Ultimate Finishers!
+                </p>
+              </div>
+              {onStartVanguardTrial && !encounter && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => runAction(onStartVanguardTrial)}
+                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <Swords className="w-3.5 h-3.5" />
+                  <span>⚔️ Vanguard Trial Arena (0⚡)</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {(game.party?.allies || []).map((ally) => {
+                const canAfford = ally.canRecruitFree || profile.shards >= ally.effectiveShardCost;
+                return (
+                  <div
+                    key={ally.id}
+                    className={`p-3 rounded-2xl border space-y-2 transition ${
+                      ally.active
+                        ? 'sp-tab-active border-sky-400/60 shadow-[0_0_16px_rgba(56,189,248,0.18)]'
+                        : 'sp-inset border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
+                          {ally.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-extrabold text-white truncate">{ally.name}</span>
+                            {ally.active && (
+                              <span className="px-1.5 py-0.5 rounded bg-sky-500/25 border border-sky-400/50 text-sky-200 text-[9px] font-extrabold">
+                                ACTIVE
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-sky-300 font-bold truncate">{ally.role}</div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={busy || ally.active || (!ally.recruited && !canAfford)}
+                        onClick={() => onManagePartyAlly && runAction(() => onManagePartyAlly(ally.id))}
+                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer shrink-0 ${
+                          ally.active
+                            ? 'sp-badge text-emerald-300 cursor-default'
+                            : ally.recruited
+                              ? 'sp-btn-primary'
+                              : canAfford
+                                ? 'sp-btn-primary'
+                                : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {ally.active
+                          ? '✓ In Vanguard'
+                          : ally.recruited
+                            ? 'Deploy Ally'
+                            : ally.effectiveShardCost === 0
+                              ? 'Recruit (Free)'
+                              : `Recruit (${ally.effectiveShardCost}✦)`}
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-slate-300 leading-relaxed">{ally.lore}</p>
+
+                    <div className="p-2 rounded-xl sp-inset space-y-1 text-[10px]">
+                      <div className="text-emerald-300 font-bold">✨ Aura: {ally.passiveLabel}</div>
+                      <div className="text-slate-200">
+                        <span className="font-extrabold text-sky-300">
+                          {ally.skillIcon} Assist [{ally.skillName}]:
+                        </span>{' '}
+                        {ally.skillDesc}
+                      </div>
+                      <div className="text-amber-200">
+                        <span className="font-extrabold text-amber-300">
+                          🌟 Dual-Tech [{ally.finisherName}]:
+                        </span>{' '}
+                        {ally.finisherDesc}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3-Act Branching Mythic Side Stories & Mythic Relics */}
+          <div className="glass-card rounded-3xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300">
+                  👑 Mythic Side Stories & Relics ({(story.mythicSideStories || []).filter((s) => s.completed).length}/
+                  {(story.mythicSideStories || []).length} Forged)
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Follow 3-Act heroic side stories and make narrative choices to forge guaranteed [MYTHIC] Relics with unique combat passives!
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {(story.mythicSideStories || []).map((ms) => (
+                <div
+                  key={ms.id}
+                  className={`p-3.5 rounded-2xl border space-y-2.5 ${
+                    ms.completed
+                      ? 'border-rose-500/60 bg-rose-500/10'
+                      : 'sp-inset border-white/15'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
+                        {ms.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-extrabold text-white">{ms.title}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-rose-500/20 border border-rose-400/50 text-rose-200">
+                            {ms.completed ? '✓ Mythic Forged' : `Act ${ms.actIndex + 1} of ${ms.totalActs}`}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {ms.subtitle} • With {ms.npcName}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mythic Relic Reward Preview Banner */}
+                  <div className="p-2.5 rounded-xl border border-rose-500/50 bg-rose-950/35 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-lg shrink-0">{ms.mythicReward.icon}</span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-extrabold text-rose-200 truncate">
+                          [MYTHIC {ms.mythicReward.slot.toUpperCase()}] {ms.mythicReward.name}
+                        </div>
+                        <div className="text-[10px] font-mono-num text-amber-200">
+                          +{ms.mythicReward.atk} ATK • +{ms.mythicReward.def} DEF • +{ms.mythicReward.hp} HP • +
+                          {ms.mythicReward.luck} LUCK • +{ms.mythicReward.crit}% CRIT
+                        </div>
+                        <div className="text-[10px] text-slate-300 italic">{ms.mythicReward.passiveDesc}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Current Act Narrative & Interactive Choices */}
+                  {ms.currentAct && !ms.completed ? (
+                    <div className="p-2.5 rounded-xl sp-inset space-y-2 border border-white/10">
+                      <div className="text-[11px] font-extrabold text-amber-300">{ms.currentAct.title}</div>
+                      <p className="text-[11px] text-slate-200 leading-relaxed">{ms.currentAct.narrative}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                        {ms.currentAct.choices.map((ch) => (
+                          <button
+                            key={ch.id}
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              onAdvanceMythicStory && runAction(() => onAdvanceMythicStory(ms.id, ch.id))
+                            }
+                            className="text-left p-2.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer transition hover:opacity-95"
+                          >
+                            <div>⚔️ {ch.label}</div>
+                            <div className="text-[9px] opacity-80 font-mono-num mt-0.5">
+                              Reward: +{ch.shards}✦ Shards • +{ch.xp} Hero XP
+                              {ms.actIndex + 1 === ms.totalActs ? ' • 👑 Forges Mythic Relic!' : ''}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] font-bold text-emerald-300">
+                      ✓ All 3 Acts completed — {ms.mythicReward.name} has been forged into your armory!
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Tab 1: Story Chronicle, Heroic Deeds, Quests, NPCs & Lore */}
       {subTab === 'story' && (
         <div className="space-y-3">
           <div className="glass-card rounded-3xl p-4 space-y-2.5">
@@ -1033,6 +1367,62 @@ export function QuestView({
               </span>
             </div>
           </div>
+
+          {/* Heroic Deeds & Permanent Combat Feats Ledger */}
+          {story.heroicDeeds && story.heroicDeeds.length > 0 && (
+            <div className="glass-card rounded-3xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                  🏅 Heroic Deeds & Titles ({story.heroicDeeds.filter((d) => d.claimed).length}/{story.heroicDeeds.length})
+                </h3>
+                <span className="text-[10px] text-slate-400">Permanent Stat Perks + Heroic Titles</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {story.heroicDeeds.map((deed) => (
+                  <div
+                    key={deed.id}
+                    className={`p-2.5 rounded-2xl border space-y-1.5 ${
+                      deed.claimed
+                        ? 'border-emerald-500/40 bg-emerald-500/10'
+                        : deed.completed
+                          ? 'border-amber-400/70 bg-amber-500/15'
+                          : 'sp-inset border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-base">{deed.icon}</span>
+                        <span className="text-xs font-extrabold text-white truncate">{deed.title}</span>
+                      </div>
+                      <span className="font-mono-num text-[10px] font-extrabold sp-badge px-2 py-0.5 rounded-full shrink-0">
+                        {deed.progress}/{deed.target}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-300 leading-snug">{deed.desc}</div>
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                      <span className="text-[9px] font-bold text-amber-200">{deed.perkLabel}</span>
+                      {deed.claimed ? (
+                        <span className="text-[10px] font-extrabold text-emerald-300 shrink-0">✓ Claimed</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={busy || !deed.completed}
+                          onClick={() => onClaimHeroicDeed && runAction(() => onClaimHeroicDeed(deed.id))}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer shrink-0 ${
+                            deed.completed
+                              ? 'sp-btn-primary'
+                              : 'sp-badge opacity-45 cursor-not-allowed'
+                          }`}
+                        >
+                          {deed.completed ? `Claim +${deed.reward.shards}✦` : 'In Progress'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="glass-card rounded-3xl p-4 space-y-2.5">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">

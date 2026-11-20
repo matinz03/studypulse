@@ -16,7 +16,9 @@ import {
   ensureUniversitySeed,
 } from './db.js';
 import {
+  advanceMythicSideStory,
   buildGameState,
+  claimHeroicDeed,
   craftAtNpc,
   dungeonExtract,
   dungeonMove,
@@ -29,6 +31,7 @@ import {
   gradeFlashcardSm2,
   grantStudyRewardsToGame,
   heroLevelFromXp,
+  managePartyAlly,
   moveInVillage,
   resolveCombatAction,
   resolveEventChoice,
@@ -38,6 +41,7 @@ import {
   salvageGameItem,
   selectFloor,
   selectSpecialization,
+  startVanguardTrial,
   talkToNpc,
   upgradeGameItem,
   upgradeHeroStat,
@@ -1222,6 +1226,17 @@ app.post('/api/game/study-cast', authMiddleware, withGameHandler((req, user, sta
   selectedIndex: req.body?.selectedIndex !== undefined ? Number(req.body.selectedIndex) : undefined,
   grade: req.body?.grade !== undefined ? Number(req.body.grade) : undefined,
 })));
+app.post('/api/game/party', authMiddleware, withGameHandler((req, user, stats) => managePartyAlly(db, user, stats, {
+  allyId: String(req.body?.allyId || ''),
+})));
+app.post('/api/game/side-story', authMiddleware, withGameHandler((req, user, stats) => advanceMythicSideStory(db, user, stats, {
+  storyId: String(req.body?.storyId || ''),
+  choiceId: String(req.body?.choiceId || ''),
+})));
+app.post('/api/game/deed', authMiddleware, withGameHandler((req, user, stats) => claimHeroicDeed(db, user, stats, {
+  deedId: String(req.body?.deedId || ''),
+})));
+app.post('/api/game/trial', authMiddleware, withGameHandler((_req, user, stats) => startVanguardTrial(db, user, stats)));
 
 app.post('/api/university/sync-subjects', authMiddleware, (req, res) => {
   ensureUniversitySeed(req.user.id);

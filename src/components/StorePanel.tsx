@@ -19,6 +19,7 @@ const RARITY_STYLES: Record<ItemRarity, { badge: string; bar: string; label: str
   rare: { badge: 'rarity-rare', bar: '#0ea5e9', label: 'Rare' },
   epic: { badge: 'rarity-epic', bar: '#a855f7', label: 'Epic' },
   legendary: { badge: 'rarity-legendary', bar: '#f59e0b', label: 'Legendary' },
+  mythic: { badge: 'border-rose-500/70 bg-rose-500/15 text-rose-200', bar: '#f43f5e', label: 'Mythic' },
 };
 
 function formatResetCountdown(sec: number) {

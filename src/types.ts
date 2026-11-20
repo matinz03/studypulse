@@ -1,7 +1,7 @@
 export type TabKey = 'focus' | 'quest' | 'rooms' | 'compete' | 'feed' | 'me';
 export type TimerMode = 'pomodoro' | 'deep' | 'custom' | 'stopwatch' | 'sprint' | 'break';
 export type ShopTier = 'daily' | 'weekly' | 'monthly' | 'permanent';
-export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
 export type GearSlot = 'weapon' | 'armor' | 'charm' | 'companion';
 
 export interface User {
@@ -256,6 +256,87 @@ export interface CompanionEvolution {
   nextMins: number;
 }
 
+export interface PartyAllyInfo {
+  id: string;
+  name: string;
+  title: string;
+  role: string;
+  icon: string;
+  spriteKey: string;
+  recruitCostShards: number;
+  recruitReqLabel: string;
+  lore: string;
+  passiveLabel: string;
+  passiveBonuses: { atk: number; def: number; hp: number; luck: number; crit: number };
+  skillName: string;
+  skillIcon: string;
+  skillDesc: string;
+  finisherName: string;
+  finisherDesc: string;
+  recruited: boolean;
+  active: boolean;
+  canRecruitFree: boolean;
+  effectiveShardCost: number;
+}
+
+export interface MythicSideStoryAct {
+  act: number;
+  title: string;
+  narrative: string;
+  choices: Array<{
+    id: string;
+    label: string;
+    outcome: string;
+    shards: number;
+    xp: number;
+  }>;
+}
+
+export interface MythicSideStoryInfo {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+  npcName: string;
+  synopsis: string;
+  mythicReward: {
+    slot: GearSlot;
+    name: string;
+    icon: string;
+    spriteKey: string;
+    rarity: ItemRarity;
+    affix: string;
+    level: number;
+    atk: number;
+    def: number;
+    hp: number;
+    luck: number;
+    crit: number;
+    passiveDesc: string;
+  };
+  acts: MythicSideStoryAct[];
+  actIndex: number;
+  totalActs: number;
+  completed: boolean;
+  choicesTaken: string[];
+  currentAct: MythicSideStoryAct | null;
+}
+
+export interface HeroicDeedInfo {
+  id: string;
+  title: string;
+  icon: string;
+  desc: string;
+  statKey: string;
+  target: number;
+  progress: number;
+  completed: boolean;
+  claimed: boolean;
+  reward: { shards: number; coins: number; bonusAtk: number; bonusDef: number; bonusHp: number; bonusLuck: number };
+  perkLabel: string;
+  heroTitle: string;
+}
+
 export interface GameHeroStats {
   heroLevel: number;
   heroXp: number;
@@ -269,6 +350,8 @@ export interface GameHeroStats {
   activeSpecialization?: HeroSpecialization;
   specializations?: HeroSpecialization[];
   companionEvolution?: CompanionEvolution;
+  activeAllyId?: string | null;
+  activeAllyName?: string | null;
   maxHp: number;
   hp: number;
   atk: number;
@@ -307,6 +390,11 @@ export interface GameEncounter {
   heroStatuses?: {
     poisonTurns: number;
     poisonDmg: number;
+    flankingTurns?: number;
+    evasionActive?: boolean;
+    allyWardTurns?: number;
+    allyCooldown?: number;
+    comboChain?: number;
   };
   enemy?: {
     key: string;
@@ -319,6 +407,8 @@ export interface GameEncounter {
     shardReward: number;
     intent?: EnemyIntent;
     intentValue?: number;
+    shields?: number;
+    maxShields?: number;
     stunned?: boolean;
     vulnerableTurns?: number;
     armorBrokenTurns?: number;
@@ -370,6 +460,11 @@ export interface GameState {
   mode: GameMode;
   profile: GameProfileData;
   heroStats: GameHeroStats;
+  party?: {
+    activeAllyId: string | null;
+    activeAlly: PartyAllyInfo | null;
+    allies: PartyAllyInfo[];
+  };
   biome: {
     key: string;
     name: string;
@@ -392,6 +487,8 @@ export interface GameState {
     npcAffinity: Record<string, number>;
     quests: QuestProgressEntry[];
     loreCodex: LoreEntry[];
+    mythicSideStories?: MythicSideStoryInfo[];
+    heroicDeeds?: HeroicDeedInfo[];
   };
   items: GameItem[];
   equippedBySlot: Record<GearSlot, GameItem | null>;

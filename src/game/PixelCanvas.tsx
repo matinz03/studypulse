@@ -44,6 +44,7 @@ const RARITY_COLORS: Record<string, string> = {
   rare: '#38bdf8',
   epic: '#c084fc',
   legendary: '#fbbf24',
+  mythic: '#f43f5e',
 };
 
 const INTENT_VISUAL: Record<EnemyIntent, { bg: string; fg: string; label: (v?: number) => string }> = {
@@ -62,9 +63,11 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
 
   const fxRef = useRef({
     heroLunge: 0,
+    allyLunge: 0,
     heroFlash: 0,
     enemyShake: 0,
     guardPulse: 0,
+    finisherLife: 0,
     lootBeamLife: 0,
     lootBeamColor: '#fbbf24',
     floaters: [] as FloatingText[],
@@ -88,7 +91,31 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
 
       if (ev.kind === 'step' && !ev.text) continue;
 
-      if (ev.kind === 'hit' || ev.kind === 'crit') {
+      if (ev.kind === 'finisher') {
+        fx.heroLunge = 26;
+        fx.allyLunge = 22;
+        fx.enemyShake = 28;
+        fx.finisherLife = 36;
+        fx.floaters.push({
+          x: 150,
+          y: 62,
+          vy: -0.45,
+          text: ev.text || `ULTIMATE -${ev.value}!`,
+          color: '#fde047',
+          life: 62,
+        });
+        for (let i = 0; i < 28; i++) {
+          fx.particles.push({
+            x: 215 + (Math.random() * 24 - 12),
+            y: 112 + (Math.random() * 20 - 10),
+            vx: (Math.random() - 0.5) * 4.8,
+            vy: (Math.random() - 0.7) * 4.2,
+            color: i % 3 === 0 ? '#fde047' : i % 3 === 1 ? '#f43f5e' : '#38bdf8',
+            life: 32 + Math.random() * 14,
+            size: 3,
+          });
+        }
+      } else if (ev.kind === 'hit' || ev.kind === 'crit') {
         fx.heroLunge = 14;
         fx.enemyShake = ev.kind === 'crit' ? 18 : 10;
         fx.floaters.push({
@@ -112,6 +139,7 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
         }
       } else if (ev.kind === 'parry') {
         fx.guardPulse = 32;
+        fx.allyLunge = 14;
         fx.enemyShake = 14;
         fx.floaters.push({ x: targetX, y: targetY - 16, vy: -0.5, text: ev.text || 'PARRY!', color: '#fde047', life: 52 });
       } else if (ev.kind === 'secret') {
@@ -130,6 +158,7 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
         fx.guardPulse = 26;
         fx.floaters.push({ x: 84, y: 78, vy: -0.45, text: ev.text || 'WARD', color: '#38bdf8', life: 44 });
       } else if (ev.kind === 'heal' || ev.kind === 'dodge') {
+        if (ev.kind === 'dodge') fx.heroLunge = 10;
         fx.floaters.push({
           x: Math.min(245, Math.max(24, targetX - 12)),
           y: Math.max(38, targetY - 8),
@@ -571,29 +600,60 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
       }
 
       if (fx.heroLunge > 0) fx.heroLunge = Math.max(0, fx.heroLunge - 1.2);
+      if (fx.allyLunge > 0) fx.allyLunge = Math.max(0, fx.allyLunge - 1.2);
       if (fx.heroFlash > 0) fx.heroFlash--;
       if (fx.enemyShake > 0) fx.enemyShake--;
       if (fx.guardPulse > 0) fx.guardPulse--;
+      if (fx.finisherLife > 0) fx.finisherLife--;
       if (fx.lootBeamLife > 0) fx.lootBeamLife--;
 
+      const enc = g.encounter!;
       const heroSprite = HERO_SPRITES[g.profile.heroClass] || HERO_SPRITES.hero_scholar;
-      const heroX = Math.floor(64 + fx.heroLunge);
+      const heroX = Math.floor(68 + fx.heroLunge);
       const heroY = Math.floor(108 + (animFrame === 1 ? -1 : 0));
 
       ctx!.fillStyle = 'rgba(0,0,0,0.45)';
       ctx!.fillRect(heroX + 3, 144, 30, 5);
       ctx!.fillRect(208, 144, 34, 5);
 
+      // Draw Active Recruited Party Ally standing in Vanguard Formation beside Hero
+      const activeAlly = g.party?.activeAlly;
+      if (activeAlly) {
+        const allySp = HERO_SPRITES[activeAlly.spriteKey] || NPC_SPRITES[activeAlly.spriteKey] || HERO_SPRITES.hero_knight;
+        const ax = Math.floor(24 + fx.allyLunge);
+        const ay = Math.floor(114 + (animFrame === 0 ? -1 : 0));
+        ctx!.fillStyle = 'rgba(0,0,0,0.38)';
+        ctx!.fillRect(ax + 2, 145, 24, 4);
+        drawPixelMatrix(ctx!, allySp.frames[animFrame], allySp.palette, ax, ay, 2.5);
+        ctx!.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx!.fillRect(ax - 2, ay - 11, 34, 9);
+        ctx!.fillStyle = '#38bdf8';
+        ctx!.font = 'bold 6px monospace';
+        ctx!.fillText(activeAlly.name.slice(0, 7).toUpperCase(), ax, ay - 4);
+      }
+
       if (fever) {
         ctx!.fillStyle = 'rgba(250, 204, 21, 0.22)';
         ctx!.fillRect(heroX - 4, heroY - 3, 44, 42);
       }
 
+      // Draw Hero Flanking Stance Cyan Afterimage & Badge
+      const flankingTurns = enc.heroStatuses?.flankingTurns || 0;
+      if (flankingTurns > 0) {
+        ctx!.fillStyle = 'rgba(34, 211, 238, 0.24)';
+        ctx!.fillRect(heroX - 10, heroY + 2, 32, 34);
+        ctx!.fillStyle = '#0891b2';
+        ctx!.fillRect(heroX - 4, heroY - 14, 46, 10);
+        ctx!.fillStyle = '#ecfeff';
+        ctx!.font = 'bold 7px monospace';
+        ctx!.fillText('FLANKING!', heroX - 1, heroY - 7);
+      }
+
       const pet = g.equippedBySlot?.companion;
       if (pet && COMPANION_SPRITES[pet.spriteKey]) {
         const petSprite = COMPANION_SPRITES[pet.spriteKey];
-        const py = Math.floor(90 + Math.sin(frameCountNum * 0.08) * 3);
-        drawPixelMatrix(ctx!, petSprite.frames[animFrame], petSprite.palette, heroX - 24, py, 2);
+        const py = Math.floor(86 + Math.sin(frameCountNum * 0.08) * 3);
+        drawPixelMatrix(ctx!, petSprite.frames[animFrame], petSprite.palette, heroX - 18, py, 2);
       }
 
       drawPixelMatrix(ctx!, heroSprite.frames[animFrame], heroSprite.palette, heroX, heroY, 3);
@@ -607,7 +667,22 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
         ctx!.strokeRect(heroX - 3, heroY - 2, 42, 40);
       }
 
-      const enc = g.encounter!;
+      // Cinematic Dual-Tech / Ultimate Finisher Cross-Slash Beam
+      if (fx.finisherLife > 0) {
+        ctx!.save();
+        ctx!.strokeStyle = fx.finisherLife % 4 < 2 ? '#fde047' : '#f43f5e';
+        ctx!.lineWidth = 4;
+        ctx!.beginPath();
+        ctx!.moveTo(heroX + 24, heroY + 14);
+        ctx!.lineTo(232, 118);
+        ctx!.moveTo(195, 92);
+        ctx!.lineTo(245, 142);
+        ctx!.moveTo(245, 92);
+        ctx!.lineTo(195, 142);
+        ctx!.stroke();
+        ctx!.restore();
+      }
+
       const shakeOffset = fx.enemyShake > 0 ? (fx.enemyShake % 4 < 2 ? -3 : 3) : 0;
       if (enc.type === 'combat' && enc.enemy) {
         const mSprite = MONSTER_SPRITES[enc.enemy.key] || MONSTER_SPRITES.slime;
@@ -623,6 +698,27 @@ export function PixelCanvas({ game, lastEvents, eventSeq, focusFever, onTileClic
         ctx!.fillRect(200, my - 10, barW + 2, 6);
         ctx!.fillStyle = enc.isBoss ? '#f59e0b' : '#ef4444';
         ctx!.fillRect(201, my - 9, Math.floor(barW * hpRatio), 4);
+
+        // Enemy Break Shields Pips or BROKEN Badge
+        const shields = enc.enemy.shields ?? 0;
+        const maxShields = enc.enemy.maxShields ?? (enc.isBoss ? 3 : 2);
+        if (shields <= 0) {
+          ctx!.fillStyle = '#dc2626';
+          ctx!.fillRect(198, my - 39, 54, 11);
+          ctx!.fillStyle = '#fef08a';
+          ctx!.font = 'bold 7px monospace';
+          ctx!.fillText('BROKEN!', 206, my - 31);
+        } else {
+          for (let s = 0; s < maxShields; s++) {
+            const sx = 202 + s * 13;
+            const sy = my - 38;
+            ctx!.fillStyle = s < shields ? '#38bdf8' : '#1e293b';
+            ctx!.fillRect(sx, sy, 10, 10);
+            ctx!.strokeStyle = '#09090b';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(sx, sy, 10, 10);
+          }
+        }
 
         // EXPLICIT INTENT TELEGRAPH BADGE ABOVE ENEMY
         const intent = (enc.enemy.intent || 'STRIKE') as EnemyIntent;

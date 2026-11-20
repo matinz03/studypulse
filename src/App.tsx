@@ -1090,7 +1090,7 @@ export function App() {
   const handleDungeonTorch = () => callGameApi('/api/game/dungeon/torch');
   const handleDungeonExtract = () => callGameApi('/api/game/dungeon/extract');
   const handleDungeonPuzzle = (optionIndex: number) => callGameApi('/api/game/dungeon/puzzle', { optionIndex });
-  const handleGameCombat = (action: 'attack' | 'skill' | 'guard' | 'potion' | 'flee') =>
+  const handleGameCombat = (action: 'attack' | 'dash' | 'skill' | 'ally_skill' | 'finisher' | 'guard' | 'potion' | 'flee') =>
     callGameApi('/api/game/combat', { action });
   const handleGameChoice = (choice: string) => callGameApi('/api/game/choice', { choice });
   const handleGameEquip = (itemId: number) => callGameApi('/api/game/equip', { itemId });
@@ -1101,6 +1101,11 @@ export function App() {
     callGameApi('/api/game/upgrade-stat', { stat });
   const handleGameSelectFloor = (floor: number) => callGameApi('/api/game/floor-select', { floor });
   const handleSelectSpecialization = (specKey: string) => callGameApi('/api/game/specialization', { specKey });
+  const handleManagePartyAlly = (allyId: string) => callGameApi('/api/game/party', { allyId });
+  const handleAdvanceMythicStory = (storyId: string, choiceId: string) =>
+    callGameApi('/api/game/side-story', { storyId, choiceId });
+  const handleClaimHeroicDeed = (deedId: string) => callGameApi('/api/game/deed', { deedId });
+  const handleStartVanguardTrial = () => callGameApi('/api/game/trial');
   const handleStudyCast = async (payload: { cardId: number; selectedIndex?: number; grade?: number }) => {
     const res = await callGameApi('/api/game/study-cast', payload);
     await refreshBootstrap();
@@ -1656,6 +1661,10 @@ export function App() {
                     onUpgradeStat={handleGameUpgradeStat}
                     onSelectFloor={handleGameSelectFloor}
                     onSelectSpecialization={handleSelectSpecialization}
+                    onManagePartyAlly={handleManagePartyAlly}
+                    onAdvanceMythicStory={handleAdvanceMythicStory}
+                    onClaimHeroicDeed={handleClaimHeroicDeed}
+                    onStartVanguardTrial={handleStartVanguardTrial}
                     onStudyCast={handleStudyCast}
                     flashcards={data.university?.flashcards}
                     onBuyShopItem={handleBuyShopItem}
