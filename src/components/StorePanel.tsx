@@ -250,7 +250,7 @@ export function StorePanel({
       </AnimatePresence>
 
       {/* Item Cards */}
-      <div className="space-y-2">
+      <div className={compact ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : 'space-y-2'}>
         {items.map((item) => {
           const rar = RARITY_STYLES[item.rarity] || RARITY_STYLES.common;
           const soldOut = item.remaining !== null && item.remaining <= 0;
@@ -261,30 +261,32 @@ export function StorePanel({
           return (
             <div
               key={item.key}
-              className="flex items-center justify-between gap-2.5 p-2.5 rounded-2xl sp-inset relative overflow-hidden"
+              className="flex items-center justify-between gap-2 p-2.5 rounded-2xl sp-inset relative overflow-hidden"
             >
               <span
                 aria-hidden="true"
                 className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full"
                 style={{ backgroundColor: rar.bar }}
               />
-              <div className="flex items-center gap-2.5 min-w-0 pl-1.5">
-                <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
+              <div className="flex items-center gap-2 min-w-0 pl-1.5">
+                <span className="w-8 h-8 rounded-xl sp-badge flex items-center justify-center text-base shrink-0">
                   {item.icon}
                 </span>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1">
                     <span className="text-xs font-bold text-white truncate">{item.name}</span>
-                    <span className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase ${rar.badge}`}>
+                    <span className={`px-1.5 py-0.5 rounded-md border text-[8.5px] font-bold uppercase ${rar.badge}`}>
                       {rar.label}
                     </span>
-                    {item.effectBadge && (
+                    {item.effectBadge && !compact && (
                       <span className="px-1.5 py-0.5 rounded-md sp-badge text-[9px] font-bold">
                         {item.effectBadge}
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-slate-400 line-clamp-2 mt-0.5">{item.desc}</div>
+                  <div className={`text-[10px] text-slate-400 ${compact ? 'line-clamp-1' : 'line-clamp-2'} mt-0.5`}>
+                    {item.desc}
+                  </div>
                   {item.maxPerPeriod !== null && (
                     <div className="text-[9px] font-mono-num text-slate-500 mt-0.5">
                       Stock: {item.remaining}/{item.maxPerPeriod} remaining

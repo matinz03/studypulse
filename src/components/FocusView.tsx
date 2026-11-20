@@ -21,6 +21,9 @@ import {
   Clock,
   Sliders,
   Coins,
+  BookOpen,
+  Layers,
+  ChevronDown,
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
 import { UniversityVaultPanel } from './UniversityVaultPanel';
@@ -194,6 +197,7 @@ export function FocusView({
   onLogManual,
 }: FocusViewProps) {
   const [addingSubject, setAddingSubject] = useState(false);
+  const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [newSubName, setNewSubName] = useState('');
   const [newSubIcon, setNewSubIcon] = useState('📚');
   const [newSubColor, setNewSubColor] = useState('#FAFAFA');
@@ -210,6 +214,9 @@ export function FocusView({
   const [savingTask, setSavingTask] = useState(false);
   const [showMixer, setShowMixer] = useState(false);
 
+  // Workbench switcher: 'vault' | 'tasks' | 'both'
+  const [workbenchTab, setWorkbenchTab] = useState<'vault' | 'tasks' | 'both'>('vault');
+
   const themeMeta = getThemeMeta(themeId);
   const resolvedSubAccent = resolveAccent(activeSubject?.color, themeId);
 
@@ -221,12 +228,12 @@ export function FocusView({
       ? Math.min(1, elapsedSec / targetSec)
       : 0;
 
-  const radius = 114;
+  const radius = 108;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - progress);
   const angleRad = progress * 2 * Math.PI - Math.PI / 2;
-  const dotX = 132 + radius * Math.cos(angleRad);
-  const dotY = 132 + radius * Math.sin(angleRad);
+  const dotX = 124 + radius * Math.cos(angleRad);
+  const dotY = 124 + radius * Math.sin(angleRad);
 
   const stage = getSpiritStage(elapsedSec, spiritSkin, themeId);
 
@@ -270,49 +277,71 @@ export function FocusView({
   }
 
   const goalPct = Math.min(100, Math.round((todayMins / Math.max(1, dailyGoalMins)) * 100));
+  const pendingTaskCount = tasks.filter((t) => !t.done).length;
+
+  // Ensure active subject is always visible in the compact subject strip
+  const visibleSubjects = showAllSubjects
+    ? subjects
+    : subjects.slice(0, 4).some((s) => s.id === activeSubject?.id)
+      ? subjects.slice(0, 4)
+      : [activeSubject, ...subjects.filter((s) => s.id !== activeSubject?.id).slice(0, 3)].filter(Boolean);
+  const hiddenSubjectCount = Math.max(0, subjects.length - visibleSubjects.length);
 
   return (
-    <div className="space-y-4">
-      {/* Daily Goal, Manual Log & Focus Intention Strip */}
-      <div className="liquid-card rounded-3xl p-3.5 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-200">
-            <Target className="w-3.5 h-3.5 opacity-80" />
-            Today&apos;s Focus Goal
-          </span>
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono-num text-[11px] font-extrabold text-white">
-              {todayMins}m
+    <div className="space-y-3">
+      {/* 1. UNIFIED CHRONOMETER COCKPIT HERO (Above-the-Fold Primary Focus Surface) */}
+      <div className="glass-card rounded-3xl p-4 space-y-3 relative overflow-hidden">
+        {/* Top Row: Daily Goal Progress Ribbon + Seated Room Pill + Offline Log */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-white/10">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-200 shrink-0">
+              <Target className="w-3.5 h-3.5 opacity-80" />
+              <span>Goal</span>
             </span>
-            <span className="text-[11px] text-slate-400 font-mono-num">/ {dailyGoalMins}m</span>
-            <span className="sp-badge px-2 py-0.5 rounded-full font-mono-num text-[10px] font-bold">
+            <div className="w-20 sm:w-28 h-1.5 rounded-full bg-white/10 overflow-hidden shrink-0">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
+              />
+            </div>
+            <span className="font-mono-num text-[11px] font-extrabold text-white shrink-0">
+              {todayMins}m<span className="text-slate-400 font-normal">/{dailyGoalMins}m</span>
+            </span>
+            <span className="sp-badge px-1.5 py-0.5 rounded-full font-mono-num text-[10px] font-bold shrink-0">
               {goalPct}%
             </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {currentRoom && (
+              <button
+                type="button"
+                onClick={onGoToRooms}
+                title={`Seated in ${currentRoom.name} — tap to open room`}
+                className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  style={{ backgroundColor: themeMeta.colors.accent }}
+                />
+                <span>{currentRoom.icon}</span>
+                <span className="max-w-[96px] truncate hidden sm:inline">{currentRoom.name}</span>
+                <Users className="w-3 h-3 opacity-75" />
+                <span className="font-mono-num">{currentRoom.activeCount}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setLoggingManual((v) => !v)}
-              className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
+              className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
               title="Log offline study session"
             >
               <Clock className="w-2.5 h-2.5" /> +Log
             </button>
           </div>
         </div>
-        <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
-          />
-        </div>
-        <input
-          type="text"
-          maxLength={100}
-          placeholder="🎯 What are you focusing on?"
-          value={focusTask}
-          onChange={(e) => onChangeFocusTask(e.target.value)}
-          className="w-full px-3.5 py-2.5 rounded-2xl sp-input text-xs font-medium transition"
-        />
 
+        {/* Collapsible Manual Offline Session Drawer */}
         <AnimatePresence>
           {loggingManual && (
             <motion.form
@@ -320,7 +349,7 @@ export function FocusView({
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               onSubmit={submitManual}
-              className="pt-2 border-t border-white/10 space-y-2 overflow-hidden"
+              className="p-3 rounded-2xl sp-inset space-y-2 overflow-hidden"
             >
               <div className="flex items-center justify-between text-[11px] text-slate-300">
                 <span>Log Offline {activeSubject.name} Block</span>
@@ -347,7 +376,7 @@ export function FocusView({
                 <button
                   type="submit"
                   disabled={savingManual}
-                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
                 >
                   {savingManual ? '...' : 'Save'}
                 </button>
@@ -355,163 +384,170 @@ export function FocusView({
             </motion.form>
           )}
         </AnimatePresence>
-      </div>
 
-      {/* Mode Switcher Segmented Control */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 p-1 rounded-2xl glass-card">
-        {MODES.map((m) => {
-          const active = mode === m.key;
-          const subLabel = m.key === 'custom' ? `${customMins}m` : m.sub;
-          return (
-            <button
-              key={m.key}
-              type="button"
-              onClick={() => onChangeMode(m.key)}
-              className={`relative py-2 px-1 rounded-xl text-center transition cursor-pointer ${
-                active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {active && (
-                <motion.div
-                  layoutId="focusModePill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-0 rounded-xl sp-tab-active"
-                />
-              )}
-              <div className="relative z-10 text-xs font-bold leading-tight">{m.label}</div>
-              <div className="relative z-10 text-[10px] text-slate-400 font-mono-num">{subLabel}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Custom Timer Duration Selector */}
-      {mode === 'custom' && !isRunning && (
-        <div className="glass-card rounded-2xl p-3 space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-slate-200">Custom Timer Length</span>
-            <span className="font-mono-num font-extrabold text-white">{customMins} mins</span>
-          </div>
-          <input
-            type="range"
-            min={5}
-            max={180}
-            step={5}
-            value={customMins}
-            onChange={(e) => onChangeCustomMins(Number(e.target.value))}
-            className="w-full accent-current"
-          />
-          <div className="flex items-center gap-1.5">
-            {[15, 35, 45, 60, 90].map((m) => (
+        {/* Single-Row Segmented Timer Mode Bar */}
+        <div className="grid grid-cols-6 gap-1 p-1 rounded-2xl sp-inset">
+          {MODES.map((m) => {
+            const active = mode === m.key;
+            const subLabel = m.key === 'custom' ? `${customMins}m` : m.sub;
+            return (
               <button
-                key={m}
+                key={m.key}
                 type="button"
-                onClick={() => onChangeCustomMins(m)}
-                className={`flex-1 py-1 rounded-lg font-mono-num text-[11px] font-bold cursor-pointer transition ${
-                  customMins === m ? 'sp-tab-active' : 'sp-badge text-slate-300'
+                onClick={() => onChangeMode(m.key)}
+                className={`relative py-1.5 px-1 rounded-xl text-center transition cursor-pointer min-w-0 ${
+                  active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {m}m
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Wrapping Subject Pills */}
-      <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
-        {subjects.map((sub) => {
-          const selected = activeSubject?.id === sub.id;
-          return (
-            <motion.button
-              key={sub.id}
-              whileTap={{ scale: 0.94 }}
-              type="button"
-              onClick={() => onSelectSubject(sub)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer border ${
-                selected ? 'sp-tab-active font-bold' : 'sp-inset text-slate-300 hover:border-white/25'
-              }`}
-            >
-              <span>{sub.icon}</span>
-              <span>{sub.name}</span>
-            </motion.button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => setAddingSubject((v) => !v)}
-          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
-        >
-          {addingSubject ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-          <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
-        </button>
-      </div>
-
-      {/* Quick Inline Subject Creator */}
-      <AnimatePresence>
-        {addingSubject && (
-          <motion.form
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            onSubmit={submitSubject}
-            className="glass-card rounded-2xl p-3.5 space-y-2.5 overflow-hidden"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                required
-                maxLength={28}
-                placeholder="New subject (e.g. Organic Chem)"
-                value={newSubName}
-                onChange={(e) => setNewSubName(e.target.value)}
-                className="flex-1 px-3 py-2 rounded-xl sp-input text-xs"
-              />
-              <button
-                type="submit"
-                disabled={savingSub}
-                className="px-3.5 py-2 rounded-xl sp-btn-primary text-xs font-bold cursor-pointer"
-              >
-                Add
-              </button>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                {SUBJECT_EMOJIS.map((em) => (
-                  <button
-                    key={em}
-                    type="button"
-                    onClick={() => setNewSubIcon(em)}
-                    className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${
-                      newSubIcon === em ? 'sp-tab-active' : 'opacity-65'
-                    }`}
-                  >
-                    {em}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {SUBJECT_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setNewSubColor(c)}
-                    className={`w-5 h-5 rounded-full border border-white/25 cursor-pointer ${
-                      newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'
-                    }`}
-                    style={{ backgroundColor: c }}
+                {active && (
+                  <motion.div
+                    layoutId="focusModePill"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    className="absolute inset-0 rounded-xl sp-tab-active"
                   />
-                ))}
-              </div>
-            </div>
-          </motion.form>
-        )}
-      </AnimatePresence>
+                )}
+                <div className="relative z-10 text-[11px] font-bold leading-tight truncate">{m.label}</div>
+                <div className="relative z-10 text-[9.5px] text-slate-400 font-mono-num">{subLabel}</div>
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Main Circular Timer & Focus Spirit Dial */}
-      <div className="glass-card rounded-3xl p-5 flex flex-col items-center relative overflow-hidden">
-        {/* Top micro telemetry & smart purity badges */}
-        <div className="w-full flex flex-wrap items-center justify-between gap-1.5 text-[11px] mb-1">
+        {/* Custom Timer Duration Selector */}
+        {mode === 'custom' && !isRunning && (
+          <div className="p-2.5 rounded-2xl sp-inset space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-200">Custom Timer Length</span>
+              <span className="font-mono-num font-extrabold text-white">{customMins} mins</span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={180}
+              step={5}
+              value={customMins}
+              onChange={(e) => onChangeCustomMins(Number(e.target.value))}
+              className="w-full accent-current"
+            />
+            <div className="flex items-center gap-1.5">
+              {[15, 35, 45, 60, 90].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => onChangeCustomMins(m)}
+                  className={`flex-1 py-1 rounded-lg font-mono-num text-[11px] font-bold cursor-pointer transition ${
+                    customMins === m ? 'sp-tab-active' : 'sp-badge text-slate-300'
+                  }`}
+                >
+                  {m}m
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Compact Subject Selector Row (Progressive Disclosure for >4 subjects) */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {visibleSubjects.map((sub) => {
+            const selected = activeSubject?.id === sub.id;
+            return (
+              <motion.button
+                key={sub.id}
+                whileTap={{ scale: 0.95 }}
+                type="button"
+                onClick={() => onSelectSubject(sub)}
+                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer border ${
+                  selected ? 'sp-tab-active font-bold' : 'sp-inset text-slate-300 hover:border-white/25'
+                }`}
+              >
+                <span>{sub.icon}</span>
+                <span className="max-w-[130px] truncate">{sub.name}</span>
+              </motion.button>
+            );
+          })}
+          {subjects.length > 4 && (
+            <button
+              type="button"
+              onClick={() => setShowAllSubjects((v) => !v)}
+              className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold sp-badge text-slate-300 hover:text-white flex items-center gap-0.5 cursor-pointer"
+            >
+              <span>{showAllSubjects ? 'Less' : `+${hiddenSubjectCount} more`}</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${showAllSubjects ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setAddingSubject((v) => !v)}
+            className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+          >
+            {addingSubject ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+            <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
+          </button>
+        </div>
+
+        {/* Inline Subject Creator */}
+        <AnimatePresence>
+          {addingSubject && (
+            <motion.form
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              onSubmit={submitSubject}
+              className="p-3 rounded-2xl sp-inset space-y-2 overflow-hidden"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  required
+                  maxLength={28}
+                  placeholder="New subject (e.g. Organic Chem)"
+                  value={newSubName}
+                  onChange={(e) => setNewSubName(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                />
+                <button
+                  type="submit"
+                  disabled={savingSub}
+                  className="px-3.5 py-1.5 rounded-xl sp-btn-primary text-xs font-bold cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  {SUBJECT_EMOJIS.map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      onClick={() => setNewSubIcon(em)}
+                      className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${
+                        newSubIcon === em ? 'sp-tab-active' : 'opacity-65'
+                      }`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {SUBJECT_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setNewSubColor(c)}
+                      className={`w-5 h-5 rounded-full border border-white/25 cursor-pointer ${
+                        newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
+
+        {/* Balanced Dial Telemetry Strip */}
+        <div className="w-full flex flex-wrap items-center justify-between gap-1.5 text-[11px] pt-0.5">
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full sp-badge font-semibold">
               <ShieldCheck className="w-3.5 h-3.5 opacity-80" />
@@ -525,7 +561,7 @@ export function FocusView({
                   ? 'Strict Lock: 1.25x XP boost, penalizes app-switching even with PiP'
                   : 'Multi-App PiP: Use external apps freely with PiP without Purity penalty'
               }
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full font-bold cursor-pointer border transition ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold cursor-pointer border transition ${
                 strictMode ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
               }`}
             >
@@ -553,7 +589,7 @@ export function FocusView({
                   else onChangeWagerCoins(0);
                 }}
                 title="High-Stakes Focus Wager: earn 2x Coins + 15 Shards at >=90% Purity"
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition disabled:opacity-50 ${
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition disabled:opacity-50 ${
                   wagerCoins > 0 ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
                 }`}
               >
@@ -565,7 +601,7 @@ export function FocusView({
               <button
                 type="button"
                 onClick={onTogglePip}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
                   pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
                 }`}
               >
@@ -574,7 +610,7 @@ export function FocusView({
               </button>
             )}
             {wakeLocked ? (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge font-medium">
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge font-medium">
                 <Sun className="w-3 h-3" /> Awake
               </span>
             ) : (
@@ -586,294 +622,158 @@ export function FocusView({
         </div>
 
         {/* Precision Chronometer SVG Timer Ring */}
-        <div className="relative w-[264px] h-[264px] flex items-center justify-center my-1">
-          <svg width="264" height="264" viewBox="0 0 264 264" className="transform">
-            <defs>
-              <linearGradient id={`ringGrad-${themeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor={themeMeta.colors.accent} />
-                <stop offset="55%" stopColor={themeMeta.colors.accent2} />
-                <stop offset="100%" stopColor={themeMeta.colors.accent} />
-              </linearGradient>
-              <filter id="glowRing" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2.5" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
+        <div className="flex flex-col items-center">
+          <div className="relative w-[248px] h-[248px] flex items-center justify-center">
+            <svg width="248" height="248" viewBox="0 0 248 248" className="transform">
+              <defs>
+                <linearGradient id={`ringGrad-${themeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor={themeMeta.colors.accent} />
+                  <stop offset="55%" stopColor={themeMeta.colors.accent2} />
+                  <stop offset="100%" stopColor={themeMeta.colors.accent} />
+                </linearGradient>
+                <filter id="glowRing" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="2.5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
 
-            {/* Outer bezel hairline */}
-            <circle cx="132" cy="132" r="125" stroke={themeMeta.colors.track} strokeWidth="1" fill="none" />
+              <circle cx="124" cy="124" r="118" stroke={themeMeta.colors.track} strokeWidth="1" fill="none" />
+              <circle cx="124" cy="124" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
 
-            {/* Background recessed track */}
-            <circle cx="132" cy="132" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
+              {Array.from({ length: 60 }).map((_, idx) => {
+                const major = idx % 5 === 0;
+                const deg = idx * 6;
+                return (
+                  <line
+                    key={idx}
+                    x1="124"
+                    y1={major ? 14 : 17}
+                    x2="124"
+                    y2={21}
+                    stroke={major ? themeMeta.colors.accent2 : themeMeta.colors.track}
+                    strokeOpacity={major ? 0.55 : 0.8}
+                    strokeWidth={major ? 1.5 : 1}
+                    transform={`rotate(${deg} 124 124)`}
+                  />
+                );
+              })}
 
-            {/* 60 Precision Chronometer Dial Ticks */}
-            {Array.from({ length: 60 }).map((_, idx) => {
-              const major = idx % 5 === 0;
-              const deg = idx * 6;
-              return (
-                <line
-                  key={idx}
-                  x1="132"
-                  y1={major ? 16 : 19}
-                  x2="132"
-                  y2={23}
-                  stroke={major ? themeMeta.colors.accent2 : themeMeta.colors.track}
-                  strokeOpacity={major ? 0.55 : 0.8}
-                  strokeWidth={major ? 1.5 : 1}
-                  transform={`rotate(${deg} 132 132)`}
-                />
-              );
-            })}
-
-            {/* Active precision progress arc */}
-            <circle
-              cx="132"
-              cy="132"
-              r={radius}
-              stroke={`url(#ringGrad-${themeId})`}
-              strokeWidth="9"
-              strokeLinecap="round"
-              fill="none"
-              filter="url(#glowRing)"
-              strokeDasharray={circumference}
-              strokeDashoffset={dashOffset}
-              transform="rotate(-90 132 132)"
-              style={{ transition: 'stroke-dashoffset 0.35s linear' }}
-            />
-
-            {/* Orbiting precision index beacon */}
-            {progress > 0.005 && (
               <circle
-                cx={dotX}
-                cy={dotY}
-                r="6"
-                fill={themeMeta.light ? '#ffffff' : '#09090b'}
-                stroke={themeMeta.colors.accent}
-                strokeWidth="3"
+                cx="124"
+                cy="124"
+                r={radius}
+                stroke={`url(#ringGrad-${themeId})`}
+                strokeWidth="9"
+                strokeLinecap="round"
+                fill="none"
                 filter="url(#glowRing)"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                transform="rotate(-90 124 124)"
+                style={{ transition: 'stroke-dashoffset 0.35s linear' }}
               />
-            )}
-          </svg>
 
-          {/* Center Content: Machined Recessed Chronometer Core */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-[186px] h-[186px] sp-dial-core flex flex-col items-center justify-center p-2">
-              <FocusSpirit
-                elapsedSec={elapsedSec}
-                isRunning={isRunning}
-                accentColor={resolvedSubAccent}
-                spiritSkin={spiritSkin}
-                themeId={themeId}
-              />
-              <div className="font-mono-num text-[36px] leading-none font-extrabold tracking-tighter text-white mt-1.5">
-                {formatClock(displayedSeconds)}
-              </div>
-              <div className="text-[11px] font-semibold text-slate-400 mt-1.5 flex items-center gap-1.5 max-w-[140px] truncate">
-                <span
-                  className="w-1.5 h-1.5 rounded-full inline-block shrink-0"
-                  style={{ backgroundColor: resolvedSubAccent }}
+              {progress > 0.005 && (
+                <circle
+                  cx={dotX}
+                  cy={dotY}
+                  r="6"
+                  fill={themeMeta.light ? '#ffffff' : '#09090b'}
+                  stroke={themeMeta.colors.accent}
+                  strokeWidth="3"
+                  filter="url(#glowRing)"
                 />
-                <span className="truncate">{activeSubject?.name || 'Focus'}</span>
+              )}
+            </svg>
+
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-[174px] h-[174px] sp-dial-core flex flex-col items-center justify-center p-2">
+                <FocusSpirit
+                  elapsedSec={elapsedSec}
+                  isRunning={isRunning}
+                  accentColor={resolvedSubAccent}
+                  spiritSkin={spiritSkin}
+                  themeId={themeId}
+                />
+                <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tighter text-white mt-1">
+                  {formatClock(displayedSeconds)}
+                </div>
+                <div className="text-[11px] font-semibold text-slate-400 mt-1 flex items-center gap-1.5 max-w-[136px] truncate">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full inline-block shrink-0"
+                    style={{ backgroundColor: resolvedSubAccent }}
+                  />
+                  <span className="truncate">{activeSubject?.name || 'Focus'}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons Row */}
-        <div className="w-full flex items-center justify-center gap-3 mt-2">
-          <motion.button
-            whileTap={{ scale: 0.93 }}
-            type="button"
-            onClick={onBoost5m}
-            title="Add +5m focus boost"
-            className="whitespace-nowrap shrink-0 px-3 py-3 rounded-2xl sp-badge text-xs font-bold hover:opacity-90 cursor-pointer"
-          >
-            +5m
-          </motion.button>
+        {/* Integrated Focus Intention Input + Primary Action Controls */}
+        <div className="space-y-2.5 pt-1">
+          <input
+            type="text"
+            maxLength={100}
+            placeholder="🎯 What are you focusing on?"
+            value={focusTask}
+            onChange={(e) => onChangeFocusTask(e.target.value)}
+            className="w-full px-3.5 py-2 rounded-2xl sp-input text-xs font-medium transition"
+          />
 
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            whileHover={{ scale: 1.02 }}
-            type="button"
-            onClick={onToggleRun}
-            className={`px-7 py-3.5 rounded-2xl font-extrabold text-sm flex items-center gap-2 cursor-pointer transition ${
-              isRunning ? 'sp-tab-active ring-1 ring-current' : 'sp-btn-primary'
-            }`}
-          >
-            {isRunning ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-            <span>{isRunning ? 'Pause' : elapsedSec > 0 ? 'Resume' : 'Start Focus'}</span>
-          </motion.button>
-
-          <motion.button
-            whileTap={{ scale: 0.93 }}
-            type="button"
-            disabled={elapsedSec < 5}
-            onClick={onFinishSession}
-            className={`px-3.5 py-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
-              elapsedSec >= 5
-                ? 'sp-btn-primary'
-                : 'sp-badge text-slate-500 opacity-50 cursor-not-allowed'
-            }`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Finish</span>
-          </motion.button>
-        </div>
-      </div>
-
-      {/* Live Study Room Presence Pill */}
-      {currentRoom && (
-        <motion.button
-          whileTap={{ scale: 0.98 }}
-          type="button"
-          onClick={onGoToRooms}
-          className="w-full glass-card rounded-2xl p-3.5 flex items-center justify-between text-left cursor-pointer hover:border-white/25 transition"
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl sp-inset flex items-center justify-center text-lg shrink-0">
-              {currentRoom.icon}
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-bold text-white truncate">{currentRoom.name}</div>
-              <div className="text-[11px] text-slate-400 truncate">
-                {isRunning ? 'Your desk is pulsing live here' : 'Seated & ready — tap to view live room'}
-              </div>
-            </div>
-          </div>
-          <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full sp-badge text-xs font-bold">
-            <span
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{ backgroundColor: themeMeta.colors.accent }}
-            />
-            <Users className="w-3.5 h-3.5" />
-            <span>{currentRoom.activeCount}</span>
-          </div>
-        </motion.button>
-      )}
-
-      {/* Study Task Queue & Planner */}
-      <div className="glass-card rounded-3xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <ListTodo className="w-3.5 h-3.5 opacity-80" />
-            Study Task Queue
-          </span>
-          <button
-            type="button"
-            onClick={() => setAddingTask((v) => !v)}
-            className="px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-          >
-            {addingTask ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-            <span>{addingTask ? 'Close' : 'Add Task'}</span>
-          </button>
-        </div>
-
-        <AnimatePresence>
-          {addingTask && (
-            <motion.form
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              onSubmit={submitTask}
-              className="space-y-2 pb-1 overflow-hidden"
+          <div className="w-full flex items-center justify-center gap-2.5">
+            <motion.button
+              whileTap={{ scale: 0.93 }}
+              type="button"
+              onClick={onBoost5m}
+              title="Add +5m focus boost"
+              className="whitespace-nowrap shrink-0 px-3.5 py-3 rounded-2xl sp-badge text-xs font-bold hover:opacity-90 cursor-pointer"
             >
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  required
-                  maxLength={90}
-                  placeholder="New task (e.g. Ch. 5 Practice Set)"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl sp-input text-xs"
-                />
-                <select
-                  value={newTaskPomos}
-                  onChange={(e) => setNewTaskPomos(Number(e.target.value))}
-                  className="px-2 py-2 rounded-xl sp-input text-xs font-mono-num"
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n}🍅
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  disabled={savingTask}
-                  className="px-3 py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
-                >
-                  {savingTask ? '...' : 'Add'}
-                </button>
-              </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
+              +5m
+            </motion.button>
 
-        <div className="space-y-1.5">
-          {tasks.slice(0, 6).map((task) => {
-            const pinned = activeTaskId === task.id;
-            return (
-              <div
-                key={task.id}
-                className={`flex items-center justify-between gap-2 p-2.5 rounded-2xl border transition ${
-                  pinned ? 'sp-tab-active' : 'sp-inset border-white/8'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onToggleTaskDone(task)}
-                  aria-label={task.done ? 'Mark incomplete' : 'Mark complete'}
-                  className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 cursor-pointer transition ${
-                    task.done ? 'sp-btn-primary' : 'border-white/25 hover:border-white/50'
-                  }`}
-                >
-                  {task.done && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                </button>
+            <motion.button
+              whileTap={{ scale: 0.94 }}
+              whileHover={{ scale: 1.01 }}
+              type="button"
+              onClick={onToggleRun}
+              className={`flex-1 max-w-[220px] py-3 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer transition ${
+                isRunning ? 'sp-tab-active ring-1 ring-current' : 'sp-btn-primary'
+              }`}
+            >
+              {isRunning ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+              <span>{isRunning ? 'Pause' : elapsedSec > 0 ? 'Resume' : 'Start Focus'}</span>
+            </motion.button>
 
-                <button
-                  type="button"
-                  onClick={() => onSelectTask(pinned ? null : task)}
-                  className="flex-1 text-left min-w-0 cursor-pointer"
-                >
-                  <div
-                    className={`text-xs font-semibold truncate ${
-                      task.done ? 'line-through text-slate-500' : 'text-white'
-                    }`}
-                  >
-                    {task.title}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono-num">
-                    {task.subjectName} • {task.completedPomos}/{task.targetPomos} 🍅
-                    {pinned ? ' • Pinned to Timer' : ''}
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onDeleteTask(task.id)}
-                  aria-label="Delete task"
-                  className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
+            <motion.button
+              whileTap={{ scale: 0.93 }}
+              type="button"
+              disabled={elapsedSec < 5}
+              onClick={onFinishSession}
+              className={`px-3.5 py-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                elapsedSec >= 5
+                  ? 'sp-btn-primary'
+                  : 'sp-badge text-slate-500 opacity-50 cursor-not-allowed'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Finish</span>
+            </motion.button>
+          </div>
         </div>
       </div>
 
-      {/* Ambient Soundscape Bar + Volume Slider */}
-      <div className="glass-card rounded-2xl p-3 space-y-2.5">
-        <div className="flex items-center justify-between px-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Volume2 className="w-3.5 h-3.5" />
-            Focus Soundscape
-          </span>
+      {/* 2. COMPACT FOCUS SOUNDSCAPE BAR + COLLAPSIBLE 6-TRACK MIXER */}
+      <div className="glass-card rounded-2xl p-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
           <div className="flex items-center gap-2">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Volume2 className="w-3.5 h-3.5" />
+              Focus Soundscape
+            </span>
             {soundPreset !== 'off' && (
               <div className="flex items-end gap-0.5 h-3">
                 {[0, 1, 2, 3].map((bar) => (
@@ -887,14 +787,27 @@ export function FocusView({
                 ))}
               </div>
             )}
-            <span className="font-mono-num text-[10px] text-slate-400">
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={0.05}
+              max={1}
+              step={0.05}
+              value={soundVolume}
+              onChange={(e) => onChangeSoundVolume(Number(e.target.value))}
+              aria-label="Soundscape volume"
+              className="w-20 sm:w-24 h-1.5 accent-current cursor-pointer"
+            />
+            <span className="font-mono-num text-[10px] text-slate-400 w-7 text-right">
               {Math.round(soundVolume * 100)}%
             </span>
             {onChangeTrackMix && (
               <button
                 type="button"
                 onClick={() => setShowMixer((v) => !v)}
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 cursor-pointer border ${
+                className={`px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 cursor-pointer border ${
                   showMixer || soundPreset === 'mix' ? 'sp-tab-active' : 'sp-badge'
                 }`}
               >
@@ -904,7 +817,8 @@ export function FocusView({
             )}
           </div>
         </div>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+
+        <div className="grid grid-cols-7 gap-1">
           {SOUNDS.map((s) => {
             const active = soundPreset === s.key;
             return (
@@ -913,26 +827,16 @@ export function FocusView({
                 whileTap={{ scale: 0.94 }}
                 type="button"
                 onClick={() => onChangeSound(s.key)}
-                className={`py-2 px-1 rounded-xl text-center transition cursor-pointer border ${
+                className={`py-1.5 px-1 rounded-xl text-center transition cursor-pointer border min-w-0 ${
                   active ? 'sp-tab-active font-bold' : 'sp-inset text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <div className="text-sm">{s.icon}</div>
-                <div className="text-[10px] font-semibold mt-0.5">{s.label}</div>
+                <div className="text-xs sm:text-sm leading-none">{s.icon}</div>
+                <div className="text-[9.5px] font-semibold mt-0.5 truncate">{s.label}</div>
               </motion.button>
             );
           })}
         </div>
-        <input
-          type="range"
-          min={0.05}
-          max={1}
-          step={0.05}
-          value={soundVolume}
-          onChange={(e) => onChangeSoundVolume(Number(e.target.value))}
-          aria-label="Soundscape volume"
-          className="w-full h-1.5 accent-current cursor-pointer"
-        />
 
         {showMixer && onChangeTrackMix && trackMix && (
           <div className="pt-2 border-t border-white/10 space-y-2">
@@ -950,14 +854,14 @@ export function FocusView({
                 ))}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {SOUNDS.filter((s) => s.key !== 'off').map((s) => {
                 const tk = s.key as TrackKey;
                 const val = trackMix[tk] || 0;
                 return (
                   <div key={tk} className="p-2 rounded-xl sp-inset space-y-1">
                     <div className="flex items-center justify-between text-[10px]">
-                      <span className="font-semibold text-slate-200">{s.icon} {s.label}</span>
+                      <span className="font-semibold text-slate-200 truncate">{s.icon} {s.label}</span>
                       <span className="font-mono-num text-slate-400">{Math.round(val * 100)}%</span>
                     </div>
                     <input
@@ -978,20 +882,185 @@ export function FocusView({
         )}
       </div>
 
-      {/* University Vault & Active Learning Hub */}
-      {university && onSyncUniversitySubjects && onReviewFlashcard && onCreateFlashcards && onSaveStudyNote && onDeleteStudyNote && onSaveExamGoal && (
-        <UniversityVaultPanel
-          university={university}
-          subjectBreakdown={subjectBreakdown}
-          coins={userCoins}
-          onSyncSubjects={onSyncUniversitySubjects}
-          onReviewCard={onReviewFlashcard}
-          onCreateFlashcards={onCreateFlashcards}
-          onSaveNote={onSaveStudyNote}
-          onDeleteNote={onDeleteStudyNote}
-          onSaveExamGoal={onSaveExamGoal}
-        />
+      {/* 3. SEGMENTED FOCUS WORKBENCH (University Vault vs. Study Task Queue) */}
+      <div className="p-1 rounded-2xl glass-card grid grid-cols-3 gap-1">
+        <button
+          type="button"
+          onClick={() => setWorkbenchTab('vault')}
+          className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+            workbenchTab === 'vault' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Uni Vault</span>
+          {university && (
+            <span className="px-1.5 py-0.5 rounded-full sp-badge text-[9.5px] font-mono-num">
+              {university.dueCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setWorkbenchTab('tasks')}
+          className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+            workbenchTab === 'tasks' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <ListTodo className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Task Queue</span>
+          <span className="px-1.5 py-0.5 rounded-full sp-badge text-[9.5px] font-mono-num">
+            {pendingTaskCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setWorkbenchTab('both')}
+          className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+            workbenchTab === 'both' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Split View</span>
+        </button>
+      </div>
+
+      {/* Study Task Queue & Planner (Shown when 'tasks' or 'both' is active) */}
+      {(workbenchTab === 'tasks' || workbenchTab === 'both') && (
+        <div className="glass-card rounded-3xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <ListTodo className="w-3.5 h-3.5 opacity-80" />
+              Study Task Queue
+            </span>
+            <button
+              type="button"
+              onClick={() => setAddingTask((v) => !v)}
+              className="px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+            >
+              {addingTask ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+              <span>{addingTask ? 'Close' : 'Add Task'}</span>
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {addingTask && (
+              <motion.form
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                onSubmit={submitTask}
+                className="space-y-2 pb-1 overflow-hidden"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    required
+                    maxLength={90}
+                    placeholder="New task (e.g. Ch. 5 Practice Set)"
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl sp-input text-xs"
+                  />
+                  <select
+                    value={newTaskPomos}
+                    onChange={(e) => setNewTaskPomos(Number(e.target.value))}
+                    className="px-2 py-2 rounded-xl sp-input text-xs font-mono-num"
+                  >
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>
+                        {n}🍅
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={savingTask}
+                    className="px-3 py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
+                  >
+                    {savingTask ? '...' : 'Add'}
+                  </button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {tasks.slice(0, 6).map((task) => {
+              const pinned = activeTaskId === task.id;
+              return (
+                <div
+                  key={task.id}
+                  className={`flex items-center justify-between gap-2 p-2.5 rounded-2xl border transition ${
+                    pinned ? 'sp-tab-active' : 'sp-inset border-white/8'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onToggleTaskDone(task)}
+                    aria-label={task.done ? 'Mark incomplete' : 'Mark complete'}
+                    className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 cursor-pointer transition ${
+                      task.done ? 'sp-btn-primary' : 'border-white/25 hover:border-white/50'
+                    }`}
+                  >
+                    {task.done && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectTask(pinned ? null : task)}
+                    className="flex-1 text-left min-w-0 cursor-pointer"
+                  >
+                    <div
+                      className={`text-xs font-semibold truncate ${
+                        task.done ? 'line-through text-slate-500' : 'text-white'
+                      }`}
+                    >
+                      {task.title}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono-num truncate">
+                      {task.subjectName} • {task.completedPomos}/{task.targetPomos} 🍅
+                      {pinned ? ' • Pinned' : ''}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onDeleteTask(task.id)}
+                    aria-label="Delete task"
+                    className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
+
+      {/* University Vault & Active Learning Hub (Shown when 'vault' or 'both' is active) */}
+      {(workbenchTab === 'vault' || workbenchTab === 'both') &&
+        university &&
+        onSyncUniversitySubjects &&
+        onReviewFlashcard &&
+        onCreateFlashcards &&
+        onSaveStudyNote &&
+        onDeleteStudyNote &&
+        onSaveExamGoal && (
+          <UniversityVaultPanel
+            university={university}
+            subjectBreakdown={subjectBreakdown}
+            coins={userCoins}
+            onSyncSubjects={onSyncUniversitySubjects}
+            onReviewCard={onReviewFlashcard}
+            onCreateFlashcards={onCreateFlashcards}
+            onSaveNote={onSaveStudyNote}
+            onDeleteNote={onDeleteStudyNote}
+            onSaveExamGoal={onSaveExamGoal}
+          />
+        )}
     </div>
   );
 }

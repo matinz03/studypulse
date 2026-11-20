@@ -1383,10 +1383,10 @@ export function App() {
         </AnimatePresence>
       </div>
 
-      {/* Main Responsive Container (Mobile Single Column -> Desktop App + Companion Panel) */}
-      <div className="max-w-5xl mx-auto lg:grid lg:grid-cols-[minmax(0,480px)_minmax(0,360px)] lg:justify-center lg:gap-6 lg:px-6">
-        {/* Primary Mobile-First Column */}
-        <div className="w-full max-w-[480px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
+      {/* Main Responsive Container (Mobile Single Column -> Desktop Wide Bento Workspace + Companion Panel) */}
+      <div className="max-w-6xl mx-auto lg:grid lg:grid-cols-[minmax(0,560px)_minmax(0,340px)] lg:justify-center lg:gap-6 lg:px-6">
+        {/* Primary Mobile-First & Tablet/Desktop Bento Column */}
+        <div className="w-full max-w-[560px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
           {/* Floating Shadcn Glass Header + Out-of-Browser Hover Bar */}
           <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-xl liquid-dock">
             <div className="flex items-center justify-between gap-2">
@@ -1868,7 +1868,7 @@ export function App() {
       {/* True Viewport-Locked Fixed Shadcn Glass Bottom Dock */}
       <nav
         aria-label="Primary Navigation"
-        className="fixed bottom-3 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[440px]"
+        className="fixed bottom-3 left-1/2 lg:left-[calc(50%-182px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[480px]"
       >
         <div className="liquid-dock liquid-dock-lens rounded-xl p-1 grid grid-cols-6 gap-0.5">
           {navItems.map((item) => {
