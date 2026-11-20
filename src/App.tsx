@@ -46,18 +46,18 @@ import { pipEngine } from './utils/pipEngine';
 const TOKEN_KEY = 'studypulse_token';
 const TIMER_STATE_KEY = 'studypulse_timer_state';
 
-function getTargetSec(mode: TimerMode, customMins: number) {
+function getTargetSec(mode: TimerMode, customMins: number, bonusSec = 0) {
   switch (mode) {
     case 'pomodoro':
-      return 25 * 60;
+      return 25 * 60 + bonusSec;
     case 'deep':
-      return 50 * 60;
+      return 50 * 60 + bonusSec;
     case 'custom':
-      return Math.max(5, customMins) * 60;
+      return Math.max(5, customMins) * 60 + bonusSec;
     case 'break':
-      return 5 * 60;
+      return 5 * 60 + bonusSec;
     case 'sprint':
-      return 60;
+      return 60 + bonusSec;
     case 'stopwatch':
       return 0;
   }
@@ -99,6 +99,7 @@ interface BeforeInstallPromptEvent extends Event {
 interface PersistedTimerState {
   mode: TimerMode;
   customMins: number;
+  bonusSec?: number;
   pomoCycleCount: number;
   isRunning: boolean;
   baseElapsedSec: number;
@@ -118,7 +119,8 @@ function loadPersistedTimer(): Partial<PersistedTimerState> & { initialElapsed: 
     const p = JSON.parse(raw) as PersistedTimerState;
     const mode: TimerMode = p.mode || 'pomodoro';
     const customMins = Number(p.customMins || 35);
-    const target = getTargetSec(mode, customMins);
+    const bonusSec = Number(p.bonusSec || 0);
+    const target = getTargetSec(mode, customMins, bonusSec);
     if (p.isRunning && p.startedAtMs) {
       const elapsedNow = (p.baseElapsedSec || 0) + Math.max(0, Math.floor((Date.now() - p.startedAtMs) / 1000));
       if (mode !== 'stopwatch' && target > 0 && elapsedNow >= target) {
@@ -159,6 +161,7 @@ export function App() {
   // Timer state
   const [mode, setMode] = useState<TimerMode>(restored.mode || 'pomodoro');
   const [customMins, setCustomMins] = useState<number>(restored.customMins || 35);
+  const [bonusSec, setBonusSec] = useState<number>(restored.bonusSec || 0);
   const [pomoCycleCount, setPomoCycleCount] = useState<number>(restored.pomoCycleCount || 0);
   const [isRunning, setIsRunning] = useState<boolean>(Boolean(restored.isRunning));
   const [elapsedSec, setElapsedSec] = useState<number>(restored.initialElapsed || 0);
@@ -301,6 +304,7 @@ export function App() {
         if (event.data?.type === 'SW_NOTIFICATION_CLICK' && event.data?.action === 'break') {
           setShowCompleteModal(false);
           setMode('break');
+          setBonusSec(0);
           baseElapsedRef.current = 0;
           startedAtMsRef.current = Date.now();
           setElapsedSec(0);
@@ -364,6 +368,7 @@ export function App() {
       const payload: PersistedTimerState = {
         mode,
         customMins,
+        bonusSec,
         pomoCycleCount,
         isRunning,
         baseElapsedSec: baseElapsedRef.current,
@@ -382,6 +387,7 @@ export function App() {
   }, [
     mode,
     customMins,
+    bonusSec,
     pomoCycleCount,
     isRunning,
     elapsedSec,
@@ -501,7 +507,7 @@ export function App() {
     if (!isRunning) return;
     startedAtMsRef.current = Date.now();
     baseElapsedRef.current = elapsedSec;
-    const target = getTargetSec(mode, customMins);
+    const target = getTargetSec(mode, customMins, bonusSec);
 
     const tick = () => {
       const realElapsed = baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000));
@@ -513,6 +519,7 @@ export function App() {
           triggerCompletionAlert('break', target, activeSubject.name);
           baseElapsedRef.current = 0;
           setElapsedSec(0);
+          setBonusSec(0);
           setMode('pomodoro');
         } else {
           setPendingDurationSec(target);
@@ -527,11 +534,11 @@ export function App() {
 
     const interval = window.setInterval(tick, 250);
     return () => window.clearInterval(interval);
-  }, [isRunning, mode, customMins, activeSubject.name, focusTask, triggerCompletionAlert, syncServerSchedule]);
+  }, [isRunning, mode, customMins, bonusSec, activeSubject.name, focusTask, triggerCompletionAlert, syncServerSchedule]);
 
   // Dynamic tab title & Floating PiP live HUD sync
   useEffect(() => {
-    const target = getTargetSec(mode, customMins);
+    const target = getTargetSec(mode, customMins, bonusSec);
     const isStopwatch = mode === 'stopwatch';
     const displayed = isStopwatch ? elapsedSec : Math.max(0, target - elapsedSec);
     const clock = formatClock(displayed);
@@ -577,6 +584,7 @@ export function App() {
     elapsedSec,
     mode,
     customMins,
+    bonusSec,
     activeSubject.name,
     activeSubject.color,
     focusTask,
@@ -667,7 +675,7 @@ export function App() {
   const handleToggleRun = useCallback(() => {
     setIsRunning((prevRunning) => {
       const nextRunning = !prevRunning;
-      const target = getTargetSec(mode, customMins);
+      const target = getTargetSec(mode, customMins, bonusSec);
       if (nextRunning) {
         if (soundPreset !== 'off') {
           soundEngine.setPreset(soundPreset, soundVolume);
@@ -684,7 +692,7 @@ export function App() {
       }
       return nextRunning;
     });
-  }, [mode, customMins, elapsedSec, activeSubject.name, focusTask, soundPreset, soundVolume, syncServerSchedule]);
+  }, [mode, customMins, bonusSec, elapsedSec, activeSubject.name, focusTask, soundPreset, soundVolume, syncServerSchedule]);
 
   function handleChangeMode(m: TimerMode) {
     if (isRunning) {
@@ -692,6 +700,7 @@ export function App() {
       return;
     }
     setMode(m);
+    setBonusSec(0);
     baseElapsedRef.current = 0;
     startedAtMsRef.current = Date.now();
     setElapsedSec(0);
@@ -702,6 +711,7 @@ export function App() {
     if (isRunning) return;
     const clamped = Math.max(5, Math.min(180, Math.round(mins)));
     setCustomMins(clamped);
+    setBonusSec(0);
     baseElapsedRef.current = 0;
     startedAtMsRef.current = Date.now();
     setElapsedSec(0);
@@ -732,35 +742,25 @@ export function App() {
 
   const handleBoost5m = useCallback(() => {
     const added = 5 * 60;
-    const target = getTargetSec(mode, customMins);
     const currentReal = isRunning
       ? baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000))
       : elapsedSec;
-    const next = mode !== 'stopwatch' && target > 0 ? Math.min(target, currentReal + added) : currentReal + added;
-    baseElapsedRef.current = next;
-    startedAtMsRef.current = Date.now();
-    setElapsedSec(next);
 
-    if (isRunning) {
-      if (mode !== 'stopwatch' && target > 0 && next >= target) {
-        setIsRunning(false);
-        syncServerSchedule(false, mode, target, target, activeSubject.name, focusTask);
-        if (mode === 'break') {
-          triggerCompletionAlert('break', target, activeSubject.name);
-          baseElapsedRef.current = 0;
-          setElapsedSec(0);
-          setMode('pomodoro');
-        } else {
-          setPendingDurationSec(target);
-          setShowCompleteModal(true);
-          triggerCompletionAlert(mode, target, activeSubject.name);
-        }
-        return;
+    if (mode === 'stopwatch') {
+      const next = currentReal + added;
+      baseElapsedRef.current = next;
+      startedAtMsRef.current = Date.now();
+      setElapsedSec(next);
+    } else {
+      const nextBonus = bonusSec + added;
+      setBonusSec(nextBonus);
+      const nextTarget = getTargetSec(mode, customMins, nextBonus);
+      if (isRunning) {
+        syncServerSchedule(true, mode, currentReal, nextTarget, activeSubject.name, focusTask);
       }
-      syncServerSchedule(true, mode, next, target, activeSubject.name, focusTask);
     }
-    pushToast('+5m focus boost applied ⚡');
-  }, [mode, customMins, isRunning, elapsedSec, activeSubject.name, focusTask, syncServerSchedule, triggerCompletionAlert, pushToast]);
+    pushToast('+5m added to current timer ⚡');
+  }, [mode, customMins, bonusSec, isRunning, elapsedSec, activeSubject.name, focusTask, syncServerSchedule, pushToast]);
 
   const handleOpenFinish = useCallback(() => {
     const currentReal = isRunning
@@ -771,18 +771,19 @@ export function App() {
     baseElapsedRef.current = currentReal;
     startedAtMsRef.current = Date.now();
     setElapsedSec(currentReal);
-    syncServerSchedule(false, mode, currentReal, getTargetSec(mode, customMins), activeSubject.name, focusTask);
+    syncServerSchedule(false, mode, currentReal, getTargetSec(mode, customMins, bonusSec), activeSubject.name, focusTask);
 
     if (mode === 'break') {
       baseElapsedRef.current = 0;
       setElapsedSec(0);
+      setBonusSec(0);
       setMode('pomodoro');
       pushToast('Break wrapped up — back to focus! 🍅');
       return;
     }
     setPendingDurationSec(currentReal);
     setShowCompleteModal(true);
-  }, [isRunning, elapsedSec, mode, customMins, activeSubject.name, focusTask, syncServerSchedule, pushToast]);
+  }, [isRunning, elapsedSec, mode, customMins, bonusSec, activeSubject.name, focusTask, syncServerSchedule, pushToast]);
 
   const flashPipToast = useCallback((msg: string) => {
     setPipToast(msg);
@@ -861,7 +862,7 @@ export function App() {
       }
 
       if (isRunning && mode !== 'stopwatch') {
-        const target = getTargetSec(mode, customMins);
+        const target = getTargetSec(mode, customMins, bonusSec);
         const realElapsed = baseElapsedRef.current + Math.max(0, Math.floor((Date.now() - startedAtMsRef.current) / 1000));
         syncServerSchedule(true, mode, realElapsed, target, activeSubject.name, focusTask);
       }
@@ -921,6 +922,7 @@ export function App() {
     baseElapsedRef.current = 0;
     startedAtMsRef.current = Date.now();
     setElapsedSec(0);
+    setBonusSec(0);
     setPurityPct(100);
     setFocusTask('');
     setWagerCoins(0);
@@ -1186,6 +1188,7 @@ export function App() {
 
   function handleSyncRoomTimer(phase: 'focus' | 'break') {
     setMode(phase === 'break' ? 'break' : 'pomodoro');
+    setBonusSec(0);
     baseElapsedRef.current = 0;
     startedAtMsRef.current = Date.now();
     setElapsedSec(0);
@@ -1463,7 +1466,7 @@ export function App() {
                       {formatClock(
                         mode === 'stopwatch'
                           ? elapsedSec
-                          : Math.max(0, getTargetSec(mode, customMins) - elapsedSec)
+                          : Math.max(0, getTargetSec(mode, customMins, bonusSec) - elapsedSec)
                       )}
                     </span>
                     <span className="truncate text-slate-300">• {activeSubject.name}</span>
@@ -1562,7 +1565,7 @@ export function App() {
                     isRunning={isRunning}
                     onToggleRun={handleToggleRun}
                     elapsedSec={elapsedSec}
-                    targetSec={getTargetSec(mode, customMins)}
+                    targetSec={getTargetSec(mode, customMins, bonusSec)}
                     onBoost5m={handleBoost5m}
                     onFinishSession={handleOpenFinish}
                     subjects={data.subjects}
@@ -1925,6 +1928,7 @@ export function App() {
               baseElapsedRef.current = 0;
               startedAtMsRef.current = Date.now();
               setElapsedSec(0);
+              setBonusSec(0);
               setPurityPct(100);
               setFocusTask('');
             }}
