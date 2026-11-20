@@ -76,6 +76,11 @@ interface FocusViewProps {
     back?: string;
     markdownText?: string;
   }) => Promise<void>;
+  onCompleteMockExam?: (results: Array<{ cardId: number; isCorrect: boolean }>) => Promise<{
+    xpEarned: number;
+    coinsEarned: number;
+    shardsEarned: number;
+  } | void>;
   onSaveStudyNote?: (payload: {
     id?: number;
     subjectName: string;
@@ -178,6 +183,7 @@ export function FocusView({
   onSyncUniversitySubjects,
   onReviewFlashcard,
   onCreateFlashcards,
+  onCompleteMockExam,
   onSaveStudyNote,
   onDeleteStudyNote,
   onSaveExamGoal,
@@ -1059,6 +1065,7 @@ export function FocusView({
             onSyncSubjects={onSyncUniversitySubjects}
             onReviewCard={onReviewFlashcard}
             onCreateFlashcards={onCreateFlashcards}
+            onCompleteMockExam={onCompleteMockExam}
             onSaveNote={onSaveStudyNote}
             onDeleteNote={onDeleteStudyNote}
             onSaveExamGoal={onSaveExamGoal}

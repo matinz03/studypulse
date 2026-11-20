@@ -1,3 +1,5 @@
+import { EXTRA_UNIVERSITY_FLASHCARDS } from './universityQuestionBank.js';
+
 export const UNIVERSITY_PORTAL_URL = 'https://university.matinz03.tech';
 
 export const UNIVERSITY_COURSES = [
@@ -88,7 +90,7 @@ export const UNIVERSITY_COURSES = [
   },
 ];
 
-export const UNIVERSITY_FLASHCARDS = [
+const BASE_UNIVERSITY_FLASHCARDS = [
   // ==========================================
   // 1. Computer Architectures (8 cards)
   // ==========================================
@@ -638,6 +640,32 @@ export const UNIVERSITY_FLASHCARDS = [
     correctIndex: 1,
     recallPrompt: 'Explain IPv6 zero-compression (:: once max) and why routers do not fragment IPv6 packets.',
   },
+];
+
+const BASE_CARD_META = {
+  ca_weighted_time: ['numeric', 'lab'],
+  ca_amdahl: ['numeric', 'exam'],
+  ca_latency_ii: ['theory', 'core'],
+  ds_olap_servers: ['theory', 'core'],
+  ds_data_lake_swamp: ['theory', 'core'],
+  ds_support_conf_lift: ['numeric', 'exam'],
+  cc_ns_vs_cgroup: ['theory', 'core'],
+  cc_cgroup_shares_quota: ['numeric', 'exam'],
+  cc_pid_namespace: ['trace', 'exam'],
+  cc_nist_cloud: ['theory', 'core'],
+  cc_service_models: ['theory', 'core'],
+  cc_zones_regions: ['theory', 'core'],
+  cc_edge_continuum: ['theory', 'core'],
+  ia_host_sizing: ['numeric', 'lab'],
+  ia_bgp_selection: ['trace', 'exam'],
+};
+
+export const UNIVERSITY_FLASHCARDS = [
+  ...BASE_UNIVERSITY_FLASHCARDS.map((c) => {
+    const meta = BASE_CARD_META[c.key] || ['theory', 'exam'];
+    return { ...c, category: c.category || meta[0], difficulty: c.difficulty || meta[1] };
+  }),
+  ...EXTRA_UNIVERSITY_FLASHCARDS,
 ];
 
 export const STARTER_STUDY_NOTES = [

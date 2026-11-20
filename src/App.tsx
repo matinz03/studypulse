@@ -1138,6 +1138,22 @@ export function App() {
     pushToast(`Saved ${res.created?.length || 1} flashcard(s) to FSRS vault! 🗂️`);
   }
 
+  async function handleCompleteMockExam(results: Array<{ cardId: number; isCorrect: boolean }>) {
+    const res = await apiFetch('/api/university/exam-complete', {
+      method: 'POST',
+      body: JSON.stringify({ results }),
+    });
+    await refreshBootstrap();
+    pushToast(
+      `Mock Exam ${res.scorePct}% (${res.correctCount}/${res.totalCount}) · +${res.xpEarned} XP, +${res.coinsEarned}🪙!`
+    );
+    return {
+      xpEarned: Number(res.xpEarned || 0),
+      coinsEarned: Number(res.coinsEarned || 0),
+      shardsEarned: Number(res.shardsEarned || 0),
+    };
+  }
+
   async function handleSaveStudyNote(payload: { id?: number; subjectName: string; title: string; contentMd: string }) {
     await apiFetch('/api/university/notes', {
       method: 'POST',
@@ -1594,6 +1610,7 @@ export function App() {
                     onSyncUniversitySubjects={handleSyncUniversitySubjects}
                     onReviewFlashcard={handleReviewFlashcard}
                     onCreateFlashcards={handleCreateFlashcards}
+                    onCompleteMockExam={handleCompleteMockExam}
                     onSaveStudyNote={handleSaveStudyNote}
                     onDeleteStudyNote={handleDeleteStudyNote}
                     onSaveExamGoal={handleSaveExamGoal}

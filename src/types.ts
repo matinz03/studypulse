@@ -629,6 +629,8 @@ export interface FlashcardItem {
   courseKey: string;
   subjectName: string;
   conceptTitle: string;
+  category?: 'theory' | 'trace' | 'numeric';
+  difficulty?: 'core' | 'exam' | 'lab';
   front: string;
   back: string;
   options: string[];

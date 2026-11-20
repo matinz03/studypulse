@@ -483,6 +483,8 @@ function formatFlashcardRow(row) {
     courseKey: row.course_key || 'custom',
     subjectName: row.subject_name,
     conceptTitle: row.concept_title || '',
+    category: row.category || 'theory',
+    difficulty: row.difficulty || 'exam',
     front: row.front,
     back: row.back,
     options: parseJsonSafeLocal(row.options_json, []),
@@ -494,6 +496,44 @@ function formatFlashcardRow(row) {
     reviewCount: Number(row.review_count || 0),
     isDue: Number(row.next_review_at || 0) <= now,
   };
+}
+
+function buildAutoMcqOptions(userId, courseKey, answerText) {
+  const correctClean = String(answerText).trim().slice(0, 125);
+  const peers = db
+    .prepare(
+      `SELECT back FROM flashcards WHERE user_id = ? AND (course_key = ? OR ? = 'custom') AND length(back) > 8 ORDER BY RANDOM() LIMIT 24`
+    )
+    .all(userId, courseKey, courseKey);
+  const distractors = [];
+  for (const p of peers) {
+    const candidate = String(p.back).split('.')[0].trim().slice(0, 125);
+    if (
+      candidate.length >= 6 &&
+      candidate.toLowerCase() !== correctClean.toLowerCase() &&
+      !distractors.some((d) => d.toLowerCase() === candidate.toLowerCase())
+    ) {
+      distractors.push(candidate);
+      if (distractors.length >= 3) break;
+    }
+  }
+  const fallbacks = [
+    'None of the listed mechanisms apply here',
+    'Occurs only during unprivileged Thread initialization',
+    'Handled exclusively at the physical Layer 1 repeater',
+  ];
+  for (const fb of fallbacks) {
+    if (distractors.length >= 3) break;
+    if (fb.toLowerCase() !== correctClean.toLowerCase()) distractors.push(fb);
+  }
+  const pool = [correctClean, ...distractors.slice(0, 3)];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+  return { options: pool, correctIndex: pool.indexOf(correctClean) };
 }
 
 function computeLeagueState(weekMins, weekBoard) {
@@ -1205,10 +1245,12 @@ app.post('/api/university/flashcards', authMiddleware, (req, res) => {
   const courseKey = String(req.body?.courseKey || 'custom').slice(0, 32);
   const subjectName = String(req.body?.subjectName || 'General').trim().slice(0, 50);
   const conceptTitle = String(req.body?.conceptTitle || 'Custom Note').trim().slice(0, 60);
+  const category = ['theory', 'trace', 'numeric'].includes(req.body?.category) ? req.body.category : 'theory';
+  const difficulty = ['core', 'exam', 'lab'].includes(req.body?.difficulty) ? req.body.difficulty : 'exam';
 
   const ins = db.prepare(`
-    INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
-    VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
+    INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, category, difficulty, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
+    VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
   `);
 
   const created = [];
@@ -1218,7 +1260,22 @@ app.post('/api/university/flashcards', authMiddleware, (req, res) => {
       const clean = line.replace(/^[-*]\s*/, '');
       const parts = clean.includes('::') ? clean.split('::') : clean.includes('->') ? clean.split('->') : null;
       if (parts && parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
-        const info = ins.run(req.user.id, courseKey, subjectName, conceptTitle, parts[0].trim().slice(0, 240), parts[1].trim().slice(0, 500), '[]', 0, now, now);
+        const backText = parts[1].trim().slice(0, 500);
+        const auto = buildAutoMcqOptions(req.user.id, courseKey, backText);
+        const info = ins.run(
+          req.user.id,
+          courseKey,
+          subjectName,
+          conceptTitle,
+          category,
+          difficulty,
+          parts[0].trim().slice(0, 240),
+          backText,
+          JSON.stringify(auto.options),
+          auto.correctIndex,
+          now,
+          now
+        );
         created.push(formatFlashcardRow(db.prepare('SELECT * FROM flashcards WHERE id = ?').get(Number(info.lastInsertRowid))));
       }
     }
@@ -1226,13 +1283,86 @@ app.post('/api/university/flashcards', authMiddleware, (req, res) => {
     const front = String(req.body?.front || '').trim().slice(0, 280);
     const back = String(req.body?.back || '').trim().slice(0, 600);
     if (!front || !back) return res.status(400).json({ error: 'Card front and back are required' });
-    const options = Array.isArray(req.body?.options) ? req.body.options.map((x) => String(x).trim().slice(0, 140)).filter(Boolean) : [];
-    const correctIndex = Math.max(0, Math.min(Math.max(0, options.length - 1), Number(req.body?.correctIndex || 0)));
-    const info = ins.run(req.user.id, courseKey, subjectName, conceptTitle, front, back, JSON.stringify(options), correctIndex, now, now);
+    let options = Array.isArray(req.body?.options)
+      ? req.body.options.map((x) => String(x).trim().slice(0, 140)).filter(Boolean)
+      : [];
+    let correctIndex = Math.max(0, Math.min(Math.max(0, options.length - 1), Number(req.body?.correctIndex || 0)));
+    if (options.length < 2) {
+      const auto = buildAutoMcqOptions(req.user.id, courseKey, back);
+      options = auto.options;
+      correctIndex = auto.correctIndex;
+    }
+    const info = ins.run(
+      req.user.id,
+      courseKey,
+      subjectName,
+      conceptTitle,
+      category,
+      difficulty,
+      front,
+      back,
+      JSON.stringify(options),
+      correctIndex,
+      now,
+      now
+    );
     created.push(formatFlashcardRow(db.prepare('SELECT * FROM flashcards WHERE id = ?').get(Number(info.lastInsertRowid))));
   }
   const flashcards = db.prepare('SELECT * FROM flashcards WHERE user_id = ? ORDER BY next_review_at ASC, id ASC').all(req.user.id).map(formatFlashcardRow);
   res.status(201).json({ ok: true, created, flashcards });
+});
+
+app.post('/api/university/exam-complete', authMiddleware, (req, res) => {
+  const results = Array.isArray(req.body?.results) ? req.body.results.slice(0, 60) : [];
+  if (results.length === 0) return res.status(400).json({ error: 'Exam results are required' });
+
+  let correctCount = 0;
+  const updCard = db.prepare(`
+    UPDATE flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, next_review_at = ?, review_count = ?
+    WHERE id = ? AND user_id = ?
+  `);
+  const getCard = db.prepare('SELECT * FROM flashcards WHERE id = ? AND user_id = ?');
+
+  const tx = db.transaction(() => {
+    for (const r of results) {
+      const card = getCard.get(Number(r.cardId), req.user.id);
+      if (!card) continue;
+      const isCorrect = Boolean(r.isCorrect);
+      if (isCorrect) correctCount++;
+      const sm2 = gradeFlashcardSm2(card, isCorrect ? 4 : 1);
+      updCard.run(sm2.easeFactor, sm2.intervalDays, sm2.repetitions, sm2.nextReviewAt, sm2.reviewCount, card.id, req.user.id);
+    }
+  });
+  tx();
+
+  const totalCount = results.length;
+  const scorePct = Math.round((correctCount / Math.max(1, totalCount)) * 100);
+  const xpEarned = correctCount * 12 + (scorePct >= 80 ? 40 : 15);
+  const coinsEarned = correctCount * 3 + (scorePct >= 80 ? 15 : 5);
+  const shardsEarned = correctCount * 4;
+
+  db.prepare('UPDATE users SET xp = xp + ?, coins = coins + ? WHERE id = ?').run(xpEarned, coinsEarned, req.user.id);
+  ensureGameProfile(db, req.user.id);
+  db.prepare('UPDATE game_profiles SET shards = shards + ?, focus_charge = MIN(100, focus_charge + 15), updated_at = ? WHERE user_id = ?').run(
+    shardsEarned,
+    Date.now(),
+    req.user.id
+  );
+
+  const flashcards = db.prepare('SELECT * FROM flashcards WHERE user_id = ? ORDER BY next_review_at ASC, id ASC').all(req.user.id).map(formatFlashcardRow);
+  const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({
+    ok: true,
+    correctCount,
+    totalCount,
+    scorePct,
+    xpEarned,
+    coinsEarned,
+    shardsEarned,
+    flashcards,
+    user: buildFullUser(req.user.id),
+    game: buildGameState(db, updatedUser, getUserStudyStats(req.user.id)),
+  });
 });
 
 app.post('/api/university/review', authMiddleware, (req, res) => {

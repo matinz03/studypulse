@@ -218,6 +218,8 @@ db.exec(`
     course_key TEXT NOT NULL DEFAULT 'custom',
     subject_name TEXT NOT NULL,
     concept_title TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'theory',
+    difficulty TEXT NOT NULL DEFAULT 'exam',
     front TEXT NOT NULL,
     back TEXT NOT NULL,
     options_json TEXT NOT NULL DEFAULT '[]',
@@ -328,6 +330,14 @@ for (const [col, def] of gpMigrations) {
   }
 }
 
+const fcCols = new Set(db.prepare('PRAGMA table_info(flashcards)').all().map((c) => c.name));
+if (!fcCols.has('category')) {
+  db.exec("ALTER TABLE flashcards ADD COLUMN category TEXT NOT NULL DEFAULT 'theory'");
+}
+if (!fcCols.has('difficulty')) {
+  db.exec("ALTER TABLE flashcards ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'exam'");
+}
+
 export const DEFAULT_SUBJECTS = [
   { name: 'Rust & Systems', color: '#FAFAFA', icon: '🦀' },
   { name: 'Algorithms', color: '#E4E4E7', icon: '⚡' },
@@ -345,27 +355,37 @@ export function createStarterSubjects(userId) {
 
 export function ensureUniversitySeed(userId) {
   const now = Date.now();
-  const fcCount = db.prepare('SELECT COUNT(*) AS c FROM flashcards WHERE user_id = ?').get(userId).c;
-  if (fcCount === 0) {
+  const existingRows = db.prepare('SELECT card_key FROM flashcards WHERE user_id = ? AND card_key IS NOT NULL').all(userId);
+  const existingKeys = new Set(existingRows.map((r) => r.card_key));
+  if (existingKeys.size < UNIVERSITY_FLASHCARDS.length) {
     const insCard = db.prepare(`
-      INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
+      INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, category, difficulty, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
+    `);
+    const updMeta = db.prepare(`
+      UPDATE flashcards SET category = ?, difficulty = ? WHERE user_id = ? AND card_key = ?
     `);
     const tx = db.transaction(() => {
       for (const c of UNIVERSITY_FLASHCARDS) {
-        insCard.run(
-          userId,
-          c.key,
-          c.courseKey,
-          c.subjectName,
-          c.conceptTitle,
-          c.front,
-          c.back,
-          JSON.stringify(c.options || []),
-          c.correctIndex ?? 0,
-          now,
-          now
-        );
+        if (!existingKeys.has(c.key)) {
+          insCard.run(
+            userId,
+            c.key,
+            c.courseKey,
+            c.subjectName,
+            c.conceptTitle,
+            c.category || 'theory',
+            c.difficulty || 'exam',
+            c.front,
+            c.back,
+            JSON.stringify(c.options || []),
+            c.correctIndex ?? 0,
+            now,
+            now
+          );
+        } else {
+          updMeta.run(c.category || 'theory', c.difficulty || 'exam', userId, c.key);
+        }
       }
     });
     tx();
