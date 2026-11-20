@@ -65,8 +65,8 @@ Sourced directly from `C:\Users\Damian Zod\Documents\University` (`matinz03/Univ
 ### Phase 6: Verification, Build & Production Deployment
 - [x] Run `npx tsc --noEmit` and `npm run build` with zero errors
 - [x] Extend Playwright E2E suite (`verify_studypulse.mjs`) covering all 6 pillars and pass locally (`http://127.0.0.1:3125`)
-- [ ] Commit & push to `matinz03/studypulse` (`main`), deploy to `ubuntu@92.5.4.155:/srv/apps/studypulse`, rebuild `studypulse-web-1`
-- [ ] Pass live Playwright E2E against `https://study.matinz03.tech`, clean temporary `sp_%` test records, and confirm `/api/health`
+- [x] Commit & push to `matinz03/studypulse` (`main`), deploy to `ubuntu@92.5.4.155:/srv/apps/studypulse`, rebuild `studypulse-web-1`
+- [x] Pass live Playwright E2E against `https://study.matinz03.tech`, clean temporary `sp_%` test records, and confirm `/api/health`
 
 ---
 
