@@ -92,12 +92,50 @@ Here is a plain-English breakdown of every feature added to StudyPulse across ea
   - **Weekly Tiered Leagues & 7-Day Focus Pacts:** Climb through 6 weekly league divisions (*Bronze -> Silver -> Gold -> Diamond -> Obsidian -> Astral*) with automatic promotion/demotion zones, challenge any study partner to a **7-Day 1v1 Focus Pact**, and earn milestone badges (`🔥 Fever Master`, `👑 Marathon 60m+`, `🎯 Pure Focus 95%+`) on the social feed.
 - **Where it lives:** `src/components/ProfileView.tsx`, `src/components/RoomsView.tsx`, `src/components/CompeteView.tsx`, `src/components/FeedView.tsx`
 
+### Step 12 — Multi-Layer Procedural Web Audio Soundscape Engine
+- **What it does in simple terms:** Rebuilt the Focus Soundscape synthesizer so every ambient channel sounds warm, organic, and loop-free:
+  - **Brown Noise (`buildBrownChannel`):** Seamless 8-second crossfaded true integrated Brownian (`1/f²`) noise with sub-rumble high-pass (`28 Hz`) and warm low-pass (`620 Hz`).
+  - **Crackling Fireplace (`buildFireChannel`):** 3-layer hearth rumble + flickering flame roar + live stochastic wood crackle, resin snaps, and ember pops.
+  - **Cozy Café (`buildCafeChannel`):** Warm espresso bar air + 4-table formant-filtered vowel conversational murmur + procedural porcelain cup/saucer clinks, spoon stirs, and espresso steam bursts.
+  - **Quiet Library (`buildLibraryChannel`):** Hushed reading-room presence + rhythmic 1 Hz wooden grandfather clock tick-tock + 2-stage paper page turns and soft pencil writing strokes.
+- **Where it lives:** `src/utils/soundEngine.ts`
+
+### Step 13 — UI/UX Pro Max Bento Redesign of Focus & Me Pages + `+5m` Live Timer Extension
+- **What it does in simple terms:**
+  - **Unified Focus Chronometer Cockpit:** Widened the primary workspace column to `560px`, unified the timer dial, 2-line mobile-safe Goal% & Room live counter header, progressive subject pills (`+N more`), and a **3-Tab Focus Workbench (`Uni Vault` | `Task Queue` | `Split View`)** so you never have to scroll past a long vertical stack.
+  - **`+5m` Extends Current Timer Duration:** Clicking **`+5m`** adds 5 minutes (`+300s`) directly to your active countdown target (`25:00 -> 30:00 -> 35:00`) and reschedules the server lock-screen alarm automatically.
+  - **Me Page Bento Analytics & 4-Section Filter:** Added a 4-tile KPI Bento Header (*Total Focus*, *Focus Purity*, *Best Hour*, *Coins & Streak*), a 4-tab view switcher (`All Bento` | `Analytics` | `Receipt & Data` | `Shop & Badges`), and 2-column responsive Bento cards.
+- **Where it lives:** `src/components/FocusView.tsx`, `src/components/ProfileView.tsx`, `src/components/StorePanel.tsx`, `src/App.tsx`
+
+### Step 14 — 320-Question Politecnico di Torino Master Test Bank & Timed Mock Exam Simulator
+- **What it does in simple terms:**
+  - **320 Exam-Grade Multiple-Choice Questions (`80` per Course):** Expanded the active-recall vault from 32 starter cards to **320 categorized questions** across *Computer Architectures* (`80`), *Data Science & Database Technology* (`80`), *Cloud Computing Technologies* (`80`), and *Internet Architecture* (`80`), tagged by category (**166 Theory**, **52 Code/Trace**, **102 Numeric**) and difficulty (**Core**, **Exam**, **Lab**).
+  - **Timed Mock Exam Simulator:** Configure a **5, 10, 15, or 20-question Timed Mock Exam** filtered by course and category (`All`, `Theory`, `Code/Trace`, `Numeric`) with a live countdown clock, question navigator pills, detailed answer key explanations, FSRS spaced-repetition batch grading (`POST /api/university/exam-complete`), and automatic XP, Coin, and Arcane Shard rewards.
+  - **Auto-Distractor Generator for Custom Notes:** Paste any `Question :: Answer` note and the server automatically generates 3 plausible course-matched multiple-choice distractors.
+- **Where it lives:** `server/universityQuestionBank.js`, `server/universityData.js`, `server/db.js`, `server/index.js`, `src/components/UniversityVaultPanel.tsx`
+
+### Step 15 — High-Contrast Dungeon Stone Masonry Walls vs. Walkable Flagstone Paths
+- **What it does in simple terms:** Made open corridors vs. closed walls immediately distinguishable inside the 11×9 dungeon viewport:
+  - **Recessed Dark Masonry Walls & Bright Corridor Rims:** Wall tiles render with dark 2-course staggered stone masonry and a crisp `2px` biome-accented perimeter border wherever a wall borders an open floor.
+  - **Bright Flagstone Walkways & Step Guides:** Open tiles render with high-contrast beveled flagstones, northern wall drop-shadows, green walkable step outlines on adjacent tiles, and D-Pad buttons that light up emerald when open or dim when blocked by a wall.
+- **Where it lives:** `src/game/pixelSprites.ts`, `src/game/PixelCanvas.tsx`, `src/components/QuestView.tsx`
+
+### Step 16 — *Chronicles of Oakhaven* Tactical RPG Overhaul: Vanguard Party, Mythic Side Stories, Break Shields, Dash Flanking, Dual-Tech Finishers & Heroic Deeds
+- **What it does in simple terms:**
+  - **Recruitable Vanguard Party Squad (4 Allies):** Recruit **Sir Kaelen** (*Iron Vanguard*), **Lyra Thorn** (*Combat Alchemist*), **Pip Swiftfoot** (*Starlight Ranger*), and **Vespera** (*Astral Chronomancer*). Your active party ally visibly stands beside you in battle on the pixel canvas, grants a permanent passive stat aura, and unlocks an active **Ally Assist (`ally_skill`)** plus a **Dual-Tech Ultimate Finisher (`finisher`)**.
+  - **Enemy Guard Shields (`🛡️`) & `💥 GUARD BROKEN!` Stagger:** Monsters and Bosses carry 2–3 Guard Shields rendered above their sprite. Breaking all shields with *Focus Break*, *Flanking Backstabs*, *Perfect Parries*, *Study Casts*, or *Ally Assists* triggers **`💥 GUARD BROKEN!`** — stunning the enemy, inflicting **+50% Vulnerable DMG**, and unlocking early Finishers.
+  - **Tactical Movements (`💨 Dash Flank`):** Dash to gain **+45% Evasion** (triggering an automatic **Sidestep Counter-Cut** if you dodge) and enter **Flanking Stance** (cyan speed-afterimage on the canvas; your next Strike becomes **`⚡ Flank Backstab!`** with Guaranteed Critical damage and `-1🛡️` Shield Break).
+  - **Cinematic Dual-Tech Ultimate Finishers:** Unleash *Dawnbreaker Cross-Slash*, *Eclipse Supernova Elixir*, *Phantom Arrow Storm*, or *Chrono Singularity Collapse* for `2.75×–3.1× ATK` multi-hit critical damage with golden-crimson cross-slash beams and **+35% bonus Shards / +25% bonus Hero XP** on a Finisher kill.
+  - **3-Act Branching Mythic Side Stories & `[MYTHIC]` Relics:** Play through 4 multi-act narrative side stories (*The Sunken Belltower of Oakhaven*, *Bram's Star-Forged Oath*, *Lyra's Eclipse Panacea*, *The Astral Phoenix's Rebirth*) where your heroic choices forge guaranteed **`[MYTHIC]` Relics** (*Dawnchime Astral Blade*, *Aegis of the First Archivist*, *Chrono-Hourglass of Oakhaven*, *Solaria, Mythic Astral Phoenix*).
+  - **Heroic Deeds & Titles Ledger + 0-Energy Trial Arena:** Complete 6 tracked combat/story deeds for permanent stat upgrades (`+ATK`, `+DEF`, `+Max HP`, `+LUCK`) and Heroic Titles, and jump into a **`⚔️ Trial Battle (0⚡)`** anytime to test your squad.
+- **Where it lives:** `server/storyData.js`, `server/gameEngine.js`, `server/index.js`, `src/game/PixelCanvas.tsx`, `src/components/QuestView.tsx`, `src/types.ts`
+
 ---
 
 ## 2. Tech Stack & Repository Layout
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4 (`src/index.css`), Framer Motion, Lucide Icons, HTML5 Canvas pixel-art renderer (`src/game/pixelSprites.ts`, `src/components/RoomTavernCanvas.tsx`), Web Audio multi-track procedural synthesizer (`src/utils/soundEngine.ts`), Floating Document + Video PiP engine (`src/utils/pipEngine.ts`), Service Worker + Web Push (`public/sw.js`).
-- **Backend:** Node.js + Express (`server/index.js`), WebSocket live presence & room sync (`ws`), SQLite via `better-sqlite3` (`server/db.js` WAL mode + foreign keys + safe idempotent migrations), Web Push VAPID notifications (`web-push`), Procedural Pixel RPG (`server/gameEngine.js`, `server/dungeonGenerator.js`, `server/storyData.js`), 4-tier Rotating Coin Store (`server/shopEngine.js`), University Vault Curriculum Seed (`server/universityData.js`).
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4 (`src/index.css`), Framer Motion, Lucide Icons, HTML5 Canvas pixel-art renderer (`src/game/pixelSprites.ts`, `src/game/PixelCanvas.tsx`, `src/components/RoomTavernCanvas.tsx`), Web Audio multi-track procedural synthesizer (`src/utils/soundEngine.ts`), Floating Document + Video PiP engine (`src/utils/pipEngine.ts`), Service Worker + Web Push (`public/sw.js`).
+- **Backend:** Node.js + Express (`server/index.js`), WebSocket live presence & room sync (`ws`), SQLite via `better-sqlite3` (`server/db.js` WAL mode + foreign keys + safe idempotent migrations), Web Push VAPID notifications (`web-push`), Procedural Pixel RPG (`server/gameEngine.js`, `server/dungeonGenerator.js`, `server/storyData.js`), 4-tier Rotating Coin Store (`server/shopEngine.js`), 320-Question University Vault Curriculum & Master Test Bank (`server/universityData.js`, `server/universityQuestionBank.js`).
 - **Themes:** 16 Dark/Light themes (`src/themes.ts`) synchronized across main UI, Service/PWA chrome, and Floating PiP HUD (`shadcn-dark/light`, `vercel/vercel-light`, `linear/linear-light`, `apple-glass/apple-light`, `raycast/raycast-light`, `sage-dark/light`, `indigo-dark/light`, `terracotta-dark/light`).
 
 ---
@@ -109,14 +147,14 @@ Sourced directly from `C:\Users\Damian Zod\Documents\University` (`matinz03/Univ
 | Vault Source | Content Integrated into StudyPulse | StudyPulse Module |
 | :--- | :--- | :--- |
 | `10 Courses/*.md` & `Connected Reading Guide.md` | 4 core courses, exam targets, & sequential concept reading trails (*RISC-V -> Pipelining -> Dynamic Scheduling -> Speculation*, *DW -> KDD -> Apriori -> Clustering*, *Virtualization -> Cgroups -> Docker -> Cloud/Edge*, *IPv4 -> Cellular -> IPv6 -> OSPF -> BGP*). | `server/universityData.js`, `src/components/UniversityVaultPanel.tsx` |
-| `20 Concepts/*` (181 atomic concept notes) & `00 Inbox/* - Learning Progress` | 32 FSRS spaced-repetition flashcards + 4-choice quiz cards covering hazards, Tomasulo, ROB, cache policies, ROLAP/MOLAP/HOLAP, Apriori/FP-growth, Silhouette/DBSCAN, VT-x/EPT, namespaces/cgroups, CIDR, GSM/LTE/5G, and OSPF/BGP; plus recall prompts seeded into study notes. | `server/universityData.js`, `flashcards` & `study_notes` tables, `POST /api/university/review`, `POST /api/game/study-cast` |
+| `20 Concepts/*` (181 atomic concept notes), `50 Labs/*` & `00 Inbox/*` | **320 FSRS Spaced-Repetition & Timed Mock Exam Questions** (`80` per course across `comp_arch`, `data_science`, `cloud_comp`, `internet_arch`, categorized into **166 Theory**, **52 Code/Trace**, and **102 Numeric** problems) + auto-distractor generator for custom notes. | `server/universityQuestionBank.js`, `server/universityData.js`, `flashcards` table, `POST /api/university/review`, `POST /api/university/exam-complete`, `POST /api/game/study-cast` |
 | `10 Courses/Internet Architecture.../Exercises/` | Interactive **IPv4 CIDR & Host-Sizing Step-by-Step Calculator** preserving the `hosts + 2 -> power of two -> host bits h -> /prefix (32-h) -> binary/decimal netmask -> usable range` workflow + `/31` point-to-point clarification. | `src/components/UniversityVaultPanel.tsx` -> Calculators Tab |
 | `50 Labs/Computer Architectures/Lab 01 & 02` | Interactive **CPU Pipeline CPI, Weighted Execution Time ($T_i = \text{cycles}_i / 1750\text{ Hz}$) & Amdahl's Law ($S = 1 / ((1 - p) + p/s)$) Calculator** matching the ASE Studio / gem5 lab workflows. | `src/components/UniversityVaultPanel.tsx` -> Calculators Tab |
 | `00 Inbox/* - Learning Progress` Markdown convention | Built-in **Obsidian Session Scratchpad & Learning Progress Composer** with 1-click download of frontmatter-tagged `.md` files (`type: learning-progress`, recall prompts, source links) ready to drop directly into `00 Inbox/`. | `src/components/UniversityVaultPanel.tsx` -> Notes & Exams Tab |
 
 ---
 
-## 4. StudyPulse v3.0 — 6-Pillar Implementation Roadmap & Handoff Status
+## 4. StudyPulse v3.0+ — Implementation Roadmap & Handoff Status
 
 > **Agent Handoff Convention:** Keep checkboxes below updated immediately after each milestone is implemented and verified (`npx tsc --noEmit && npm run build` + Playwright E2E).
 
@@ -126,7 +164,7 @@ Sourced directly from `C:\Users\Damian Zod\Documents\University` (`matinz03/Univ
 
 ### Phase 2: University Curriculum Data & SQLite Schema Migrations
 - [x] **Pillar 4 / University Seed:** Create `server/universityData.js` (`UNIVERSITY_PORTAL_URL`, `UNIVERSITY_COURSES`, `UNIVERSITY_FLASHCARDS`)
-- [x] **Database Migrations:** Update `server/db.js` with `flashcards`, `exam_goals`, `study_notes`, `room_raids`, `room_messages`, `focus_duels`, plus `specialization` on `game_profiles`, and export `ensureUniversitySeed(userId)`
+- [x] **Database Migrations:** Update `server/db.js` with `flashcards`, `exam_goals`, `study_notes`, `room_raids`, `room_messages`, `focus_duels`, plus `specialization`, `category`, and `difficulty` columns, and export `ensureUniversitySeed(userId)`
 
 ### Phase 3: Backend Engines & REST/WebSocket Endpoints
 - [x] **Pillar 1 (Co-Op & RPG Mastery):** Update `server/gameEngine.js` with `HERO_SPECIALIZATIONS` (2 masteries per hero class), `selectSpecialization()`, `companionEvolution` stage computation, and `resolveStudyCast()` (FSRS flashcard quiz -> critical RPG strike / riddle solve)
@@ -137,16 +175,16 @@ Sourced directly from `C:\Users\Damian Zod\Documents\University` (`matinz03/Univ
   - [x] Implement `/api/university/*`, `/api/game/specialization`, `/api/game/study-cast`, `/api/rooms/:id/chat`, `/api/rooms/:id/raid-strike`, and `/api/compete/duel`
 
 ### Phase 4: Client Types, Audio Studio & Floating PiP Enhancements
-- [x] **Types:** Update `src/types.ts` with all v3.0 interfaces (`UniversityCourse`, `FlashcardItem`, `ExamGoal`, `StudyNoteItem`, `RoomRaidState`, `RoomChatMessage`, `LeagueStatus`, `FocusDuel`, `TodayTimelineItem`, etc.)
-- [x] **Pillar 2 (Multi-Track Ambient Sound Mixer):** Upgrade `src/utils/soundEngine.ts` with simultaneous multi-channel mixing (`setTrackMix`, `getTrackMix`, `applySavedMixPreset`) while preserving legacy `setPreset`
+- [x] **Types:** Update `src/types.ts` with all v3.0+ interfaces (`UniversityCourse`, `FlashcardItem`, `ExamGoal`, `StudyNoteItem`, `RoomRaidState`, `RoomChatMessage`, `LeagueStatus`, `FocusDuel`, `TodayTimelineItem`, `PartyAllyInfo`, `MythicSideStoryInfo`, `HeroicDeedInfo`, etc.)
+- [x] **Pillar 2 (Multi-Track Ambient Sound Mixer):** Upgrade `src/utils/soundEngine.ts` with simultaneous multi-channel mixing (`setTrackMix`, `getTrackMix`, `applySavedMixPreset`) and multi-layer procedural generators for `brown`, `fire`, `cafe`, and `library`
 - [x] **Pillar 3 (Interactive Floating PiP HUD):** Upgrade `src/utils/pipEngine.ts` with `#sp-task-done` task completion button (`onCompleteTask`), live `#sp-peers` room occupant badge, and floating `#sp-toast` milestone/loot banner across Document PiP and Canvas Video PiP
 
 ### Phase 5: Frontend Feature Implementation Across All 6 Pillars
-- [x] **Pillars 2 & 4 (`src/components/FocusView.tsx` & `src/components/UniversityVaultPanel.tsx`):** Soundscape Mixer Studio sliders, Flowtime earned-break indicator, High-Stakes Coin Wager selector, and **University Vault & Active Learning Hub** (FSRS Flashcards, IPv4 CIDR & Comp-Arch CPI/Amdahl Lab Calculators, Obsidian `.md` Scratchpad & Exam Countdown Planner)
+- [x] **Pillars 2 & 4 (`src/components/FocusView.tsx` & `src/components/UniversityVaultPanel.tsx`):** Unified Focus Chronometer Cockpit, `+5m` live timer extension, Soundscape Mixer Studio sliders, Flowtime earned-break indicator, High-Stakes Coin Wager selector, and **University Vault & Active Learning Hub** (320-Question FSRS Flashcards, **Timed Mock Exam Simulator**, IPv4 CIDR & Comp-Arch CPI/Amdahl Lab Calculators, Obsidian `.md` Scratchpad & Exam Countdown Planner)
 - [x] **Pillars 1 & 6 (`src/components/RoomsView.tsx` & `src/components/RoomTavernCanvas.tsx`):** **Live Pixel Study Tavern** `<canvas>` showing seated peers' pixel heroes & companions with live focus auras, **Synced Room Pomodoro Bar**, **Weekly Co-Op Room Raid Boss** card with `Raid Strike`, and **Room Lounge Chat**
 - [x] **Pillars 1 & 4 (`src/components/QuestView.tsx`):** **Study-to-Cast University Quiz** trigger inside dungeon combat & ancient riddles, **Class Specialization Selector**, and **Companion Evolution Stage** badge
 - [x] **Pillar 6 (`src/components/CompeteView.tsx` & `src/components/FeedView.tsx`):** **Weekly Tiered Leagues** (`Bronze` -> `Astral`), **1v1 Focus Duel Arena**, and **Feed Session Milestone Badges**
-- [x] **Pillar 5 (`src/components/ProfileView.tsx`):** **365-Day Heatmap Toggle**, **Week-over-Week Delta Badge**, **YPT Daily Timeline Receipt Card** with downloadable PNG generator, and **CSV / JSON / iCal (`.ics`) Export Bar**
+- [x] **Pillar 5 (`src/components/ProfileView.tsx`):** **4-Tile KPI Bento Header**, **4-Section Filter (`All Bento` | `Analytics` | `Receipt & Data` | `Shop & Badges`)**, **365-Day Heatmap Toggle**, **Week-over-Week Delta Badge**, **YPT Daily Timeline Receipt Card** with downloadable PNG generator, and **CSV / JSON / iCal (`.ics`) Export Bar**
 - [x] **App Wiring (`src/App.tsx`):** Connect all new handlers, WebSocket chat/raid sync, PiP task completion/toast state, and props across tabs
 
 ### Phase 6: Verification, Build & Production Deployment
@@ -154,6 +192,12 @@ Sourced directly from `C:\Users\Damian Zod\Documents\University` (`matinz03/Univ
 - [x] Extend Playwright E2E suite (`verify_studypulse.mjs`) covering all 6 pillars and pass locally (`http://127.0.0.1:3125`)
 - [x] Commit & push to `matinz03/studypulse` (`main`), deploy to `ubuntu@92.5.4.155:/srv/apps/studypulse`, rebuild `studypulse-web-1`
 - [x] Pass live Playwright E2E against `https://study.matinz03.tech`, clean temporary `sp_%` test records, and confirm `/api/health`
+
+### Phase 7: 320-Question Master Test Bank, Dungeon Wall/Path Clarity & Tactical RPG Overhaul
+- [x] **320-Question Master Test Bank & Mock Exam Simulator:** Create `server/universityQuestionBank.js` (`288` new + `32` base = `320` total questions, `80` per course), add `POST /api/university/exam-complete`, and build the Timed Mock Exam Simulator in `src/components/UniversityVaultPanel.tsx`
+- [x] **Dungeon Wall vs. Open Walkable Path Clarity:** High-contrast recessed masonry walls, `2px` corridor rim borders, beveled flagstone floors, adjacent step indicators in `src/game/PixelCanvas.tsx`, and open/blocked D-Pad indicators in `src/components/QuestView.tsx`
+- [x] **Tactical RPG Overhaul (*Chronicles of Oakhaven*):** Add `PARTY_ALLIES` (4 recruitable party members), `MYTHIC_SIDE_STORIES` (4 3-Act narrative side stories rewarding `[MYTHIC]` relics), `HEROIC_DEEDS` (6 permanent stat & title deeds), Enemy Break Shields (`🛡️`), `💨 Dash Flank` movement & Flanking Backstabs, `🤝 Ally Assist`, `🌟 Dual-Tech Ultimate Finishers`, and `⚔️ Vanguard Trial Arena (0⚡)` across `server/storyData.js`, `server/gameEngine.js`, `server/index.js`, `src/game/PixelCanvas.tsx`, and `src/components/QuestView.tsx`
+- [x] Verify live on `https://study.matinz03.tech` with Playwright (`verify_rpg_overhaul.mjs`) and clean temporary `sp_%` test users
 
 ---
 
@@ -170,9 +214,10 @@ $env:PORT="3125"; $env:NODE_ENV="production"; node server/index.js
 # Run full Playwright E2E against local or live target
 $env:TARGET_URL="http://127.0.0.1:3125"
 node "C:\Users\Damian Zod\.gemini\antigravity\brain\743af130-a4a6-4321-ac87-6c92a2a4a881\scratch\verify_studypulse.mjs"
+node "C:\Users\Damian Zod\.gemini\antigravity\brain\743af130-a4a6-4321-ac87-6c92a2a4a881\scratch\verify_rpg_overhaul.mjs"
 ```
 
-### Database Schema Reference (v3.0)
+### Database Schema Reference (v3.0+)
 Core tables in `server/db.js`:
 - Existing: `users`, `subjects`, `study_sessions`, `friendships`, `feed_reactions`, `feed_comments`, `study_rooms`, `study_tasks`, `push_subscriptions`, `scheduled_timers`, `user_unlocks`, `shop_purchases`, `game_profiles`, `game_items`.
-- v3.0 Additions: `flashcards`, `exam_goals`, `study_notes`, `room_raids`, `room_messages`, `focus_duels` (+ `game_profiles.specialization`).
+- v3.0+ Additions: `flashcards` (`category`, `difficulty`), `exam_goals`, `study_notes`, `room_raids`, `room_messages`, `focus_duels` (+ `game_profiles.specialization`, `story_flags_json` storing `recruitedAllies`, `activeAllyId`, `sideStories`, `deedStats`, and `claimedDeeds`).
