@@ -19,11 +19,14 @@ import {
   Trash2,
   Check,
   Clock,
+  Sliders,
+  Coins,
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
-import { Room, StudyTask, Subject, TimerMode } from '../types';
+import { UniversityVaultPanel } from './UniversityVaultPanel';
+import { Room, StudyTask, Subject, SubjectStat, TimerMode, UniversityData } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
-import { SoundPreset } from '../utils/soundEngine';
+import { SAVED_MIX_PRESETS, SoundPreset, TrackKey } from '../utils/soundEngine';
 
 interface FocusViewProps {
   themeId?: ThemeId;
@@ -53,6 +56,37 @@ interface FocusViewProps {
   soundVolume: number;
   onChangeSound: (p: SoundPreset) => void;
   onChangeSoundVolume: (v: number) => void;
+  trackMix?: Record<TrackKey, number>;
+  onChangeTrackMix?: (mix: Partial<Record<TrackKey, number>>) => void;
+  onApplyMixPreset?: (key: string) => void;
+  wagerCoins?: number;
+  onChangeWagerCoins?: (coins: number) => void;
+  userCoins?: number;
+  university?: UniversityData;
+  subjectBreakdown?: SubjectStat[];
+  onSyncUniversitySubjects?: () => Promise<void>;
+  onReviewFlashcard?: (cardId: number, grade?: number, selectedIndex?: number) => Promise<{ isCorrect?: boolean } | void>;
+  onCreateFlashcards?: (payload: {
+    subjectName: string;
+    courseKey: string;
+    front?: string;
+    back?: string;
+    markdownText?: string;
+  }) => Promise<void>;
+  onSaveStudyNote?: (payload: {
+    id?: number;
+    subjectName: string;
+    title: string;
+    contentMd: string;
+  }) => Promise<void>;
+  onDeleteStudyNote?: (id: number) => Promise<void>;
+  onSaveExamGoal?: (payload: {
+    courseKey: string;
+    subjectName: string;
+    examTitle: string;
+    examDate: string;
+    targetHours: number;
+  }) => Promise<void>;
   currentRoom: Room | undefined;
   onGoToRooms: () => void;
   todayMins: number;
@@ -130,6 +164,20 @@ export function FocusView({
   soundVolume,
   onChangeSound,
   onChangeSoundVolume,
+  trackMix,
+  onChangeTrackMix,
+  onApplyMixPreset,
+  wagerCoins = 0,
+  onChangeWagerCoins,
+  userCoins = 0,
+  university,
+  subjectBreakdown = [],
+  onSyncUniversitySubjects,
+  onReviewFlashcard,
+  onCreateFlashcards,
+  onSaveStudyNote,
+  onDeleteStudyNote,
+  onSaveExamGoal,
   currentRoom,
   onGoToRooms,
   todayMins,
@@ -160,6 +208,7 @@ export function FocusView({
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPomos, setNewTaskPomos] = useState(2);
   const [savingTask, setSavingTask] = useState(false);
+  const [showMixer, setShowMixer] = useState(false);
 
   const themeMeta = getThemeMeta(themeId);
   const resolvedSubAccent = resolveAccent(activeSubject?.color, themeId);
@@ -489,6 +538,29 @@ export function FocusView({
             <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold">
               🍅 {(pomoCycleCount % 4) + 1}/4
             </span>
+            {mode === 'stopwatch' && (
+              <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold">
+                ☕ Earned +{Math.max(1, Math.floor(elapsedSec / 300))}m
+              </span>
+            )}
+            {onChangeWagerCoins && (
+              <button
+                type="button"
+                disabled={isRunning || elapsedSec > 0}
+                onClick={() => {
+                  const next = wagerCoins === 0 ? 15 : wagerCoins === 15 ? 30 : 0;
+                  if (next <= userCoins || next === 0) onChangeWagerCoins(next);
+                  else onChangeWagerCoins(0);
+                }}
+                title="High-Stakes Focus Wager: earn 2x Coins + 15 Shards at >=90% Purity"
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition disabled:opacity-50 ${
+                  wagerCoins > 0 ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
+                }`}
+              >
+                <Coins className="w-3 h-3" />
+                <span>{wagerCoins > 0 ? `Wager ${wagerCoins}` : 'Wager'}</span>
+              </button>
+            )}
             {pipSupported && (
               <button
                 type="button"
@@ -818,6 +890,18 @@ export function FocusView({
             <span className="font-mono-num text-[10px] text-slate-400">
               {Math.round(soundVolume * 100)}%
             </span>
+            {onChangeTrackMix && (
+              <button
+                type="button"
+                onClick={() => setShowMixer((v) => !v)}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 cursor-pointer border ${
+                  showMixer || soundPreset === 'mix' ? 'sp-tab-active' : 'sp-badge'
+                }`}
+              >
+                <Sliders className="w-3 h-3" />
+                <span>Mixer</span>
+              </button>
+            )}
           </div>
         </div>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
@@ -849,7 +933,65 @@ export function FocusView({
           aria-label="Soundscape volume"
           className="w-full h-1.5 accent-current cursor-pointer"
         />
+
+        {showMixer && onChangeTrackMix && trackMix && (
+          <div className="pt-2 border-t border-white/10 space-y-2">
+            {onApplyMixPreset && (
+              <div className="flex flex-wrap gap-1.5">
+                {SAVED_MIX_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => onApplyMixPreset(p.key)}
+                    className="px-2.5 py-1 rounded-full sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90"
+                  >
+                    {p.icon} {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              {SOUNDS.filter((s) => s.key !== 'off').map((s) => {
+                const tk = s.key as TrackKey;
+                const val = trackMix[tk] || 0;
+                return (
+                  <div key={tk} className="p-2 rounded-xl sp-inset space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-semibold text-slate-200">{s.icon} {s.label}</span>
+                      <span className="font-mono-num text-slate-400">{Math.round(val * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={val}
+                      aria-label={`Mix ${s.label}`}
+                      onChange={(e) => onChangeTrackMix({ [tk]: Number(e.target.value) })}
+                      className="w-full h-1 accent-current cursor-pointer"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* University Vault & Active Learning Hub */}
+      {university && onSyncUniversitySubjects && onReviewFlashcard && onCreateFlashcards && onSaveStudyNote && onDeleteStudyNote && onSaveExamGoal && (
+        <UniversityVaultPanel
+          university={university}
+          subjectBreakdown={subjectBreakdown}
+          coins={userCoins}
+          onSyncSubjects={onSyncUniversitySubjects}
+          onReviewCard={onReviewFlashcard}
+          onCreateFlashcards={onCreateFlashcards}
+          onSaveNote={onSaveStudyNote}
+          onDeleteNote={onDeleteStudyNote}
+          onSaveExamGoal={onSaveExamGoal}
+        />
+      )}
     </div>
   );
 }

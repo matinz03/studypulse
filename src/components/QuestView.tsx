@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import {
   EnemyIntent,
+  FlashcardItem,
   GameActionResponse,
   GameItem,
   GameState,
@@ -63,6 +64,9 @@ interface QuestViewProps {
   onSalvageItem: (payload: { itemId?: number; maxRarity?: string }) => Promise<GameActionResponse>;
   onUpgradeStat: (stat: 'atk' | 'vit' | 'luck' | 'crit') => Promise<GameActionResponse>;
   onSelectFloor: (floor: number) => Promise<GameActionResponse>;
+  onSelectSpecialization?: (specKey: string) => Promise<GameActionResponse>;
+  onStudyCast?: (payload: { cardId: number; selectedIndex?: number; grade?: number }) => Promise<GameActionResponse>;
+  flashcards?: FlashcardItem[];
   onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
   onRerollDailyShop: () => Promise<void>;
   onGoToFocus: () => void;
@@ -150,6 +154,9 @@ export function QuestView({
   onSalvageItem,
   onUpgradeStat,
   onSelectFloor,
+  onSelectSpecialization,
+  onStudyCast,
+  flashcards = [],
   onBuyShopItem,
   onRerollDailyShop,
   onGoToFocus,
@@ -162,6 +169,11 @@ export function QuestView({
   const [eventSeq, setEventSeq] = useState(0);
   const [recentDrop, setRecentDrop] = useState<GameItem | null>(null);
   const [sfxMuted, setSfxMuted] = useState(() => soundEngine.isSfxMuted());
+  const [showStudyCast, setShowStudyCast] = useState(false);
+  const [quizCardIdx, setQuizCardIdx] = useState(0);
+
+  const quizCards = flashcards.filter((c) => c.options && c.options.length > 0);
+  const activeQuizCard = quizCards.length > 0 ? quizCards[quizCardIdx % quizCards.length] : null;
 
   const { mode, profile, heroStats, biome, village, dungeon, story, encounter, items, equippedBySlot, recentLogs } = game;
   const hpPct = Math.round((heroStats.hp / Math.max(1, heroStats.maxHp)) * 100);
@@ -518,21 +530,92 @@ export function QuestView({
                 🧪 Potion ({profile.potions})
               </button>
             </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onCombatAction('flee'))}
-              className="w-full py-1.5 rounded-xl sp-inset text-[11px] font-semibold text-slate-400 hover:text-white cursor-pointer"
-            >
-              🏃 Disengage Back to Map
-            </button>
+            <div className="flex gap-1.5">
+              {onStudyCast && activeQuizCard && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setShowStudyCast((v) => !v)}
+                  className="flex-1 py-2 rounded-xl sp-tab-active border text-xs font-extrabold cursor-pointer flex items-center justify-center gap-1"
+                >
+                  📖 Study Cast (University Quiz 1.65x)
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(() => onCombatAction('flee'))}
+                className="px-3 py-2 rounded-xl sp-inset text-[11px] font-semibold text-slate-400 hover:text-white cursor-pointer"
+              >
+                🏃 Disengage
+              </button>
+            </div>
+            {showStudyCast && activeQuizCard && onStudyCast && (
+              <div className="p-3 rounded-2xl sp-inset border border-white/15 space-y-2">
+                <div className="text-[10px] font-bold text-slate-300">
+                  🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} (Answer correctly for 1.65x Arcane DMG!)
+                </div>
+                <div className="text-xs font-bold text-white">{activeQuizCard.front}</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {activeQuizCard.options.map((opt, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setShowStudyCast(false);
+                        setQuizCardIdx((i) => i + 1);
+                        await runAction(() => onStudyCast({ cardId: activeQuizCard.id, selectedIndex: idx }));
+                      }}
+                      className="text-left px-2.5 py-2 rounded-xl sp-btn-primary text-[11px] font-bold cursor-pointer"
+                    >
+                      {String.fromCharCode(65 + idx)}. {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : encounter?.type === 'riddle' && encounter.options ? (
           <div className="p-3 rounded-2xl sp-tab-active border space-y-2">
-            <div className="text-xs font-extrabold text-white">🗿 {encounter.title}</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-extrabold text-white">🗿 {encounter.title}</div>
+              {onStudyCast && activeQuizCard && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setShowStudyCast((v) => !v)}
+                  className="px-2 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+                >
+                  📖 Vault Quiz
+                </button>
+              )}
+            </div>
             <p className="text-[11px] text-slate-200 leading-relaxed">{encounter.prompt}</p>
             {encounter.hint && (
               <div className="text-[10px] font-bold text-sky-300">👁️ {encounter.hint}</div>
+            )}
+            {showStudyCast && activeQuizCard && onStudyCast && (
+              <div className="p-2.5 rounded-xl sp-inset space-y-1.5 border border-white/15">
+                <div className="text-[11px] font-bold text-white">{activeQuizCard.front}</div>
+                <div className="grid grid-cols-1 gap-1">
+                  {activeQuizCard.options.map((opt, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setShowStudyCast(false);
+                        setQuizCardIdx((i) => i + 1);
+                        await runAction(() => onStudyCast({ cardId: activeQuizCard.id, selectedIndex: idx }));
+                      }}
+                      className="text-left px-2.5 py-1.5 rounded-lg sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90"
+                    >
+                      {String.fromCharCode(65 + idx)}. {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             <div className="grid grid-cols-3 gap-1.5 pt-1">
               {encounter.options.map((opt, idx) => (
@@ -1183,6 +1266,46 @@ export function QuestView({
                 ))}
               </div>
             </div>
+
+            {/* Class Specialization & Companion Evolution */}
+            {(heroStats.specializations || heroStats.companionEvolution) && (
+              <div className="p-3 rounded-2xl sp-inset space-y-2.5 border border-white/10">
+                {heroStats.companionEvolution && (
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-slate-300">🦉 Companion Evolution</span>
+                    <span className="px-2 py-0.5 rounded-full sp-badge font-bold text-white">
+                      {heroStats.companionEvolution.label}
+                    </span>
+                  </div>
+                )}
+                {heroStats.specializations && heroStats.specializations.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-extrabold text-white">🌟 Class Mastery Specialization</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {heroStats.specializations.map((sp) => {
+                        const active = heroStats.specialization === sp.key;
+                        return (
+                          <button
+                            key={sp.key}
+                            type="button"
+                            disabled={busy || !onSelectSpecialization}
+                            onClick={() => onSelectSpecialization && runAction(() => onSelectSpecialization(sp.key))}
+                            className={`text-left p-2.5 rounded-xl border transition cursor-pointer ${
+                              active ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
+                            }`}
+                          >
+                            <div className="text-[11px] font-extrabold text-white">
+                              {active ? '✓ ' : ''}{sp.name}
+                            </div>
+                            <div className="text-[9px] text-slate-300 leading-snug mt-0.5">{sp.perk}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="glass-card rounded-3xl p-4 space-y-3">

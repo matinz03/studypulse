@@ -70,6 +70,113 @@ export const HERO_CLASSES = {
   },
 };
 
+export const HERO_SPECIALIZATIONS = {
+  hero_scholar: [
+    {
+      key: 'chronomancer',
+      name: 'Chronomancer',
+      classKey: 'hero_scholar',
+      bonusAtk: 4,
+      bonusDef: 1,
+      bonusHp: 12,
+      bonusLuck: 6,
+      bonusCrit: 4,
+      bonusIntuition: 6,
+      perk: '+6 Intuition, +6 Luck, +4 ATK & Time-Dilation Cast',
+    },
+    {
+      key: 'archivist',
+      name: 'Grand Archivist',
+      classKey: 'hero_scholar',
+      bonusAtk: 6,
+      bonusDef: 3,
+      bonusHp: 22,
+      bonusLuck: 4,
+      bonusCrit: 6,
+      bonusIntuition: 10,
+      perk: '+10 Intuition, +22 HP & +6% Crit Lore Mastery',
+    },
+  ],
+  hero_knight: [
+    {
+      key: 'templar',
+      name: 'Oakhaven Templar',
+      classKey: 'hero_knight',
+      bonusAtk: 5,
+      bonusDef: 6,
+      bonusHp: 35,
+      bonusLuck: 2,
+      bonusCrit: 3,
+      bonusIntuition: 4,
+      perk: '+6 DEF, +35 HP & Bastion Aegis',
+    },
+    {
+      key: 'vanguard',
+      name: 'Iron Vanguard',
+      classKey: 'hero_knight',
+      bonusAtk: 9,
+      bonusDef: 4,
+      bonusHp: 20,
+      bonusLuck: 2,
+      bonusCrit: 5,
+      bonusIntuition: 2,
+      perk: '+9 ATK, +4 DEF & Crushing Riposte',
+    },
+  ],
+  hero_rogue: [
+    {
+      key: 'vaultbreaker',
+      name: 'Vaultbreaker',
+      classKey: 'hero_rogue',
+      bonusAtk: 5,
+      bonusDef: 2,
+      bonusHp: 10,
+      bonusLuck: 14,
+      bonusCrit: 8,
+      bonusIntuition: 8,
+      perk: '+14 Luck, +8% Crit & +8 Intuition Seeker',
+    },
+    {
+      key: 'nightblade',
+      name: 'Nightblade',
+      classKey: 'hero_rogue',
+      bonusAtk: 10,
+      bonusDef: 1,
+      bonusHp: 8,
+      bonusLuck: 6,
+      bonusCrit: 14,
+      bonusIntuition: 4,
+      perk: '+14% Crit & +10 ATK Precision Ambush',
+    },
+  ],
+  hero_mage: [
+    {
+      key: 'pyromancer',
+      name: 'Pyromancer',
+      classKey: 'hero_mage',
+      bonusAtk: 12,
+      bonusDef: 1,
+      bonusHp: 12,
+      bonusLuck: 5,
+      bonusCrit: 9,
+      bonusIntuition: 4,
+      perk: '+12 ATK & +9% Crit Surge',
+    },
+    {
+      key: 'spellweaver',
+      name: 'Spellweaver',
+      classKey: 'hero_mage',
+      bonusAtk: 8,
+      bonusDef: 3,
+      bonusHp: 22,
+      bonusLuck: 8,
+      bonusCrit: 6,
+      bonusIntuition: 10,
+      perk: '+10 Intuition, +8 Luck & Arcane Matrix',
+    },
+  ],
+};
+
 export const BIOMES = [
   { key: 'moss_library', name: 'Mossy Library Ruins', minFloor: 1 },
   { key: 'clockwork_obs', name: 'Clockwork Observatory', minFloor: 4 },
@@ -300,9 +407,22 @@ export function computeStudyBonuses(user, userStats) {
 
 export function computeHeroStats(profile, rawItems, studyBonuses) {
   const cls = HERO_CLASSES[profile.hero_class] || HERO_CLASSES.hero_scholar;
+  const classSpecs = HERO_SPECIALIZATIONS[cls.key] || HERO_SPECIALIZATIONS.hero_scholar;
+  const activeSpec = classSpecs.find((s) => s.key === profile.specialization) || classSpecs[0];
   const lvlInfo = heroLevelFromXp(profile.hero_xp || 0);
   const items = rawItems.map(formatGameItem);
   const equipped = items.filter((i) => i.equipped);
+  const equippedCompanion = equipped.find((i) => i.slot === 'companion') || null;
+  const evolScore = (studyBonuses.totalMins || 0) + (equippedCompanion ? equippedCompanion.upgradeLevel * 60 : 0);
+  const companionEvolution = !equippedCompanion
+    ? { stage: 0, label: 'No Companion Equipped', nextMins: 60 }
+    : evolScore >= 360
+      ? { stage: 3, label: 'Stage III · Mythic Familiar', nextMins: 0 }
+      : evolScore >= 120
+        ? { stage: 2, label: 'Stage II · Awakened Spirit', nextMins: Math.max(0, 360 - evolScore) }
+        : { stage: 1, label: 'Stage I · Hatchling', nextMins: Math.max(0, 120 - evolScore) };
+  const evolAtkBonus = companionEvolution.stage >= 3 ? 4 : companionEvolution.stage === 2 ? 2 : 0;
+  const evolLuckBonus = companionEvolution.stage >= 3 ? 6 : companionEvolution.stage === 2 ? 3 : 0;
 
   const gearAtk = equipped.reduce((a, b) => a + b.atk, 0);
   const gearDef = equipped.reduce((a, b) => a + b.def, 0);
@@ -316,10 +436,10 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
   const upgLuck = (profile.upg_luck || 0) * 4;
   const upgCrit = (profile.upg_crit || 0) * 2;
 
-  const bonusAtk = profile.bonus_atk || 0;
-  const bonusDef = profile.bonus_def || 0;
-  const bonusHp = profile.bonus_hp || 0;
-  const bonusLuck = profile.bonus_luck || 0;
+  const bonusAtk = (profile.bonus_atk || 0) + activeSpec.bonusAtk + evolAtkBonus;
+  const bonusDef = (profile.bonus_def || 0) + activeSpec.bonusDef;
+  const bonusHp = (profile.bonus_hp || 0) + activeSpec.bonusHp;
+  const bonusLuck = (profile.bonus_luck || 0) + activeSpec.bonusLuck + evolLuckBonus;
 
   const buffLuck = (profile.luck_buff_charges || 0) > 0 ? profile.luck_buff_amount || 0 : 0;
   const levelAtk = lvlInfo.heroLevel - 1;
@@ -330,13 +450,13 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
   const def = cls.def + upgDef + gearDef + studyBonuses.studyDef + bonusDef;
   const maxHp = cls.hp + levelHp + upgHp + gearHp + studyBonuses.studyHp + bonusHp;
   const luck = cls.luck + upgLuck + gearLuck + bonusLuck + studyBonuses.streakLuck + studyBonuses.feverLuck + buffLuck;
-  const critPct = Math.min(75, cls.crit + upgCrit + gearCrit + studyBonuses.purityCrit);
+  const critPct = Math.min(80, cls.crit + upgCrit + gearCrit + activeSpec.bonusCrit + studyBonuses.purityCrit);
   const dodgePct = Math.min(40, Math.round(studyBonuses.purityDodge + Math.min(12, luck * 0.15)));
 
   const affinity = parseJsonSafe(profile.npc_affinity_json, { rowan: 0, bram: 0, lyra: 0, pip: 0 });
   const intuition = Math.max(
     4,
-    (studyBonuses.purityIntuition || 8) + Math.floor(luck * 0.25) + (studyBonuses.scholarLevel - 1) + (buffLuck > 0 ? 5 : 0)
+    (studyBonuses.purityIntuition || 8) + Math.floor(luck * 0.25) + (studyBonuses.scholarLevel - 1) + activeSpec.bonusIntuition + (buffLuck > 0 ? 5 : 0)
   );
   const visionRadius = 2 + (studyBonuses.focusFever ? 1 : 0) + ((affinity.pip || 0) >= 25 ? 1 : 0);
 
@@ -345,6 +465,10 @@ export function computeHeroStats(profile, rawItems, studyBonuses) {
     classKey: cls.key,
     className: cls.name,
     classPerk: cls.perk,
+    specialization: activeSpec.key,
+    activeSpecialization: activeSpec,
+    specializations: classSpecs,
+    companionEvolution,
     maxHp,
     hp: Math.max(0, Math.min(maxHp, profile.hp)),
     atk,
@@ -1292,7 +1416,7 @@ export function dungeonExtract(db, user, userStats) {
 // TACTICAL INTENT COMBAT & PUZZLE / EVENTS
 // ==========================================
 
-export function resolveCombatAction(db, user, userStats, action) {
+export function resolveCombatAction(db, user, userStats, action, studyCastOpts = null) {
   const profile = ensureGameProfile(db, user.id);
   const encounter = parseJsonSafe(profile.active_encounter_json, null);
   if (!encounter || encounter.type !== 'combat') {
@@ -1397,6 +1521,23 @@ export function resolveCombatAction(db, user, userStats, action) {
     heroStatuses.poisonTurns = 0;
     events.push({ kind: 'heal', target: 'hero', value: heal, text: `+${heal} HP` });
     logLines.push(`🧪 Drank Potion: restored +${heal} HP & cleansed Venom!`);
+  } else if (action === 'study_cast' && studyCastOpts) {
+    const mult = studyCastOpts.studyMultiplier || 1.65;
+    const vulnMult = enemy.vulnerableTurns > 0 ? 1.4 : 1.0;
+    const dmg = Math.max(studyCastOpts.isCorrect ? 10 : 4, Math.round(heroStats.atk * mult * vulnMult));
+    enemy.hp = Math.max(0, enemy.hp - dmg);
+    if (studyCastOpts.isCorrect) {
+      focusCharge = Math.min(100, focusCharge + 15);
+      if (enemy.intent === 'SHELL' || enemy.intent === 'RITUAL') {
+        enemy.stunned = true;
+        enemy.vulnerableTurns = 2;
+      }
+      events.push({ kind: 'crit', target: 'enemy', value: dmg, text: `RECALL CRIT -${dmg}!` });
+      logLines.push(`📖 Study Cast [${studyCastOpts.conceptTitle || 'Vault'}]: Answered right! Dealt ${dmg} Arcane DMG!`);
+    } else {
+      events.push({ kind: 'hit', target: 'enemy', value: dmg, text: `SPARK -${dmg}` });
+      logLines.push(`📖 Study Cast miss-spark dealt ${dmg} DMG — review "${studyCastOpts.conceptTitle || 'concept'}"!`);
+    }
   } else {
     throw new Error('Invalid combat action.');
   }
@@ -1961,4 +2102,165 @@ export function selectFloor(db, user, userStats, floorNum) {
   if (profile.mode === 'dungeon') throw new Error('Extract from the current dungeon before changing floors');
   db.prepare('UPDATE game_profiles SET floor = ?, updated_at = ? WHERE user_id = ?').run(target, Date.now(), user.id);
   return { game: buildGameState(db, user, userStats) };
+}
+
+export function selectSpecialization(db, user, userStats, specKey) {
+  const profile = ensureGameProfile(db, user.id);
+  const specs = HERO_SPECIALIZATIONS[profile.hero_class] || HERO_SPECIALIZATIONS.hero_scholar;
+  const chosen = specs.find((s) => s.key === specKey);
+  if (!chosen) throw new Error('Specialization not available for your hero class');
+  const logs = appendLogs(profile, [`🌟 Attuned Mastery Specialization: ${chosen.name} (${chosen.perk}).`]);
+  db.prepare('UPDATE game_profiles SET specialization = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?').run(
+    chosen.key,
+    logs,
+    Date.now(),
+    user.id
+  );
+  return { game: buildGameState(db, user, userStats), message: `Attuned ${chosen.name}!` };
+}
+
+export function gradeFlashcardSm2(card, quality) {
+  const q = Math.max(1, Math.min(4, Number(quality) || 3));
+  const now = Date.now();
+  const prevEase = Number(card.ease_factor || 2.5);
+  const ease = Math.max(1.3, prevEase + (0.1 - (4 - q) * (0.08 + (4 - q) * 0.02)));
+  let repetitions = Number(card.repetitions || 0);
+  let intervalDays = Number(card.interval_days || 0);
+  let nextReviewAt = now;
+
+  if (q < 2) {
+    repetitions = 0;
+    intervalDays = 0;
+    nextReviewAt = now + 5 * 60_000;
+  } else if (repetitions === 0) {
+    repetitions = 1;
+    intervalDays = q === 4 ? 3 : 1;
+    nextReviewAt = now + intervalDays * 86400_000;
+  } else if (repetitions === 1) {
+    repetitions = 2;
+    intervalDays = q === 4 ? 7 : 4;
+    nextReviewAt = now + intervalDays * 86400_000;
+  } else {
+    repetitions += 1;
+    const mult = q === 4 ? 1.3 : q === 2 ? 0.8 : 1.0;
+    intervalDays = Math.max(1, Math.round(Math.max(1, intervalDays) * ease * mult));
+    nextReviewAt = now + intervalDays * 86400_000;
+  }
+
+  return {
+    easeFactor: Math.round(ease * 100) / 100,
+    intervalDays,
+    repetitions,
+    nextReviewAt,
+    reviewCount: (card.review_count || 0) + 1,
+  };
+}
+
+export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, grade }) {
+  const profile = ensureGameProfile(db, user.id);
+  const card = db.prepare('SELECT * FROM flashcards WHERE id = ? AND user_id = ?').get(Number(cardId), user.id);
+  if (!card) throw new Error('Flashcard not found');
+
+  const options = parseJsonSafe(card.options_json, []);
+  const hasMcq = Array.isArray(options) && options.length > 0 && selectedIndex !== undefined && selectedIndex !== null;
+  const isCorrect = hasMcq ? Number(selectedIndex) === Number(card.correct_index) : Number(grade || 3) >= 2;
+  const effQuality = grade ? Number(grade) : isCorrect ? 3 : 1;
+  const sm2 = gradeFlashcardSm2(card, effQuality);
+
+  db.prepare(`
+    UPDATE flashcards
+    SET ease_factor = ?, interval_days = ?, repetitions = ?, next_review_at = ?, review_count = ?
+    WHERE id = ? AND user_id = ?
+  `).run(sm2.easeFactor, sm2.intervalDays, sm2.repetitions, sm2.nextReviewAt, sm2.reviewCount, card.id, user.id);
+
+  const xpGain = isCorrect ? 10 : 4;
+  const coinsGain = isCorrect ? 2 : 0;
+  const shardsGain = isCorrect ? 6 : 2;
+  db.prepare('UPDATE users SET xp = xp + ?, coins = coins + ? WHERE id = ?').run(xpGain, coinsGain, user.id);
+  db.prepare(
+    'UPDATE game_profiles SET shards = shards + ?, focus_charge = MIN(100, focus_charge + ?), updated_at = ? WHERE user_id = ?'
+  ).run(shardsGain, isCorrect ? 10 : 4, Date.now(), user.id);
+
+  const encounter = parseJsonSafe(profile.active_encounter_json, null);
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+
+  if (encounter?.type === 'combat') {
+    const res = resolveCombatAction(db, refreshedUser, userStats, 'study_cast', {
+      studyMultiplier: isCorrect ? 1.65 : 0.65,
+      isCorrect,
+      conceptTitle: card.concept_title || card.subject_name,
+    });
+    return {
+      ...res,
+      isCorrect,
+      xpGain,
+      coinsGain,
+      shardsGain,
+      card: { ...card, easeFactor: sm2.easeFactor, intervalDays: sm2.intervalDays, nextReviewAt: sm2.nextReviewAt },
+    };
+  }
+
+  if (encounter?.type === 'riddle') {
+    const dungeon = profile.mode === 'dungeon' && profile.dungeon_state_json ? JSON.parse(profile.dungeon_state_json) : null;
+    const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
+    const heroStats = computeHeroStats(ensureGameProfile(db, user.id), rawItems, computeStudyBonuses(refreshedUser, userStats));
+    let droppedItem = null;
+    const events = [];
+    let hp = heroStats.hp;
+    let logMsg = '';
+    if (isCorrect) {
+      const spec = rollLootSpec(dungeon?.floor || profile.floor, heroStats.luck, { minRarity: 'rare', bonusLuck: 15 });
+      if (dungeon) {
+        dungeon.satchel.items.push(spec);
+        dungeon.satchel.shards = (dungeon.satchel.shards || 0) + 25;
+        droppedItem = formatSatchelPreview(spec, -dungeon.satchel.items.length);
+      } else {
+        droppedItem = insertLootSpec(db, user.id, spec);
+        db.prepare('UPDATE game_profiles SET shards = shards + 25 WHERE user_id = ?').run(user.id);
+      }
+      if (dungeon && encounter.entityId) {
+        const ent = dungeon.entities.find((e) => e.id === encounter.entityId);
+        if (ent) ent.done = true;
+      }
+      events.push({ kind: 'secret', target: 'enemy', text: 'VAULT SOLVED!' });
+      logMsg = `📖 Study Riddle [${card.concept_title}]: Unlocked [${spec.rarity.toUpperCase()}] ${spec.name} (+25✦)!`;
+      db.prepare(
+        'UPDATE game_profiles SET dungeon_state_json = ?, active_encounter_json = NULL, last_log_json = ?, updated_at = ? WHERE user_id = ?'
+      ).run(
+        dungeon ? JSON.stringify(dungeon) : profile.dungeon_state_json,
+        appendLogs(profile, [logMsg]),
+        Date.now(),
+        user.id
+      );
+    } else {
+      hp = Math.max(1, hp - 8);
+      events.push({ kind: 'trap', target: 'hero', value: 8, text: 'HEX -8' });
+      logMsg = `💥 Vault Recall miss (-8 HP): Review "${card.concept_title}" and try again!`;
+      db.prepare('UPDATE game_profiles SET hp = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?').run(
+        hp,
+        appendLogs(profile, [logMsg]),
+        Date.now(),
+        user.id
+      );
+    }
+    return {
+      game: buildGameState(db, refreshedUser, userStats),
+      events,
+      droppedItem,
+      isCorrect,
+      xpGain,
+      coinsGain,
+      shardsGain,
+    };
+  }
+
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    events: [{ kind: isCorrect ? 'secret' : 'hit', target: 'hero', text: isCorrect ? `+${shardsGain}✦ RECALL` : 'REVIEWED' }],
+    droppedItem: null,
+    isCorrect,
+    xpGain,
+    coinsGain,
+    shardsGain,
+  };
 }

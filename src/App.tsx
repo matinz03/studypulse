@@ -40,7 +40,7 @@ import {
   User,
 } from './types';
 import { ThemeId, THEME_STORAGE_KEY, getThemeMeta, isValidThemeId, resolveAccent } from './themes';
-import { soundEngine, SoundPreset } from './utils/soundEngine';
+import { soundEngine, SoundPreset, TrackKey } from './utils/soundEngine';
 import { pipEngine } from './utils/pipEngine';
 
 const TOKEN_KEY = 'studypulse_token';
@@ -169,6 +169,9 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState<number>(restored.selectedRoomId || 1);
   const [soundPreset, setSoundPreset] = useState<SoundPreset>('off');
   const [soundVolume, setSoundVolume] = useState<number>(0.45);
+  const [trackMix, setTrackMix] = useState<Record<TrackKey, number>>(() => soundEngine.getTrackMix());
+  const [wagerCoins, setWagerCoins] = useState<number>(0);
+  const [pipToast, setPipToast] = useState<string | null>(null);
   const [showCompleteModal, setShowCompleteModal] = useState<boolean>(Boolean(restored.finishedOffline));
   const [pendingDurationSec, setPendingDurationSec] = useState<number>(restored.finishedSec || 0);
   const [focusTask, setFocusTask] = useState<string>(restored.focusTask || '');
@@ -563,6 +566,11 @@ export function App() {
       heroLevel: data?.game?.heroStats?.heroLevel || 1,
       focusFever: Boolean(data?.game?.heroStats?.studyBonuses?.focusFever),
       biomeKey: data?.game?.biome?.key || 'moss_library',
+      activeTaskId,
+      pendingTasksCount: (data?.tasks || []).filter((t) => !t.done).length,
+      roomPeersCount: currentRoom?.activeCount || 0,
+      roomName: currentRoom?.name || '',
+      toastText: pipToast,
     });
   }, [
     isRunning,
@@ -574,6 +582,11 @@ export function App() {
     focusTask,
     purityPct,
     themeId,
+    activeTaskId,
+    pipToast,
+    currentRoom?.activeCount,
+    currentRoom?.name,
+    data?.tasks,
     data?.game?.profile?.heroClass,
     data?.game?.equippedBySlot?.companion?.spriteKey,
     data?.game?.heroStats?.heroLevel,
@@ -697,6 +710,19 @@ export function App() {
   function handleChangeSound(preset: SoundPreset) {
     setSoundPreset(preset);
     soundEngine.setPreset(preset, soundVolume);
+    setTrackMix(soundEngine.getTrackMix());
+  }
+
+  function handleChangeTrackMix(mix: Partial<Record<TrackKey, number>>) {
+    soundEngine.setTrackMix(mix);
+    setTrackMix(soundEngine.getTrackMix());
+    setSoundPreset(soundEngine.getPreset());
+  }
+
+  function handleApplyMixPreset(key: string) {
+    soundEngine.applySavedMixPreset(key);
+    setTrackMix(soundEngine.getTrackMix());
+    setSoundPreset(soundEngine.getPreset());
   }
 
   function handleChangeSoundVolume(vol: number) {
@@ -758,19 +784,43 @@ export function App() {
     setShowCompleteModal(true);
   }, [isRunning, elapsedSec, mode, customMins, activeSubject.name, focusTask, syncServerSchedule, pushToast]);
 
+  const flashPipToast = useCallback((msg: string) => {
+    setPipToast(msg);
+    window.setTimeout(() => setPipToast((cur) => (cur === msg ? null : cur)), 3500);
+  }, []);
+
+  const handleCompleteActivePipTask = useCallback(async () => {
+    if (!activeTaskId || !data?.tasks) return;
+    const task = data.tasks.find((t) => t.id === activeTaskId);
+    if (!task) return;
+    const res = await apiFetch(`/api/tasks/${task.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ done: true }),
+    });
+    const nextPending = data.tasks.find((t) => !t.done && t.id !== task.id) || null;
+    setActiveTaskId(nextPending ? nextPending.id : null);
+    if (nextPending) setFocusTask(nextPending.title);
+    await refreshBootstrap();
+    const xp = res.bonusXp || 15;
+    flashPipToast(`Done! +${xp} XP ✅`);
+    pushToast(`Completed "${task.title}" (+${xp} XP) ✅`);
+  }, [activeTaskId, data?.tasks, apiFetch, refreshBootstrap, flashPipToast, pushToast]);
+
   useEffect(() => {
     pipEngine.setActions({
       onToggleRun: handleToggleRun,
       onBoost5m: handleBoost5m,
       onFinish: handleOpenFinish,
+      onCompleteTask: handleCompleteActivePipTask,
     });
-  }, [handleToggleRun, handleBoost5m, handleOpenFinish]);
+  }, [handleToggleRun, handleBoost5m, handleOpenFinish, handleCompleteActivePipTask]);
 
   async function handleTogglePip() {
     const active = await pipEngine.toggle({
       onToggleRun: handleToggleRun,
       onBoost5m: handleBoost5m,
       onFinish: handleOpenFinish,
+      onCompleteTask: handleCompleteActivePipTask,
     });
     if (active) {
       pushToast('Floating Top Mini-App open — stays visible outside your browser! 🪟');
@@ -864,6 +914,7 @@ export function App() {
         note,
         shareToFeed,
         roomId: selectedRoomId,
+        wagerCoins,
       }),
     });
     setShowCompleteModal(false);
@@ -872,15 +923,18 @@ export function App() {
     setElapsedSec(0);
     setPurityPct(100);
     setFocusTask('');
+    setWagerCoins(0);
     setPomoCycleCount((c) => c + 1);
     await refreshBootstrap();
 
     const freezeNote = res.usedFreeze ? ' • Streak Freeze used ❄️' : '';
+    const wagerNote = res.wagerOutcome === 'won' ? ' • 🏆 2x Wager Won!' : res.wagerOutcome === 'lost' ? ' • Wager Forfeited' : '';
+    const raidNote = res.raidDamageDealt ? ` • ⚔️ ${res.raidDamageDealt} Raid DMG` : '';
     const gr: SessionGameRewards | undefined = res.gameRewards;
     const gameNote = gr
       ? ` • +${gr.energyGained}⚡ +${gr.shardsGained}✦${gr.droppedItem ? ` • 🎁 ${gr.droppedItem.name}` : ''}`
       : '';
-    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned}🪙! Streak: ${res.newStreak}d 🔥${freezeNote}${gameNote}`);
+    pushToast(`+${res.xpEarned} XP & +${res.coinsEarned}🪙! Streak: ${res.newStreak}d 🔥${freezeNote}${wagerNote}${raidNote}${gameNote}`);
 
     if (startBreakAfter) {
       setMode('break');
@@ -1044,6 +1098,122 @@ export function App() {
   const handleGameUpgradeStat = (stat: 'atk' | 'vit' | 'luck' | 'crit') =>
     callGameApi('/api/game/upgrade-stat', { stat });
   const handleGameSelectFloor = (floor: number) => callGameApi('/api/game/floor-select', { floor });
+  const handleSelectSpecialization = (specKey: string) => callGameApi('/api/game/specialization', { specKey });
+  const handleStudyCast = async (payload: { cardId: number; selectedIndex?: number; grade?: number }) => {
+    const res = await callGameApi('/api/game/study-cast', payload);
+    await refreshBootstrap();
+    return res;
+  };
+
+  async function handleSyncUniversitySubjects() {
+    await apiFetch('/api/university/sync-subjects', { method: 'POST' });
+    await refreshBootstrap();
+    pushToast('Synced 4 Politecnico di Torino courses! 🎓');
+  }
+
+  async function handleReviewFlashcard(cardId: number, grade?: number, selectedIndex?: number) {
+    const res = await apiFetch('/api/university/review', {
+      method: 'POST',
+      body: JSON.stringify({ cardId, grade, selectedIndex }),
+    });
+    await refreshBootstrap();
+    pushToast(res.isCorrect ? `+${res.xpGain} XP & +5✦ · FSRS scheduled!` : `Reviewed (+${res.xpGain} XP) — scheduled soon!`);
+    return res;
+  }
+
+  async function handleCreateFlashcards(payload: {
+    subjectName: string;
+    courseKey: string;
+    front?: string;
+    back?: string;
+    markdownText?: string;
+  }) {
+    const res = await apiFetch('/api/university/flashcards', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await refreshBootstrap();
+    pushToast(`Saved ${res.created?.length || 1} flashcard(s) to FSRS vault! 🗂️`);
+  }
+
+  async function handleSaveStudyNote(payload: { id?: number; subjectName: string; title: string; contentMd: string }) {
+    await apiFetch('/api/university/notes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await refreshBootstrap();
+    pushToast('Saved Obsidian session note! 📝');
+  }
+
+  async function handleDeleteStudyNote(id: number) {
+    await apiFetch(`/api/university/notes/${id}`, { method: 'DELETE' });
+    await refreshBootstrap();
+    pushToast('Note deleted');
+  }
+
+  async function handleSaveExamGoal(payload: {
+    courseKey: string;
+    subjectName: string;
+    examTitle: string;
+    examDate: string;
+    targetHours: number;
+  }) {
+    await apiFetch('/api/university/exams', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await refreshBootstrap();
+    pushToast('Exam goal saved! 📅');
+  }
+
+  async function handleRaidStrike(roomId: number) {
+    try {
+      const res = await apiFetch(`/api/rooms/${roomId}/raid-strike`, { method: 'POST' });
+      await refreshBootstrap();
+      pushToast(`⚔️ Dealt ${res.dmg} Raid Boss DMG! (+8✦, +15 XP)`);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Raid Strike failed');
+    }
+  }
+
+  async function handleSendRoomChat(roomId: number, content: string) {
+    await apiFetch(`/api/rooms/${roomId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+    await refreshBootstrap();
+  }
+
+  function handleSyncRoomTimer(phase: 'focus' | 'break') {
+    setMode(phase === 'break' ? 'break' : 'pomodoro');
+    baseElapsedRef.current = 0;
+    startedAtMsRef.current = Date.now();
+    setElapsedSec(0);
+    setIsRunning(true);
+    pushToast(`Synced with room ${phase === 'break' ? '5m Break ☕' : '25m Focus 🔥'}!`);
+  }
+
+  async function handleStartDuel(payload: { opponentId?: number | null; targetMins?: number; wagerCoins?: number }) {
+    await apiFetch('/api/compete/duel', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'create', ...payload }),
+    });
+    await refreshBootstrap();
+    pushToast('7-Day Focus Pact launched! ⚔️');
+  }
+
+  async function handleClaimDuel() {
+    try {
+      const res = await apiFetch('/api/compete/duel', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'claim' }),
+      });
+      await refreshBootstrap();
+      pushToast(`Claimed Duel Chest (+${res.rewardCoins} 🪙 & +50 XP)! 🏆`);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Unable to claim yet');
+    }
+  }
 
   async function handleCreateRoom(name: string, topic: string, icon: string, accent: string) {
     const created = await apiFetch('/api/rooms', {
@@ -1410,6 +1580,20 @@ export function App() {
                     soundVolume={soundVolume}
                     onChangeSound={handleChangeSound}
                     onChangeSoundVolume={handleChangeSoundVolume}
+                    trackMix={trackMix}
+                    onChangeTrackMix={handleChangeTrackMix}
+                    onApplyMixPreset={handleApplyMixPreset}
+                    wagerCoins={wagerCoins}
+                    onChangeWagerCoins={setWagerCoins}
+                    userCoins={user.coins}
+                    university={data.university}
+                    subjectBreakdown={data.subjectBreakdown}
+                    onSyncUniversitySubjects={handleSyncUniversitySubjects}
+                    onReviewFlashcard={handleReviewFlashcard}
+                    onCreateFlashcards={handleCreateFlashcards}
+                    onSaveStudyNote={handleSaveStudyNote}
+                    onDeleteStudyNote={handleDeleteStudyNote}
+                    onSaveExamGoal={handleSaveExamGoal}
                     currentRoom={currentRoom}
                     onGoToRooms={() => setTab('rooms')}
                     todayMins={user.todayMins}
@@ -1451,6 +1635,9 @@ export function App() {
                     onSalvageItem={handleGameSalvage}
                     onUpgradeStat={handleGameUpgradeStat}
                     onSelectFloor={handleGameSelectFloor}
+                    onSelectSpecialization={handleSelectSpecialization}
+                    onStudyCast={handleStudyCast}
+                    flashcards={data.university?.flashcards}
                     onBuyShopItem={handleBuyShopItem}
                     onRerollDailyShop={handleRerollDailyShop}
                     onGoToFocus={() => setTab('focus')}
@@ -1472,7 +1659,11 @@ export function App() {
                     onSendCheer={handleSendCheer}
                     currentUserId={user.id}
                     isRunning={isRunning}
+                    heroEnergy={data.game.profile.energy}
                     onJumpToFocus={() => setTab('focus')}
+                    onRaidStrike={handleRaidStrike}
+                    onSendRoomChat={handleSendRoomChat}
+                    onSyncRoomTimer={handleSyncRoomTimer}
                     onMatchSubject={(subName) => {
                       const match = data.subjects.find(
                         (s) => s.name.toLowerCase() === subName.toLowerCase()
@@ -1491,6 +1682,10 @@ export function App() {
                     user={user}
                     leaderboards={data.leaderboards}
                     directory={data.directory}
+                    league={data.league}
+                    activeDuel={data.activeDuel}
+                    onStartDuel={handleStartDuel}
+                    onClaimDuel={handleClaimDuel}
                     onToggleFriend={handleToggleFriend}
                     onNudgeFriend={handleNudgeFriend}
                   />
@@ -1511,6 +1706,9 @@ export function App() {
                     themeId={themeId}
                     user={user}
                     heatmap={data.heatmap}
+                    heatmap365={data.heatmap365}
+                    prevWeekMins={data.prevWeekMins}
+                    todayTimeline={data.todayTimeline}
                     weekTrend={data.weekTrend}
                     subjectBreakdown={data.subjectBreakdown}
                     hourlyDistribution={data.hourlyDistribution}

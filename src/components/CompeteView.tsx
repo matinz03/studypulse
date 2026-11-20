@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Crown, Flame, Swords, Zap, UserPlus, UserCheck, Search } from 'lucide-react';
-import { LeaderboardEntry, PeerUser, User } from '../types';
+import { Crown, Flame, Swords, Zap, UserPlus, UserCheck, Search, Award } from 'lucide-react';
+import { FocusDuel, LeaderboardEntry, LeagueStatus, PeerUser, User } from '../types';
 
 interface CompeteViewProps {
   user: User;
@@ -11,6 +11,10 @@ interface CompeteViewProps {
     all: LeaderboardEntry[];
   };
   directory: PeerUser[];
+  league?: LeagueStatus;
+  activeDuel?: FocusDuel;
+  onStartDuel?: (payload: { opponentId?: number | null; targetMins?: number; wagerCoins?: number }) => Promise<void>;
+  onClaimDuel?: () => Promise<void>;
   onToggleFriend: (friendId: number) => Promise<void>;
   onNudgeFriend: (friendId: number) => Promise<void>;
 }
@@ -28,6 +32,10 @@ export function CompeteView({
   user,
   leaderboards,
   directory,
+  league,
+  activeDuel,
+  onStartDuel,
+  onClaimDuel,
   onToggleFriend,
   onNudgeFriend,
 }: CompeteViewProps) {
@@ -109,6 +117,46 @@ export function CompeteView({
 
   return (
     <div className="space-y-4">
+      {/* Weekly Tiered League Banner */}
+      {league && (
+        <div className="glass-card rounded-3xl p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-10 h-10 rounded-2xl sp-inset flex items-center justify-center text-2xl shrink-0">
+                {league.tierIcon}
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                  <span>{league.tierName} League</span>
+                  <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-mono-num">
+                    #{league.rankInLeague}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {league.nextTierName
+                    ? `${Math.max(0, (league.nextTierMins || 0) - league.weekMins)}m to promote to ${league.nextTierName}`
+                    : 'Highest weekly league tier reached!'}
+                </div>
+              </div>
+            </div>
+            <span className="text-xs font-mono-num font-bold text-white shrink-0">
+              {league.weekMins}m / wk
+            </span>
+          </div>
+          {league.nextTierMins && (
+            <div className="h-2 rounded-full sp-inset overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min(100, Math.round(((league.weekMins - league.minMins) / Math.max(1, league.nextTierMins - league.minMins)) * 100))}%`,
+                  backgroundColor: 'var(--sp-accent)',
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Timeframe & Scope Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl glass-card flex-1">
@@ -349,6 +397,57 @@ export function CompeteView({
               </>
             );
           })()}
+        </div>
+      )}
+
+      {/* Active 1v1 Focus Pact & Duel Chest */}
+      {activeDuel && (
+        <div className="glass-card rounded-3xl p-4 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-8 h-8 rounded-xl sp-badge flex items-center justify-center shrink-0">
+                <Award className="w-4 h-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-white truncate">
+                  7-Day Focus Pact vs {activeDuel.opponentAvatar} {activeDuel.opponentName}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Target: {activeDuel.targetMins}m · Reward: +{activeDuel.wagerCoins * 2} 🪙 + 50 XP
+                </div>
+              </div>
+            </div>
+            {activeDuel.status === 'won' && !activeDuel.claimed && onClaimDuel ? (
+              <button
+                type="button"
+                onClick={onClaimDuel}
+                className="px-3 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer shrink-0"
+              >
+                Claim Chest
+              </button>
+            ) : onStartDuel && (
+              <button
+                type="button"
+                onClick={() => onStartDuel({ opponentId: rival?.id || null, targetMins: 60, wagerCoins: 20 })}
+                className="px-2.5 py-1.5 rounded-xl sp-badge text-[10px] font-bold cursor-pointer shrink-0"
+              >
+                New 60m Pact
+              </button>
+            )}
+          </div>
+          <div className="h-2 rounded-full sp-inset overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.min(100, Math.round((activeDuel.userMins / Math.max(1, activeDuel.targetMins)) * 100))}%`,
+                backgroundColor: 'var(--sp-accent)',
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] font-mono-num text-slate-400">
+            <span>You: {activeDuel.userMins}/{activeDuel.targetMins}m</span>
+            <span>{activeDuel.opponentName}: {activeDuel.opponentMins}m</span>
+          </div>
         </div>
       )}
 

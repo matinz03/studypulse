@@ -237,6 +237,25 @@ export interface GameStudyBonuses {
   todayEnergyTier: string;
 }
 
+export interface HeroSpecialization {
+  key: string;
+  name: string;
+  classKey: string;
+  bonusAtk: number;
+  bonusDef: number;
+  bonusHp: number;
+  bonusLuck: number;
+  bonusCrit: number;
+  bonusIntuition: number;
+  perk: string;
+}
+
+export interface CompanionEvolution {
+  stage: number;
+  label: string;
+  nextMins: number;
+}
+
 export interface GameHeroStats {
   heroLevel: number;
   heroXp: number;
@@ -246,6 +265,10 @@ export interface GameHeroStats {
   classKey: string;
   className: string;
   classPerk: string;
+  specialization?: string;
+  activeSpecialization?: HeroSpecialization;
+  specializations?: HeroSpecialization[];
+  companionEvolution?: CompanionEvolution;
   maxHp: number;
   hp: number;
   atk: number;
@@ -465,7 +488,45 @@ export interface RoomOccupant {
   startedAtMs: number;
   baseElapsedSec: number;
   mode: string;
+  heroClass?: string;
+  heroLevel?: number;
+  companionSpriteKey?: string | null;
   simulated?: boolean;
+}
+
+export interface RoomRaidContributor {
+  userId: number;
+  displayName: string;
+  avatar: string;
+  damage: number;
+}
+
+export interface RoomRaidState {
+  roomId: number;
+  weekKey: string;
+  bossName: string;
+  bossIcon: string;
+  bossHp: number;
+  bossMaxHp: number;
+  contributors: RoomRaidContributor[];
+}
+
+export interface RoomSyncTimer {
+  phase: 'focus' | 'break';
+  remainingSec: number;
+  cycleDurationSec: number;
+  phaseDurationSec: number;
+}
+
+export interface RoomChatMessage {
+  id: number;
+  roomId: number;
+  userId: number;
+  username: string;
+  displayName: string;
+  avatar: string;
+  content: string;
+  createdAt: number;
 }
 
 export interface Room {
@@ -478,6 +539,9 @@ export interface Room {
   occupants: RoomOccupant[];
   activeCount: number;
   totalCount: number;
+  raid?: RoomRaidState;
+  syncTimer?: RoomSyncTimer;
+  messages?: RoomChatMessage[];
 }
 
 export interface FeedReaction {
@@ -547,6 +611,101 @@ export interface Achievement {
   target: number;
 }
 
+export interface UniversityCourse {
+  key: string;
+  name: string;
+  shortName: string;
+  icon: string;
+  color: string;
+  portalUrl: string;
+  defaultExamDate: string;
+  defaultTargetHours: number;
+  readingTrail: string[];
+}
+
+export interface FlashcardItem {
+  id: number;
+  cardKey: string | null;
+  courseKey: string;
+  subjectName: string;
+  conceptTitle: string;
+  front: string;
+  back: string;
+  options: string[];
+  correctIndex: number;
+  easeFactor: number;
+  intervalDays: number;
+  repetitions: number;
+  nextReviewAt: number;
+  reviewCount: number;
+  isDue: boolean;
+}
+
+export interface ExamGoal {
+  id: number;
+  courseKey: string;
+  subjectName: string;
+  examTitle: string;
+  examDate: string;
+  targetHours: number;
+  createdAt: number;
+}
+
+export interface StudyNoteItem {
+  id: number;
+  subjectName: string;
+  title: string;
+  contentMd: string;
+  recallPrompts: string[];
+  updatedAt: number;
+}
+
+export interface UniversityData {
+  portalUrl: string;
+  courses: UniversityCourse[];
+  flashcards: FlashcardItem[];
+  dueCount: number;
+  examGoals: ExamGoal[];
+  notes: StudyNoteItem[];
+}
+
+export interface LeagueStatus {
+  tierKey: string;
+  tierName: string;
+  tierIcon: string;
+  minMins: number;
+  nextTierName: string | null;
+  nextTierMins: number | null;
+  weekMins: number;
+  rankInLeague: number;
+}
+
+export interface FocusDuel {
+  id: number;
+  opponentId: number | null;
+  opponentName: string;
+  opponentAvatar: string;
+  targetMins: number;
+  wagerCoins: number;
+  userMins: number;
+  opponentMins: number;
+  startedAt: number;
+  endsAt: number;
+  status: string;
+  claimed: boolean;
+}
+
+export interface TodayTimelineItem {
+  id: number;
+  subjectName: string;
+  subjectColor: string;
+  mode: string;
+  durationSec: number;
+  purityPct: number;
+  note: string;
+  createdAt: number;
+}
+
 export interface BootstrapData {
   user: User;
   subjects: Subject[];
@@ -554,6 +713,11 @@ export interface BootstrapData {
   shopItems: ShopItem[];
   shop: ShopState;
   game: GameState;
+  university?: UniversityData;
+  league?: LeagueStatus;
+  activeDuel?: FocusDuel;
+  prevWeekMins?: number;
+  todayTimeline?: TodayTimelineItem[];
   vapidPublicKey: string;
   directory: PeerUser[];
   leaderboards: {
@@ -564,6 +728,7 @@ export interface BootstrapData {
   rooms: Room[];
   feed: FeedItem[];
   heatmap: HeatmapDay[];
+  heatmap365?: HeatmapDay[];
   weekTrend: WeekDay[];
   hourlyDistribution: number[];
   peakWindowLabel: string;

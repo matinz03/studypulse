@@ -13,6 +13,7 @@ import {
   verifyPassword,
   createStarterSubjects,
   dateKeyUTC,
+  ensureUniversitySeed,
 } from './db.js';
 import {
   buildGameState,
@@ -25,19 +26,24 @@ import {
   enterDungeon,
   equipGameItem,
   exploreRoom,
+  gradeFlashcardSm2,
   grantStudyRewardsToGame,
+  heroLevelFromXp,
   moveInVillage,
   resolveCombatAction,
   resolveEventChoice,
   resolvePuzzleChoice,
+  resolveStudyCast,
   restAtCamp,
   salvageGameItem,
   selectFloor,
+  selectSpecialization,
   talkToNpc,
   upgradeGameItem,
   upgradeHeroStat,
 } from './gameEngine.js';
 import { buildShopState, purchaseShopItem, rerollDailyShop } from './shopEngine.js';
+import { UNIVERSITY_COURSES, UNIVERSITY_PORTAL_URL } from './universityData.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -158,18 +164,159 @@ function authMiddleware(req, res, next) {
 const livePresence = new Map();
 const wsSockets = new Set();
 
+const RAID_BOSSES = [
+  { bossName: 'Arch-Lich of Procrastination', bossIcon: '💀', bossMaxHp: 2500 },
+  { bossName: 'Dread Dragon of Multitasking', bossIcon: '🐉', bossMaxHp: 3000 },
+  { bossName: 'Null-Pointer Leviathan', bossIcon: '👾', bossMaxHp: 2800 },
+  { bossName: 'Chronos Deadline Titan', bossIcon: '⏳', bossMaxHp: 3200 },
+];
+
+function getIsoWeekKey(ts = Date.now()) {
+  const d = new Date(ts);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function parseJsonSafeLocal(str, fallback) {
+  try {
+    return str ? JSON.parse(str) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getSyncedRoomTimer(nowMs = Date.now()) {
+  const cycleDurationSec = 1800; // 25m Focus + 5m Break
+  const secOfCycle = Math.floor(nowMs / 1000) % cycleDurationSec;
+  const phase = secOfCycle < 1500 ? 'focus' : 'break';
+  const remainingSec = phase === 'focus' ? 1500 - secOfCycle : 1800 - secOfCycle;
+  return {
+    phase,
+    remainingSec,
+    cycleDurationSec,
+    phaseDurationSec: phase === 'focus' ? 1500 : 300,
+  };
+}
+
+function ensureRoomRaid(roomId) {
+  const weekKey = getIsoWeekKey();
+  const row = db.prepare('SELECT * FROM room_raids WHERE room_id = ?').get(roomId);
+  const weekSeed = weekKey.split('-W')[1] ? Number(weekKey.split('-W')[1]) : 1;
+  const template = RAID_BOSSES[(roomId + weekSeed) % RAID_BOSSES.length];
+  if (!row || row.week_key !== weekKey) {
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO room_raids (room_id, week_key, boss_name, boss_icon, boss_hp, boss_max_hp, contributors_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '[]', ?)
+      ON CONFLICT(room_id) DO UPDATE SET
+        week_key = excluded.week_key,
+        boss_name = excluded.boss_name,
+        boss_icon = excluded.boss_icon,
+        boss_hp = excluded.boss_hp,
+        boss_max_hp = excluded.boss_max_hp,
+        contributors_json = '[]',
+        updated_at = excluded.updated_at
+    `).run(roomId, weekKey, template.bossName, template.bossIcon, template.bossMaxHp, template.bossMaxHp, now);
+    return {
+      roomId,
+      weekKey,
+      bossName: template.bossName,
+      bossIcon: template.bossIcon,
+      bossHp: template.bossMaxHp,
+      bossMaxHp: template.bossMaxHp,
+      contributors: [],
+    };
+  }
+  return {
+    roomId: row.room_id,
+    weekKey: row.week_key,
+    bossName: row.boss_name,
+    bossIcon: row.boss_icon,
+    bossHp: row.boss_hp,
+    bossMaxHp: row.boss_max_hp,
+    contributors: parseJsonSafeLocal(row.contributors_json, []),
+  };
+}
+
+function applyRaidDamageToRoom(roomId, user, dmg) {
+  if (!roomId || dmg <= 0) return ensureRoomRaid(roomId);
+  const raid = ensureRoomRaid(roomId);
+  const nextHp = Math.max(0, raid.bossHp - Math.round(dmg));
+  const map = new Map();
+  for (const c of raid.contributors) {
+    map.set(c.userId, { ...c });
+  }
+  const existing = map.get(user.id) || {
+    userId: user.id,
+    displayName: user.display_name,
+    avatar: user.avatar,
+    damage: 0,
+  };
+  existing.damage += Math.round(dmg);
+  existing.displayName = user.display_name;
+  existing.avatar = user.avatar;
+  map.set(user.id, existing);
+  const sorted = [...map.values()].sort((a, b) => b.damage - a.damage).slice(0, 6);
+  db.prepare('UPDATE room_raids SET boss_hp = ?, contributors_json = ?, updated_at = ? WHERE room_id = ?').run(
+    nextHp,
+    JSON.stringify(sorted),
+    Date.now(),
+    roomId
+  );
+  return { ...raid, bossHp: nextHp, contributors: sorted };
+}
+
+function getHeroMetaMap() {
+  const gpRows = db.prepare('SELECT user_id, hero_class, hero_xp FROM game_profiles').all();
+  const compRows = db
+    .prepare("SELECT user_id, sprite_key FROM game_items WHERE equipped = 1 AND slot = 'companion'")
+    .all();
+  const compByUser = new Map(compRows.map((c) => [c.user_id, c.sprite_key]));
+  const map = new Map();
+  for (const gp of gpRows) {
+    map.set(gp.user_id, {
+      heroClass: gp.hero_class || 'hero_scholar',
+      heroLevel: heroLevelFromXp(gp.hero_xp || 0).heroLevel,
+      companionSpriteKey: compByUser.get(gp.user_id) || null,
+    });
+  }
+  return map;
+}
+
 function buildRoomOccupants(rooms) {
   const byRoom = new Map();
   for (const r of rooms) byRoom.set(r.id, []);
+  const heroMap = getHeroMetaMap();
 
   for (const pres of livePresence.values()) {
     const rid = pres.roomId || rooms[0]?.id;
     if (!rid || !byRoom.has(rid)) continue;
-    byRoom.get(rid).push({ ...pres, simulated: false });
+    const hMeta = heroMap.get(pres.userId) || { heroClass: 'hero_scholar', heroLevel: 1, companionSpriteKey: null };
+    byRoom.get(rid).push({
+      ...pres,
+      heroClass: hMeta.heroClass,
+      heroLevel: hMeta.heroLevel,
+      companionSpriteKey: hMeta.companionSpriteKey,
+      simulated: false,
+    });
   }
+
+  const syncTimer = getSyncedRoomTimer();
+  const msgStmt = db.prepare(`
+    SELECT id, room_id AS roomId, user_id AS userId, username, display_name AS displayName, avatar, content, created_at AS createdAt
+    FROM room_messages
+    WHERE room_id = ?
+    ORDER BY created_at DESC
+    LIMIT 20
+  `);
 
   return rooms.map((r) => {
     const occupants = byRoom.get(r.id) || [];
+    const raid = ensureRoomRaid(r.id);
+    const messages = msgStmt.all(r.id).reverse();
     return {
       id: r.id,
       name: r.name,
@@ -180,6 +327,9 @@ function buildRoomOccupants(rooms) {
       occupants,
       activeCount: occupants.filter((o) => o.status === 'studying').length,
       totalCount: occupants.length,
+      raid,
+      syncTimer,
+      messages,
     };
   });
 }
@@ -325,13 +475,111 @@ function buildFullUser(userId) {
   };
 }
 
+function formatFlashcardRow(row) {
+  const now = Date.now();
+  return {
+    id: row.id,
+    cardKey: row.card_key || null,
+    courseKey: row.course_key || 'custom',
+    subjectName: row.subject_name,
+    conceptTitle: row.concept_title || '',
+    front: row.front,
+    back: row.back,
+    options: parseJsonSafeLocal(row.options_json, []),
+    correctIndex: Number(row.correct_index || 0),
+    easeFactor: Number(row.ease_factor || 2.5),
+    intervalDays: Number(row.interval_days || 0),
+    repetitions: Number(row.repetitions || 0),
+    nextReviewAt: Number(row.next_review_at || 0),
+    reviewCount: Number(row.review_count || 0),
+    isDue: Number(row.next_review_at || 0) <= now,
+  };
+}
+
+function computeLeagueState(weekMins, weekBoard) {
+  const tiers = [
+    { tierKey: 'bronze', tierName: 'Bronze Desk', tierIcon: '🥉', minMins: 0 },
+    { tierKey: 'silver', tierName: 'Silver Scholar', tierIcon: '🥈', minMins: 60 },
+    { tierKey: 'gold', tierName: 'Gold Archivist', tierIcon: '🥇', minMins: 180 },
+    { tierKey: 'obsidian', tierName: 'Obsidian Spire', tierIcon: '🔮', minMins: 420 },
+    { tierKey: 'astral', tierName: 'Astral Grandmaster', tierIcon: '🌟', minMins: 900 },
+  ];
+  let idx = 0;
+  for (let i = 0; i < tiers.length; i++) {
+    if (weekMins >= tiers[i].minMins) idx = i;
+  }
+  const cur = tiers[idx];
+  const nxt = tiers[idx + 1] || null;
+  const selfIdx = weekBoard.findIndex((r) => r.isSelf);
+  return {
+    tierKey: cur.tierKey,
+    tierName: cur.tierName,
+    tierIcon: cur.tierIcon,
+    minMins: cur.minMins,
+    nextTierName: nxt ? nxt.tierName : null,
+    nextTierMins: nxt ? nxt.minMins : null,
+    weekMins,
+    rankInLeague: selfIdx >= 0 ? selfIdx + 1 : 1,
+  };
+}
+
+function buildDuelState(userId, weekMins, weekBoard, directory) {
+  const now = Date.now();
+  let duel = db
+    .prepare('SELECT * FROM focus_duels WHERE user_id = ? ORDER BY id DESC LIMIT 1')
+    .get(userId);
+  if (!duel || (duel.claimed && now > duel.ends_at)) {
+    const rival = directory[0] || { id: null, displayName: 'Elder Rowan', avatar: '🧙', weekMins: 25 };
+    const startedAt = now;
+    const endsAt = now + 7 * 86400_000;
+    const info = db.prepare(`
+      INSERT INTO focus_duels (user_id, opponent_id, opponent_name, opponent_avatar, target_mins, wager_coins, user_start_mins, opp_base_mins, started_at, ends_at, status, claimed)
+      VALUES (?, ?, ?, ?, 60, 20, ?, ?, ?, ?, 'active', 0)
+    `).run(userId, rival.id || null, rival.displayName || 'Elder Rowan', rival.avatar || '🧙', weekMins, rival.weekMins || 0, startedAt, endsAt);
+    duel = db.prepare('SELECT * FROM focus_duels WHERE id = ?').get(Number(info.lastInsertRowid));
+  }
+
+  let oppLiveMins = 0;
+  if (duel.opponent_id) {
+    const oppBoard = weekBoard.find((r) => r.id === duel.opponent_id);
+    oppLiveMins = Math.max(0, (oppBoard?.minutes || 0) - duel.opp_base_mins);
+  } else {
+    const daysElapsed = Math.max(0, (now - duel.started_at) / 86400_000);
+    oppLiveMins = Math.min(duel.target_mins, Math.round(daysElapsed * 15));
+  }
+  const userMins = Math.max(0, weekMins - duel.user_start_mins);
+  const status = duel.claimed
+    ? 'claimed'
+    : userMins >= duel.target_mins
+      ? 'won'
+      : now > duel.ends_at
+        ? 'expired'
+        : 'active';
+  return {
+    id: duel.id,
+    opponentId: duel.opponent_id,
+    opponentName: duel.opponent_name,
+    opponentAvatar: duel.opponent_avatar,
+    targetMins: duel.target_mins,
+    wagerCoins: duel.wager_coins,
+    userMins,
+    opponentMins: oppLiveMins,
+    startedAt: duel.started_at,
+    endsAt: duel.ends_at,
+    status,
+    claimed: Boolean(duel.claimed),
+  };
+}
+
 function buildBootstrap(userId) {
+  ensureUniversitySeed(userId);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const now = Date.now();
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
   const todayStartMs = startOfToday.getTime();
   const weekStartMs = now - 7 * 86400_000;
+  const prevWeekStartMs = now - 14 * 86400_000;
 
   const userStats = getUserStudyStats(userId);
 
@@ -508,13 +756,17 @@ function buildBootstrap(userId) {
     };
   });
 
-  // 90-day heatmap & 7-day trend & subject breakdown & 24h rhythm for current user
-  const mySessions = db.prepare('SELECT subject_name, subject_color, duration_sec, purity_pct, created_at FROM study_sessions WHERE user_id = ?').all(userId);
+  // 365-day & 90-day heatmap, week-over-week delta, today timeline & 24h rhythm
+  const mySessions = db
+    .prepare('SELECT id, subject_name, subject_color, mode, duration_sec, purity_pct, note, created_at FROM study_sessions WHERE user_id = ? ORDER BY created_at ASC')
+    .all(userId);
   const daySecMap = new Map();
   const dayCountMap = new Map();
   const subjMap = new Map();
   const hourSec = new Array(24).fill(0);
   let pureSessions = 0;
+  let prevWeekSec = 0;
+  const todayTimeline = [];
 
   for (const s of mySessions) {
     const dk = dateKeyUTC(s.created_at);
@@ -526,6 +778,21 @@ function buildBootstrap(userId) {
     curSub.seconds += s.duration_sec;
     subjMap.set(s.subject_name, curSub);
     if (s.purity_pct >= 95 && s.duration_sec >= 300) pureSessions++;
+    if (s.created_at >= prevWeekStartMs && s.created_at < weekStartMs) {
+      prevWeekSec += s.duration_sec;
+    }
+    if (s.created_at >= todayStartMs) {
+      todayTimeline.push({
+        id: s.id,
+        subjectName: s.subject_name,
+        subjectColor: s.subject_color,
+        mode: s.mode,
+        durationSec: s.duration_sec,
+        purityPct: s.purity_pct,
+        note: s.note,
+        createdAt: s.created_at,
+      });
+    }
   }
 
   const hourlyDistribution = hourSec.map((sec) => Math.round(sec / 60));
@@ -549,16 +816,17 @@ function buildBootstrap(userId) {
             ? `Evening Sprinter (Peak ${formatHour(peakHour)})`
             : `Night Owl (Peak ${formatHour(peakHour)})`;
 
-  const heatmap = [];
-  for (let d = 89; d >= 0; d--) {
+  const heatmap365 = [];
+  for (let d = 364; d >= 0; d--) {
     const ts = now - d * 86400_000;
     const dk = dateKeyUTC(ts);
-    heatmap.push({
+    heatmap365.push({
       date: dk,
       minutes: Math.round((daySecMap.get(dk) || 0) / 60),
       count: dayCountMap.get(dk) || 0,
     });
   }
+  const heatmap = heatmap365.slice(-90);
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const weekTrend = [];
@@ -612,11 +880,34 @@ function buildBootstrap(userId) {
   const shop = buildShopState(db, user, gameProfileRaw);
   const game = buildGameState(db, user, userStats);
 
+  const flashcards = db
+    .prepare('SELECT * FROM flashcards WHERE user_id = ? ORDER BY next_review_at ASC, id ASC')
+    .all(userId)
+    .map(formatFlashcardRow);
+  const examGoals = db
+    .prepare('SELECT id, course_key AS courseKey, subject_name AS subjectName, exam_title AS examTitle, exam_date AS examDate, target_hours AS targetHours, created_at AS createdAt FROM exam_goals WHERE user_id = ? ORDER BY exam_date ASC')
+    .all(userId);
+  const notes = db
+    .prepare('SELECT id, subject_name AS subjectName, title, content_md AS contentMd, recall_prompts_json, updated_at AS updatedAt FROM study_notes WHERE user_id = ? ORDER BY updated_at DESC')
+    .all(userId)
+    .map((n) => ({
+      id: n.id,
+      subjectName: n.subjectName,
+      title: n.title,
+      contentMd: n.contentMd,
+      recallPrompts: parseJsonSafeLocal(n.recall_prompts_json, []),
+      updatedAt: n.updatedAt,
+    }));
+
+  const weekMins = Math.round((userStats.week_sec || 0) / 60);
+  const league = computeLeagueState(weekMins, weekBoard);
+  const activeDuel = buildDuelState(userId, weekMins, weekBoard, directory);
+
   return {
     user: {
       ...sanitizeUser(user),
       todayMins: Math.round((userStats.today_sec || 0) / 60),
-      weekMins: Math.round((userStats.week_sec || 0) / 60),
+      weekMins,
       totalMins: Math.round(totalSec / 60),
       sessionsCount: userStats.sessions_count || 0,
       avgPurity: Math.round(userStats.avg_purity || 100),
@@ -626,6 +917,18 @@ function buildBootstrap(userId) {
     shopItems: shop.sections.permanent,
     shop,
     game,
+    university: {
+      portalUrl: UNIVERSITY_PORTAL_URL,
+      courses: UNIVERSITY_COURSES,
+      flashcards,
+      dueCount: flashcards.filter((c) => c.isDue).length,
+      examGoals,
+      notes,
+    },
+    league,
+    activeDuel,
+    prevWeekMins: Math.round(prevWeekSec / 60),
+    todayTimeline,
     vapidPublicKey: vapidKeys.publicKey,
     directory,
     leaderboards: {
@@ -636,6 +939,7 @@ function buildBootstrap(userId) {
     rooms,
     feed,
     heatmap,
+    heatmap365,
     weekTrend,
     hourlyDistribution,
     peakWindowLabel,
@@ -872,6 +1176,182 @@ app.post('/api/game/dungeon/search', authMiddleware, withGameHandler((_req, user
 app.post('/api/game/dungeon/torch', authMiddleware, withGameHandler((_req, user, stats) => dungeonUseTorch(db, user, stats)));
 app.post('/api/game/dungeon/extract', authMiddleware, withGameHandler((_req, user, stats) => dungeonExtract(db, user, stats)));
 app.post('/api/game/dungeon/puzzle', authMiddleware, withGameHandler((req, user, stats) => resolvePuzzleChoice(db, user, stats, Number(req.body?.optionIndex ?? -1))));
+app.post('/api/game/specialization', authMiddleware, withGameHandler((req, user, stats) => selectSpecialization(db, user, stats, String(req.body?.specKey || ''))));
+app.post('/api/game/study-cast', authMiddleware, withGameHandler((req, user, stats) => resolveStudyCast(db, user, stats, {
+  cardId: Number(req.body?.cardId),
+  selectedIndex: req.body?.selectedIndex !== undefined ? Number(req.body.selectedIndex) : undefined,
+  grade: req.body?.grade !== undefined ? Number(req.body.grade) : undefined,
+})));
+
+app.post('/api/university/sync-subjects', authMiddleware, (req, res) => {
+  ensureUniversitySeed(req.user.id);
+  const existing = db.prepare('SELECT name FROM subjects WHERE user_id = ?').all(req.user.id);
+  const names = new Set(existing.map((s) => s.name.toLowerCase()));
+  const ins = db.prepare('INSERT INTO subjects (user_id, name, color, icon) VALUES (?, ?, ?, ?)');
+  let added = 0;
+  for (const c of UNIVERSITY_COURSES) {
+    if (!names.has(c.name.toLowerCase())) {
+      ins.run(req.user.id, c.name, c.color, c.icon);
+      added++;
+    }
+  }
+  const subjects = db.prepare('SELECT id, name, color, icon FROM subjects WHERE user_id = ? ORDER BY id ASC').all(req.user.id);
+  res.json({ ok: true, added, subjects });
+});
+
+app.post('/api/university/flashcards', authMiddleware, (req, res) => {
+  const now = Date.now();
+  const markdownText = String(req.body?.markdownText || '').trim();
+  const courseKey = String(req.body?.courseKey || 'custom').slice(0, 32);
+  const subjectName = String(req.body?.subjectName || 'General').trim().slice(0, 50);
+  const conceptTitle = String(req.body?.conceptTitle || 'Custom Note').trim().slice(0, 60);
+
+  const ins = db.prepare(`
+    INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
+    VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
+  `);
+
+  const created = [];
+  if (markdownText) {
+    const lines = markdownText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const clean = line.replace(/^[-*]\s*/, '');
+      const parts = clean.includes('::') ? clean.split('::') : clean.includes('->') ? clean.split('->') : null;
+      if (parts && parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
+        const info = ins.run(req.user.id, courseKey, subjectName, conceptTitle, parts[0].trim().slice(0, 240), parts[1].trim().slice(0, 500), '[]', 0, now, now);
+        created.push(formatFlashcardRow(db.prepare('SELECT * FROM flashcards WHERE id = ?').get(Number(info.lastInsertRowid))));
+      }
+    }
+  } else {
+    const front = String(req.body?.front || '').trim().slice(0, 280);
+    const back = String(req.body?.back || '').trim().slice(0, 600);
+    if (!front || !back) return res.status(400).json({ error: 'Card front and back are required' });
+    const options = Array.isArray(req.body?.options) ? req.body.options.map((x) => String(x).trim().slice(0, 140)).filter(Boolean) : [];
+    const correctIndex = Math.max(0, Math.min(Math.max(0, options.length - 1), Number(req.body?.correctIndex || 0)));
+    const info = ins.run(req.user.id, courseKey, subjectName, conceptTitle, front, back, JSON.stringify(options), correctIndex, now, now);
+    created.push(formatFlashcardRow(db.prepare('SELECT * FROM flashcards WHERE id = ?').get(Number(info.lastInsertRowid))));
+  }
+  const flashcards = db.prepare('SELECT * FROM flashcards WHERE user_id = ? ORDER BY next_review_at ASC, id ASC').all(req.user.id).map(formatFlashcardRow);
+  res.status(201).json({ ok: true, created, flashcards });
+});
+
+app.post('/api/university/review', authMiddleware, (req, res) => {
+  const cardId = Number(req.body?.cardId);
+  const grade = Number(req.body?.grade ?? 3);
+  const selectedIndex = req.body?.selectedIndex !== undefined ? Number(req.body.selectedIndex) : undefined;
+  const card = db.prepare('SELECT * FROM flashcards WHERE id = ? AND user_id = ?').get(cardId, req.user.id);
+  if (!card) return res.status(404).json({ error: 'Flashcard not found' });
+
+  const options = parseJsonSafeLocal(card.options_json, []);
+  const hasMcq = Array.isArray(options) && options.length > 0 && selectedIndex !== undefined;
+  const isCorrect = hasMcq ? selectedIndex === Number(card.correct_index) : grade >= 2;
+  const effQuality = req.body?.grade !== undefined ? grade : isCorrect ? 3 : 1;
+  const sm2 = gradeFlashcardSm2(card, effQuality);
+
+  db.prepare(`
+    UPDATE flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, next_review_at = ?, review_count = ?
+    WHERE id = ? AND user_id = ?
+  `).run(sm2.easeFactor, sm2.intervalDays, sm2.repetitions, sm2.nextReviewAt, sm2.reviewCount, card.id, req.user.id);
+
+  const xpGain = isCorrect ? 10 : 4;
+  const coinsGain = isCorrect ? 2 : 0;
+  db.prepare('UPDATE users SET xp = xp + ?, coins = coins + ? WHERE id = ?').run(xpGain, coinsGain, req.user.id);
+  ensureGameProfile(db, req.user.id);
+  db.prepare('UPDATE game_profiles SET shards = shards + ?, focus_charge = MIN(100, focus_charge + 6), updated_at = ? WHERE user_id = ?').run(
+    isCorrect ? 5 : 2,
+    Date.now(),
+    req.user.id
+  );
+
+  const updatedCard = formatFlashcardRow(db.prepare('SELECT * FROM flashcards WHERE id = ?').get(card.id));
+  const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({
+    ok: true,
+    isCorrect,
+    xpGain,
+    coinsGain,
+    flashcard: updatedCard,
+    user: buildFullUser(req.user.id),
+    game: buildGameState(db, updatedUser, getUserStudyStats(req.user.id)),
+  });
+});
+
+app.post('/api/university/notes', authMiddleware, (req, res) => {
+  const id = req.body?.id ? Number(req.body.id) : null;
+  const subjectName = String(req.body?.subjectName || 'Study Session').trim().slice(0, 60);
+  const title = String(req.body?.title || '').trim().slice(0, 120);
+  const contentMd = String(req.body?.contentMd || '').trim().slice(0, 4000);
+  const recallPrompts = Array.isArray(req.body?.recallPrompts) ? req.body.recallPrompts.slice(0, 10) : [];
+  if (!title || !contentMd) return res.status(400).json({ error: 'Note title and Markdown content are required' });
+
+  const now = Date.now();
+  let savedId = id;
+  if (id) {
+    const own = db.prepare('SELECT id FROM study_notes WHERE id = ? AND user_id = ?').get(id, req.user.id);
+    if (!own) return res.status(404).json({ error: 'Note not found' });
+    db.prepare('UPDATE study_notes SET subject_name = ?, title = ?, content_md = ?, recall_prompts_json = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(
+      subjectName,
+      title,
+      contentMd,
+      JSON.stringify(recallPrompts),
+      now,
+      id,
+      req.user.id
+    );
+  } else {
+    const info = db.prepare('INSERT INTO study_notes (user_id, subject_name, title, content_md, recall_prompts_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      req.user.id,
+      subjectName,
+      title,
+      contentMd,
+      JSON.stringify(recallPrompts),
+      now
+    );
+    savedId = Number(info.lastInsertRowid);
+  }
+  const notes = db.prepare('SELECT id, subject_name AS subjectName, title, content_md AS contentMd, recall_prompts_json, updated_at AS updatedAt FROM study_notes WHERE user_id = ? ORDER BY updated_at DESC').all(req.user.id).map((n) => ({
+    ...n,
+    recallPrompts: parseJsonSafeLocal(n.recall_prompts_json, []),
+  }));
+  res.json({ ok: true, id: savedId, notes });
+});
+
+app.delete('/api/university/notes/:id', authMiddleware, (req, res) => {
+  db.prepare('DELETE FROM study_notes WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/university/exams', authMiddleware, (req, res) => {
+  const id = req.body?.id ? Number(req.body.id) : null;
+  const courseKey = String(req.body?.courseKey || 'custom').slice(0, 32);
+  const subjectName = String(req.body?.subjectName || 'Focus').trim().slice(0, 60);
+  const examTitle = String(req.body?.examTitle || `${subjectName} Exam`).trim().slice(0, 80);
+  const examDate = String(req.body?.examDate || '2027-01-30').slice(0, 12);
+  const targetHours = Math.max(2, Math.min(300, Math.round(Number(req.body?.targetHours || 40))));
+
+  if (id) {
+    db.prepare('UPDATE exam_goals SET subject_name = ?, exam_title = ?, exam_date = ?, target_hours = ? WHERE id = ? AND user_id = ?').run(
+      subjectName,
+      examTitle,
+      examDate,
+      targetHours,
+      id,
+      req.user.id
+    );
+  } else {
+    db.prepare('INSERT INTO exam_goals (user_id, course_key, subject_name, exam_title, exam_date, target_hours, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      req.user.id,
+      courseKey,
+      subjectName,
+      examTitle,
+      examDate,
+      targetHours,
+      Date.now()
+    );
+  }
+  const examGoals = db.prepare('SELECT id, course_key AS courseKey, subject_name AS subjectName, exam_title AS examTitle, exam_date AS examDate, target_hours AS targetHours, created_at AS createdAt FROM exam_goals WHERE user_id = ? ORDER BY exam_date ASC').all(req.user.id);
+  res.json({ ok: true, examGoals });
+});
 
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const subjectName = String(req.body?.subjectName || 'Focus Block').trim().slice(0, 40);
@@ -888,7 +1368,21 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   const purityBonus = purityPct >= 95 ? 35 : purityPct >= 80 ? 15 : 0;
   const baseXp = Math.max(20, mins * 12 + purityBonus);
   const xpEarned = strictMode && purityPct >= 95 ? Math.round(baseXp * 1.25) : baseXp;
-  const coinsEarned = Math.max(5, Math.round(xpEarned / 10));
+  const baseCoins = Math.max(5, Math.round(xpEarned / 10));
+  const requestedWager = [0, 15, 30].includes(Number(req.body?.wagerCoins || 0)) ? Number(req.body?.wagerCoins || 0) : 0;
+  const activeWager = requestedWager > 0 && req.user.coins >= requestedWager ? requestedWager : 0;
+  let wagerOutcome = 'none';
+  let coinsDelta = baseCoins;
+  if (activeWager > 0) {
+    if (purityPct >= 90 && durationSec >= 300) {
+      coinsDelta += activeWager;
+      wagerOutcome = 'won';
+    } else if (purityPct < 80) {
+      coinsDelta = Math.max(-req.user.coins, baseCoins - activeWager);
+      wagerOutcome = 'lost';
+    }
+  }
+  const coinsEarned = Math.max(0, coinsDelta);
 
   const now = Date.now();
   const todayStr = dateKeyUTC(now);
@@ -918,8 +1412,21 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   `).run(req.user.id, subjectName, subjectColor, mode, durationSec, purityPct, xpEarned, note, shareToFeed, now);
 
   db.prepare(`
-    UPDATE users SET xp = xp + ?, coins = coins + ?, streak_days = ?, last_study_date = ?, streak_freezes = ? WHERE id = ?
-  `).run(xpEarned, coinsEarned, nextStreak, todayStr, nextFreezes, req.user.id);
+    UPDATE users SET xp = xp + ?, coins = MAX(0, coins + ?), streak_days = ?, last_study_date = ?, streak_freezes = ? WHERE id = ?
+  `).run(xpEarned, coinsDelta, nextStreak, todayStr, nextFreezes, req.user.id);
+
+  if (wagerOutcome === 'won') {
+    ensureGameProfile(db, req.user.id);
+    db.prepare('UPDATE game_profiles SET shards = shards + 15 WHERE user_id = ?').run(req.user.id);
+  }
+
+  const activeRoomId = livePresence.get(req.user.id)?.roomId || Number(req.body?.roomId || 0) || db.prepare('SELECT id FROM study_rooms ORDER BY id ASC LIMIT 1').get()?.id;
+  let raidDamageDealt = 0;
+  if (activeRoomId) {
+    raidDamageDealt = mins * 15 + (purityPct >= 95 ? 25 : 0);
+    applyRaidDamageToRoom(activeRoomId, req.user, raidDamageDealt);
+    broadcastPresence();
+  }
 
   if (taskId) {
     db.prepare('UPDATE study_tasks SET completed_pomos = completed_pomos + 1 WHERE id = ? AND user_id = ?').run(taskId, req.user.id);
@@ -950,6 +1457,8 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     session,
     xpEarned,
     coinsEarned,
+    wagerOutcome,
+    raidDamageDealt,
     newStreak: nextStreak,
     usedFreeze,
     gameRewards,
@@ -1065,6 +1574,122 @@ app.delete('/api/rooms/:id', authMiddleware, (req, res) => {
   }
   broadcastPresence();
   res.json({ ok: true, deletedId: id, fallbackRoomId });
+});
+
+app.post('/api/rooms/:id/chat', authMiddleware, (req, res) => {
+  const roomId = Number(req.params.id);
+  const room = db.prepare('SELECT id FROM study_rooms WHERE id = ?').get(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const content = String(req.body?.content || '').trim().slice(0, 240);
+  if (!content) return res.status(400).json({ error: 'Message cannot be empty' });
+
+  const now = Date.now();
+  const info = db.prepare(`
+    INSERT INTO room_messages (room_id, user_id, username, display_name, avatar, content, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(roomId, req.user.id, req.user.username, req.user.display_name, req.user.avatar, content, now);
+
+  const msg = {
+    id: Number(info.lastInsertRowid),
+    roomId,
+    userId: req.user.id,
+    username: req.user.username,
+    displayName: req.user.display_name,
+    avatar: req.user.avatar,
+    content,
+    createdAt: now,
+  };
+  broadcastPresence();
+  res.status(201).json({ ok: true, message: msg });
+});
+
+app.post('/api/rooms/:id/raid-strike', authMiddleware, (req, res) => {
+  const roomId = Number(req.params.id);
+  const room = db.prepare('SELECT id FROM study_rooms WHERE id = ?').get(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+
+  const gp = ensureGameProfile(db, req.user.id);
+  if ((gp.energy || 0) < 1) {
+    return res.status(400).json({ error: 'Need at least 1 ⚡ Energy to launch a Raid Strike!' });
+  }
+  const st = buildGameState(db, req.user, getUserStudyStats(req.user.id));
+  const dmg = Math.max(25, Math.round(st.heroStats.atk * 3));
+  db.prepare('UPDATE game_profiles SET energy = energy - 1, shards = shards + 8, updated_at = ? WHERE user_id = ?').run(
+    Date.now(),
+    req.user.id
+  );
+  db.prepare('UPDATE users SET xp = xp + 15 WHERE id = ?').run(req.user.id);
+  const raid = applyRaidDamageToRoom(roomId, req.user, dmg);
+  broadcastPresence();
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({
+    ok: true,
+    dmg,
+    raid,
+    user: buildFullUser(req.user.id),
+    game: buildGameState(db, refreshedUser, getUserStudyStats(req.user.id)),
+  });
+});
+
+app.post('/api/compete/duel', authMiddleware, (req, res) => {
+  const action = String(req.body?.action || 'create');
+  const now = Date.now();
+  const weekStartMs = now - 7 * 86400_000;
+  const weekSec = db.prepare('SELECT COALESCE(SUM(duration_sec), 0) AS s FROM study_sessions WHERE user_id = ? AND created_at >= ?').get(req.user.id, weekStartMs).s;
+  const weekMins = Math.round((weekSec || 0) / 60);
+
+  if (action === 'claim') {
+    const duel = db.prepare('SELECT * FROM focus_duels WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(req.user.id);
+    if (!duel || duel.claimed) return res.status(400).json({ error: 'No claimable duel' });
+    const progress = Math.max(0, weekMins - duel.user_start_mins);
+    if (progress < duel.target_mins) return res.status(400).json({ error: 'Reach duel goal minutes first!' });
+    const rewardCoins = duel.wager_coins * 2;
+    db.prepare('UPDATE focus_duels SET claimed = 1, status = ? WHERE id = ?').run('claimed', duel.id);
+    db.prepare('UPDATE users SET coins = coins + ?, xp = xp + 50 WHERE id = ?').run(rewardCoins, req.user.id);
+    return res.json({ ok: true, rewardCoins, user: buildFullUser(req.user.id) });
+  }
+
+  const targetMins = Math.max(15, Math.min(600, Math.round(Number(req.body?.targetMins || 60))));
+  const wagerCoins = Math.max(5, Math.min(100, Math.round(Number(req.body?.wagerCoins || 20))));
+  const oppId = req.body?.opponentId ? Number(req.body.opponentId) : null;
+  const oppUser = oppId ? db.prepare('SELECT id, display_name, avatar FROM users WHERE id = ?').get(oppId) : null;
+  const oppWeekSec = oppUser
+    ? db.prepare('SELECT COALESCE(SUM(duration_sec), 0) AS s FROM study_sessions WHERE user_id = ? AND created_at >= ?').get(oppUser.id, weekStartMs).s
+    : 0;
+
+  const info = db.prepare(`
+    INSERT INTO focus_duels (user_id, opponent_id, opponent_name, opponent_avatar, target_mins, wager_coins, user_start_mins, opp_base_mins, started_at, ends_at, status, claimed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0)
+  `).run(
+    req.user.id,
+    oppUser?.id || null,
+    oppUser?.display_name || 'Elder Rowan',
+    oppUser?.avatar || '🧙',
+    targetMins,
+    wagerCoins,
+    weekMins,
+    Math.round((oppWeekSec || 0) / 60),
+    now,
+    now + 7 * 86400_000
+  );
+  const created = db.prepare('SELECT * FROM focus_duels WHERE id = ?').get(Number(info.lastInsertRowid));
+  res.status(201).json({
+    ok: true,
+    duel: {
+      id: created.id,
+      opponentId: created.opponent_id,
+      opponentName: created.opponent_name,
+      opponentAvatar: created.opponent_avatar,
+      targetMins: created.target_mins,
+      wagerCoins: created.wager_coins,
+      userMins: 0,
+      opponentMins: 0,
+      startedAt: created.started_at,
+      endsAt: created.ends_at,
+      status: 'active',
+      claimed: false,
+    },
+  });
 });
 
 app.patch('/api/profile', authMiddleware, (req, res) => {

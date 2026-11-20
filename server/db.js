@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { STARTER_STUDY_NOTES, UNIVERSITY_COURSES, UNIVERSITY_FLASHCARDS } from './universityData.js';
 
 const DB_PATH = process.env.DB_PATH || path.resolve(process.cwd(), 'data', 'studypulse.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -210,9 +211,89 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS flashcards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    card_key TEXT,
+    course_key TEXT NOT NULL DEFAULT 'custom',
+    subject_name TEXT NOT NULL,
+    concept_title TEXT NOT NULL DEFAULT '',
+    front TEXT NOT NULL,
+    back TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '[]',
+    correct_index INTEGER NOT NULL DEFAULT 0,
+    ease_factor REAL NOT NULL DEFAULT 2.5,
+    interval_days INTEGER NOT NULL DEFAULT 0,
+    repetitions INTEGER NOT NULL DEFAULT 0,
+    next_review_at INTEGER NOT NULL DEFAULT 0,
+    review_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS exam_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    course_key TEXT NOT NULL,
+    subject_name TEXT NOT NULL,
+    exam_title TEXT NOT NULL,
+    exam_date TEXT NOT NULL,
+    target_hours INTEGER NOT NULL DEFAULT 40,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS study_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content_md TEXT NOT NULL,
+    recall_prompts_json TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS room_raids (
+    room_id INTEGER PRIMARY KEY REFERENCES study_rooms(id) ON DELETE CASCADE,
+    week_key TEXT NOT NULL,
+    boss_name TEXT NOT NULL,
+    boss_icon TEXT NOT NULL,
+    boss_hp INTEGER NOT NULL,
+    boss_max_hp INTEGER NOT NULL,
+    contributors_json TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS room_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES study_rooms(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    avatar TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS focus_duels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    opponent_id INTEGER,
+    opponent_name TEXT NOT NULL,
+    opponent_avatar TEXT NOT NULL,
+    target_mins INTEGER NOT NULL DEFAULT 90,
+    wager_coins INTEGER NOT NULL DEFAULT 20,
+    user_start_mins INTEGER NOT NULL DEFAULT 0,
+    opp_base_mins INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    claimed INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_user_time ON study_sessions(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON study_sessions(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_game_items_user ON game_items(user_id, equipped DESC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_flashcards_user ON flashcards(user_id, next_review_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_room_messages_room ON room_messages(room_id, created_at DESC);
 `);
 
 // Safe migrations for existing production DBs
@@ -239,6 +320,7 @@ const gpMigrations = [
   ['herbs', 'INTEGER NOT NULL DEFAULT 1'],
   ['torches', 'INTEGER NOT NULL DEFAULT 2'],
   ['dungeon_state_json', 'TEXT'],
+  ['specialization', "TEXT NOT NULL DEFAULT 'chronomancer'"],
 ];
 for (const [col, def] of gpMigrations) {
   if (!gpCols.has(col)) {
@@ -258,6 +340,57 @@ export function createStarterSubjects(userId) {
   const insert = db.prepare('INSERT INTO subjects (user_id, name, color, icon) VALUES (?, ?, ?, ?)');
   for (const s of DEFAULT_SUBJECTS) {
     insert.run(userId, s.name, s.color, s.icon);
+  }
+}
+
+export function ensureUniversitySeed(userId) {
+  const now = Date.now();
+  const fcCount = db.prepare('SELECT COUNT(*) AS c FROM flashcards WHERE user_id = ?').get(userId).c;
+  if (fcCount === 0) {
+    const insCard = db.prepare(`
+      INSERT INTO flashcards (user_id, card_key, course_key, subject_name, concept_title, front, back, options_json, correct_index, ease_factor, interval_days, repetitions, next_review_at, review_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2.5, 0, 0, ?, 0, ?)
+    `);
+    const tx = db.transaction(() => {
+      for (const c of UNIVERSITY_FLASHCARDS) {
+        insCard.run(
+          userId,
+          c.key,
+          c.courseKey,
+          c.subjectName,
+          c.conceptTitle,
+          c.front,
+          c.back,
+          JSON.stringify(c.options || []),
+          c.correctIndex ?? 0,
+          now,
+          now
+        );
+      }
+    });
+    tx();
+  }
+
+  const examCount = db.prepare('SELECT COUNT(*) AS c FROM exam_goals WHERE user_id = ?').get(userId).c;
+  if (examCount === 0) {
+    const insExam = db.prepare(`
+      INSERT INTO exam_goals (user_id, course_key, subject_name, exam_title, exam_date, target_hours, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const c of UNIVERSITY_COURSES) {
+      insExam.run(userId, c.key, c.name, `${c.shortName} Final Exam`, c.defaultExamDate, c.defaultTargetHours, now);
+    }
+  }
+
+  const noteCount = db.prepare('SELECT COUNT(*) AS c FROM study_notes WHERE user_id = ?').get(userId).c;
+  if (noteCount === 0) {
+    const insNote = db.prepare(`
+      INSERT INTO study_notes (user_id, subject_name, title, content_md, recall_prompts_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const n of STARTER_STUDY_NOTES) {
+      insNote.run(userId, n.subjectName, n.title, n.contentMd, JSON.stringify(n.recallPrompts || []), now);
+    }
   }
 }
 

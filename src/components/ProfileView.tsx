@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Award, Calendar, Flame, LogOut, Settings2, Check, Target, Clock, Trash2 } from 'lucide-react';
-import { Achievement, GameState, HeatmapDay, ShopBuyResponse, ShopState, Subject, SubjectStat, User, WeekDay } from '../types';
+import { Award, Calendar, Flame, LogOut, Settings2, Check, Target, Clock, Trash2, Download, Receipt } from 'lucide-react';
+import { Achievement, GameState, HeatmapDay, ShopBuyResponse, ShopState, Subject, SubjectStat, TodayTimelineItem, User, WeekDay } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { StorePanel } from './StorePanel';
 
@@ -9,6 +9,9 @@ interface ProfileViewProps {
   themeId?: ThemeId;
   user: User;
   heatmap: HeatmapDay[];
+  heatmap365?: HeatmapDay[];
+  prevWeekMins?: number;
+  todayTimeline?: TodayTimelineItem[];
   weekTrend: WeekDay[];
   hourlyDistribution: number[];
   peakWindowLabel: string;
@@ -37,6 +40,9 @@ export function ProfileView({
   themeId = 'shadcn-dark',
   user,
   heatmap,
+  heatmap365,
+  prevWeekMins = 0,
+  todayTimeline = [],
   weekTrend,
   hourlyDistribution,
   peakWindowLabel,
@@ -57,8 +63,89 @@ export function ProfileView({
   const [bio, setBio] = useState(user.bio);
   const [dailyGoalMins, setDailyGoalMins] = useState(user.dailyGoalMins);
   const [saving, setSaving] = useState(false);
+  const [heatRange, setHeatRange] = useState<'90' | '365'>('90');
 
   const themeMeta = getThemeMeta(themeId);
+  const activeHeatmap = heatRange === '365' && heatmap365?.length ? heatmap365 : heatmap;
+  const weekDeltaPct = prevWeekMins > 0 ? Math.round(((user.weekMins - prevWeekMins) / prevWeekMins) * 100) : user.weekMins > 0 ? 100 : 0;
+
+  function triggerDownload(filename: string, mime: string, body: string) {
+    const blob = new Blob([body], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCsv() {
+    const rows = ['date,subject,mode,duration_min,purity_pct,note'];
+    for (const s of todayTimeline) {
+      rows.push(`${new Date(s.createdAt).toISOString()},"${s.subjectName}","${s.mode}",${Math.max(1, Math.round(s.durationSec / 60))},${s.purityPct},"${(s.note || '').replace(/"/g, '""')}"`);
+    }
+    triggerDownload(`studypulse_sessions_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv', rows.join('\n'));
+  }
+
+  function exportJson() {
+    triggerDownload(
+      `studypulse_analytics_${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json',
+      JSON.stringify({ user: user.username, weekMins: user.weekMins, prevWeekMins, todayTimeline, heatmap365: activeHeatmap }, null, 2)
+    );
+  }
+
+  function exportIcal() {
+    const fmt = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//StudyPulse//Focus Receipt//EN'];
+    for (const s of todayTimeline) {
+      lines.push('BEGIN:VEVENT');
+      lines.push(`UID:sp-${s.id}@study.matinz03.tech`);
+      lines.push(`DTSTART:${fmt(s.createdAt - s.durationSec * 1000)}`);
+      lines.push(`DTEND:${fmt(s.createdAt)}`);
+      lines.push(`SUMMARY:StudyPulse - ${s.subjectName} (${s.purityPct}% Purity)`);
+      lines.push(`DESCRIPTION:${(s.note || 'Deep Focus Block').replace(/\n/g, ' ')}`);
+      lines.push('END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    triggerDownload(`studypulse_today.ics`, 'text/calendar', lines.join('\r\n'));
+  }
+
+  function downloadReceiptPng() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 480;
+    canvas.height = Math.max(260, 150 + todayTimeline.length * 28);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = themeMeta.preview.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = themeMeta.preview.border;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+    ctx.fillStyle = themeMeta.preview.text;
+    ctx.font = '800 18px monospace';
+    ctx.fillText(`STUDYPULSE RECEIPT · @${user.username}`, 28, 46);
+    ctx.font = '600 12px monospace';
+    ctx.fillText(`Today: ${user.todayMins}m  |  Week: ${user.weekMins}m  |  Streak: ${user.streakDays}d`, 28, 72);
+    ctx.fillStyle = themeMeta.colors.accent;
+    ctx.fillRect(28, 86, canvas.width - 56, 2);
+    let y = 114;
+    if (!todayTimeline.length) {
+      ctx.fillStyle = themeMeta.preview.text;
+      ctx.fillText('Complete a session today to print blocks on your receipt.', 28, y);
+    } else {
+      for (const s of todayTimeline.slice(0, 10)) {
+        const tm = new Date(s.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        ctx.fillStyle = themeMeta.preview.text;
+        ctx.fillText(`${tm}  ${s.subjectName.slice(0, 20).padEnd(20)}  ${Math.max(1, Math.round(s.durationSec / 60))}m · ${s.purityPct}%`, 28, y);
+        y += 24;
+      }
+    }
+    const link = document.createElement('a');
+    link.download = `studypulse_receipt_${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }
   const goalPct = Math.min(100, Math.round((user.todayMins / Math.max(1, user.dailyGoalMins)) * 100));
   const maxTrend = Math.max(30, ...weekTrend.map((d) => d.minutes));
   const maxHour = Math.max(15, ...(hourlyDistribution.length ? hourlyDistribution : [15]));
@@ -214,7 +301,12 @@ export function ProfileView({
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
             Last 7 Days Focus
           </h3>
-          <span className="font-mono-num text-xs font-bold text-white">{user.weekMins}m total</span>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full sp-badge font-mono-num text-[10px] font-bold">
+              {weekDeltaPct >= 0 ? `+${weekDeltaPct}%` : `${weekDeltaPct}%`} vs prev wk
+            </span>
+            <span className="font-mono-num text-xs font-bold text-white">{user.weekMins}m total</span>
+          </div>
         </div>
         <div className="grid grid-cols-7 gap-2 items-end h-28 pt-2">
           {weekTrend.map((d) => {
@@ -241,13 +333,31 @@ export function ProfileView({
         </div>
       </div>
 
-      {/* 90-Day Study Consistency Heatmap */}
+      {/* 90-Day / 365-Day Study Consistency Heatmap */}
       <div className="glass-card rounded-3xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5" />
-            90-Day Study Heatmap
-          </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5" />
+              {heatRange}-Day Study Heatmap
+            </h3>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setHeatRange('90')}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${heatRange === '90' ? 'sp-btn-primary' : 'sp-badge'}`}
+              >
+                90d
+              </button>
+              <button
+                type="button"
+                onClick={() => setHeatRange('365')}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${heatRange === '365' ? 'sp-btn-primary' : 'sp-badge'}`}
+              >
+                365d
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-1 text-[10px] text-slate-400">
             <span>Less</span>
             <span className="w-2.5 h-2.5 rounded-sm inline-block border border-white/10" style={{ backgroundColor: themeMeta.colors.track }} />
@@ -259,7 +369,7 @@ export function ProfileView({
         </div>
         <div className="overflow-x-auto no-scrollbar">
           <div className="grid grid-rows-7 grid-flow-col gap-1.5 w-max">
-            {heatmap.map((cell) => (
+            {activeHeatmap.map((cell) => (
               <div
                 key={cell.date}
                 title={`${cell.date}: ${cell.minutes}m (${cell.count} sessions)`}
@@ -268,6 +378,56 @@ export function ProfileView({
               />
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* YPT Daily Timeline Receipt + Exports */}
+      <div className="glass-card rounded-3xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <Receipt className="w-3.5 h-3.5" /> Daily Focus Receipt & Exports
+          </h3>
+          <button
+            type="button"
+            onClick={downloadReceiptPng}
+            className="px-2.5 py-1 rounded-xl sp-btn-primary text-[10px] font-extrabold flex items-center gap-1 cursor-pointer"
+          >
+            <Download className="w-3 h-3" /> Receipt PNG
+          </button>
+        </div>
+
+        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+          {todayTimeline.length === 0 ? (
+            <div className="p-2.5 rounded-xl sp-inset text-[11px] text-slate-400">
+              Finish a session today to generate chronological YPT receipt blocks.
+            </div>
+          ) : (
+            todayTimeline.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-2 p-2 rounded-xl sp-inset text-[11px]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono-num text-[10px] text-slate-400 shrink-0">
+                    {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="font-bold text-white truncate">{item.subjectName}</span>
+                </div>
+                <span className="font-mono-num text-[10px] text-slate-300 shrink-0">
+                  {Math.max(1, Math.round(item.durationSec / 60))}m · {item.purityPct}%
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-1.5">
+          <button type="button" onClick={exportCsv} className="py-1.5 rounded-xl sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90">
+            Export CSV
+          </button>
+          <button type="button" onClick={exportJson} className="py-1.5 rounded-xl sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90">
+            Export JSON
+          </button>
+          <button type="button" onClick={exportIcal} className="py-1.5 rounded-xl sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90">
+            Export iCal
+          </button>
         </div>
       </div>
 

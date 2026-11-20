@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Users, Sparkles, Flame, X, ChevronLeft, ChevronRight, LayoutGrid, Trash2 } from 'lucide-react';
+import { Plus, Users, Sparkles, Flame, X, ChevronLeft, ChevronRight, LayoutGrid, Trash2, Swords, Send, Timer } from 'lucide-react';
 import { FloatingEmoji, Room, RoomOccupant } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { formatClock } from './FocusView';
+import { RoomTavernCanvas } from './RoomTavernCanvas';
 
 interface RoomsViewProps {
   themeId?: ThemeId;
@@ -16,8 +17,12 @@ interface RoomsViewProps {
   onSendCheer: (emoji: string) => void;
   currentUserId: number;
   isRunning: boolean;
+  heroEnergy?: number;
   onJumpToFocus: () => void;
   onMatchSubject?: (subjectName: string) => void;
+  onRaidStrike?: (roomId: number) => Promise<void>;
+  onSendRoomChat?: (roomId: number, content: string) => Promise<void>;
+  onSyncRoomTimer?: (phase: 'focus' | 'break') => void;
 }
 
 const CHEERS = ['🔥', '⚡', '👏', '☕', '🚀', '🤍'];
@@ -40,8 +45,12 @@ export function RoomsView({
   onSendCheer,
   currentUserId,
   isRunning,
+  heroEnergy = 0,
   onJumpToFocus,
   onMatchSubject,
+  onRaidStrike,
+  onSendRoomChat,
+  onSyncRoomTimer,
 }: RoomsViewProps) {
   const [nowMs, setNowMs] = useState(Date.now());
   const [creating, setCreating] = useState(false);
@@ -52,6 +61,9 @@ export function RoomsView({
   const [accent, setAccent] = useState('#FAFAFA');
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [chatText, setChatText] = useState('');
+  const [sendingChat, setSendingChat] = useState(false);
+  const [strikingRaid, setStrikingRaid] = useState(false);
   const railRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ down: boolean; startX: number; scrollLeft: number; dragged: boolean }>({
     down: false,
@@ -118,6 +130,32 @@ export function RoomsView({
       setDeletingId(null);
     }
   }
+
+  async function submitChat(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentRoom || !onSendRoomChat || !chatText.trim() || sendingChat) return;
+    setSendingChat(true);
+    try {
+      await onSendRoomChat(currentRoom.id, chatText.trim());
+      setChatText('');
+    } finally {
+      setSendingChat(false);
+    }
+  }
+
+  async function triggerRaidStrike() {
+    if (!currentRoom || !onRaidStrike || strikingRaid) return;
+    setStrikingRaid(true);
+    try {
+      await onRaidStrike(currentRoom.id);
+    } finally {
+      setStrikingRaid(false);
+    }
+  }
+
+  const cycleSec = Math.floor(nowMs / 1000) % 1800;
+  const syncPhase: 'focus' | 'break' = cycleSec < 1500 ? 'focus' : 'break';
+  const syncRemaining = syncPhase === 'focus' ? 1500 - cycleSec : 1800 - cycleSec;
 
   return (
     <div className="space-y-4">
@@ -396,6 +434,80 @@ export function RoomsView({
             </div>
           </div>
 
+          {/* Live Pixel Study Tavern Canvas */}
+          <RoomTavernCanvas
+            occupants={currentRoom.occupants}
+            currentUserId={currentUserId}
+            themeId={themeId}
+          />
+
+          {/* Synchronized Group Pomodoro Clock + Co-Op Weekly Raid Boss */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3 relative z-10">
+            <div className="rounded-2xl p-3 sp-inset border border-white/10 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <Timer className="w-3 h-3" /> Synced Room Clock
+                </div>
+                <div className="text-xs font-extrabold text-white mt-0.5 flex items-center gap-1.5">
+                  <span>{syncPhase === 'focus' ? '🔥 25m Focus' : '☕ 5m Break'}</span>
+                  <span className="font-mono-num text-sm">{formatClock(syncRemaining)}</span>
+                </div>
+              </div>
+              {onSyncRoomTimer && (
+                <button
+                  type="button"
+                  onClick={() => onSyncRoomTimer(syncPhase)}
+                  className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[10px] font-extrabold shrink-0 cursor-pointer"
+                >
+                  Join Sync
+                </button>
+              )}
+            </div>
+
+            {currentRoom.raid && (
+              <div className="rounded-2xl p-3 sp-inset border border-white/10 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Co-Op Weekly Raid Boss
+                    </div>
+                    <div className="text-xs font-extrabold text-white truncate">
+                      {currentRoom.raid.bossIcon} {currentRoom.raid.bossName}
+                    </div>
+                  </div>
+                  {onRaidStrike && (
+                    <button
+                      type="button"
+                      disabled={strikingRaid || heroEnergy < 1 || currentRoom.raid.bossHp <= 0}
+                      onClick={triggerRaidStrike}
+                      className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[10px] font-extrabold shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                    >
+                      <Swords className="w-3 h-3" />
+                      <span>{currentRoom.raid.bossHp <= 0 ? 'Slain!' : 'Strike (1⚡)'}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="h-2 rounded-full bg-black/30 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.max(0, Math.round((currentRoom.raid.bossHp / Math.max(1, currentRoom.raid.bossMaxHp)) * 100))}%`,
+                      backgroundColor: themeMeta.colors.accent,
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] font-mono-num text-slate-400">
+                  <span>{currentRoom.raid.bossHp}/{currentRoom.raid.bossMaxHp} HP</span>
+                  <span>
+                    {currentRoom.raid.contributors[0]
+                      ? `Top: ${currentRoom.raid.contributors[0].avatar} ${currentRoom.raid.contributors[0].damage} DMG`
+                      : 'Focus sessions deal boss DMG'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Desk Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 relative z-10">
             {currentRoom.occupants.length === 0 ? (
@@ -512,6 +624,47 @@ export function RoomsView({
               ))}
             </div>
           </div>
+
+          {/* Room Break Lounge Chat */}
+          {onSendRoomChat && (
+            <div className="mt-4 pt-3 border-t border-white/10 relative z-10 space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-semibold text-slate-300">💬 Room Lounge Chat</span>
+                <span className="text-[10px] text-slate-400">
+                  {syncPhase === 'focus' ? 'Focus phase — keep notes brief' : 'Break phase — chat open!'}
+                </span>
+              </div>
+              {(currentRoom.messages || []).length > 0 && (
+                <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                  {(currentRoom.messages || []).slice(-6).map((m) => (
+                    <div key={m.id} className="text-[11px] flex items-baseline gap-1.5">
+                      <span className="font-bold text-white shrink-0">
+                        {m.avatar} {m.displayName}:
+                      </span>
+                      <span className="text-slate-300 break-words">{m.content}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={submitChat} className="flex gap-1.5">
+                <input
+                  type="text"
+                  maxLength={220}
+                  placeholder="Share a goal or break check-in..."
+                  value={chatText}
+                  onChange={(e) => setChatText(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                />
+                <button
+                  type="submit"
+                  disabled={sendingChat || !chatText.trim()}
+                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                >
+                  <Send className="w-3 h-3" /> Send
+                </button>
+              </form>
+            </div>
+          )}
         </div>
       )}
     </div>

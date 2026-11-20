@@ -43,12 +43,18 @@ export interface PipTimerState {
   heroLevel: number;
   focusFever: boolean;
   biomeKey: string;
+  activeTaskId?: number | null;
+  pendingTasksCount?: number;
+  roomPeersCount?: number;
+  roomName?: string;
+  toastText?: string | null;
 }
 
 export interface PipActions {
   onToggleRun: () => void;
   onBoost5m: () => void;
   onFinish: () => void;
+  onCompleteTask?: () => void;
 }
 
 interface DocumentPictureInPictureApi {
@@ -72,6 +78,11 @@ const DEFAULT_STATE: PipTimerState = {
   heroLevel: 1,
   focusFever: false,
   biomeKey: 'moss_library',
+  activeTaskId: null,
+  pendingTasksCount: 0,
+  roomPeersCount: 0,
+  roomName: '',
+  toastText: null,
 };
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -539,6 +550,47 @@ export function renderCanvasHudToContext(
   const taskLine = (s.taskTitle || (s.isRunning ? 'Stay locked in' : 'Ready to focus')).slice(0, 32);
   ctx.fillText(taskLine, innerLeft, Math.round(h * 0.77), Math.round(w * 0.54));
 
+  // Optional Room Peers indicator or Floating Loot/Milestone Toast on right corner
+  if (s.toastText) {
+    const toastStr = s.toastText.slice(0, 26);
+    ctx.font = '800 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const tw = Math.ceil(ctx.measureText(toastStr).width) + 20;
+    const tx = w - pad - 16 - tw;
+    const ty = Math.round(h * 0.23);
+    ctx.fillStyle = isLight ? hexToRgba(meta.preview.card, 0.94) : hexToRgba(meta.preview.bg, 0.88);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, tw, 22, 999);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fbbf24';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(toastStr, tx + tw / 2, ty + 11.5);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  } else if ((s.roomPeersCount || 0) > 0) {
+    const peerStr = `👥 ${s.roomPeersCount} live`;
+    ctx.font = '700 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const pw = Math.ceil(ctx.measureText(peerStr).width) + 16;
+    const px = w - pad - 16 - pw;
+    const py = Math.round(h * 0.23);
+    ctx.fillStyle = pillBg;
+    ctx.strokeStyle = pillBorder;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(px, py, pw, 20, 999);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = mutedInk;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(peerStr, px + pw / 2, py + 10.5);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
   // Bottom progress track
   const barY = h - pad - 20;
   const barW = w - (pad + 18) * 2;
@@ -850,7 +902,7 @@ class FloatingPipEngine {
           background: linear-gradient(90deg, var(--sp-primary), var(--sp-glow));
           transition: width 0.3s linear;
         }
-        .actions { display: flex; gap: 6px; max-width: 66%; }
+        .actions { display: flex; gap: 6px; max-width: 72%; }
         button {
           border: 1px solid var(--sp-border); border-radius: 9px; padding: 5px 9px;
           font-size: 11px; font-weight: 800; cursor: pointer;
@@ -858,6 +910,17 @@ class FloatingPipEngine {
         }
         button.primary { flex: 1; background: var(--sp-primary); color: var(--sp-primary-text); border: 1px solid transparent; }
         button.paused { flex: 1; background: var(--sp-pill-bg); color: var(--sp-text); border: 1px solid var(--sp-border); }
+        .subline { display: flex; align-items: center; gap: 6px; }
+        .peers {
+          font-size: 10px; font-weight: 700; color: var(--sp-muted);
+          background: var(--sp-pill-bg); border: 1px solid var(--sp-border);
+          padding: 2px 7px; border-radius: 999px; display: none;
+        }
+        .toast {
+          font-size: 10px; font-weight: 800; color: #fbbf24;
+          background: var(--sp-card); border: 1px solid #fbbf24;
+          padding: 2px 8px; border-radius: 999px; display: none;
+        }
       </style>
       <canvas id="sp-bg"></canvas>
       <div class="hud">
@@ -870,13 +933,18 @@ class FloatingPipEngine {
         </div>
         <div class="mid">
           <div id="sp-clock" class="clock">25:00</div>
-          <div id="sp-task" class="task"></div>
+          <div class="subline">
+            <div id="sp-task" class="task"></div>
+            <span id="sp-peers" class="peers"></span>
+            <span id="sp-toast" class="toast"></span>
+          </div>
         </div>
         <div class="bottom">
           <div class="track"><div id="sp-bar" class="bar"></div></div>
           <div class="actions">
             <button id="sp-boost">+5m</button>
             <button id="sp-toggle" class="primary">Pause</button>
+            <button id="sp-task-done" style="display:none" title="Complete current study task">✓ Done</button>
             <button id="sp-finish">Finish</button>
           </div>
         </div>
@@ -884,6 +952,7 @@ class FloatingPipEngine {
     `;
     doc.getElementById('sp-toggle')?.addEventListener('click', () => this.actions.onToggleRun());
     doc.getElementById('sp-boost')?.addEventListener('click', () => this.actions.onBoost5m());
+    doc.getElementById('sp-task-done')?.addEventListener('click', () => this.actions.onCompleteTask?.());
     doc.getElementById('sp-finish')?.addEventListener('click', () => this.actions.onFinish());
   }
 
@@ -949,6 +1018,9 @@ class FloatingPipEngine {
     const task = doc.getElementById('sp-task');
     const bar = doc.getElementById('sp-bar');
     const toggleBtn = doc.getElementById('sp-toggle');
+    const taskDoneBtn = doc.getElementById('sp-task-done') as HTMLButtonElement | null;
+    const peersEl = doc.getElementById('sp-peers');
+    const toastEl = doc.getElementById('sp-toast');
 
     if (dot) dot.style.backgroundColor = s.subjectColor || meta.colors.accent;
     if (sub) sub.textContent = `${s.modeLabel} • ${s.subjectName}`;
@@ -960,6 +1032,25 @@ class FloatingPipEngine {
     if (toggleBtn) {
       toggleBtn.textContent = s.isRunning ? 'Pause' : 'Resume';
       toggleBtn.className = s.isRunning ? 'paused' : 'primary';
+    }
+    if (taskDoneBtn) {
+      taskDoneBtn.style.display = s.activeTaskId ? 'inline-block' : 'none';
+    }
+    if (peersEl) {
+      if ((s.roomPeersCount || 0) > 0) {
+        peersEl.style.display = 'inline-block';
+        peersEl.textContent = `👥 ${s.roomPeersCount} live`;
+      } else {
+        peersEl.style.display = 'none';
+      }
+    }
+    if (toastEl) {
+      if (s.toastText) {
+        toastEl.style.display = 'inline-block';
+        toastEl.textContent = s.toastText;
+      } else {
+        toastEl.style.display = 'none';
+      }
     }
     if (redrawBackdrop) {
       this.drawDocPipBackdrop();

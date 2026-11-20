@@ -191,6 +191,30 @@ export function FeedView({ themeId = 'shadcn-dark', feed, onReact, onComment, on
                   </p>
                 )}
 
+                {/* Proof Milestone Badges */}
+                <div className="flex flex-wrap gap-1 mb-2.5">
+                  {item.purityPct >= 95 && (
+                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
+                      🛡️ Laser Lock
+                    </span>
+                  )}
+                  {item.durationSec >= 2700 && (
+                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
+                      🌊 Deep Dive
+                    </span>
+                  )}
+                  {/Architect|Data|Cloud|Internet|OSPF|BGP|CIDR/i.test(item.subjectName) && (
+                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
+                      🎓 University Vault
+                    </span>
+                  )}
+                  {item.xpEarned >= 120 && (
+                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
+                      ⚔️ Raid Striker
+                    </span>
+                  )}
+                </div>
+
                 {/* Reaction Bar + Comment Toggle */}
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-1.5">
