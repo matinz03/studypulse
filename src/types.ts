@@ -98,9 +98,12 @@ export interface GameItem {
   hp: number;
   luck: number;
   crit: number;
+  power?: number;
   equipped: boolean;
   salvageValue: number;
   createdAt: number;
+  autoEquipped?: boolean;
+  autoSalvagedShards?: number;
 }
 
 export type EnemyIntent = 'STRIKE' | 'HEAVY' | 'SHELL' | 'RITUAL' | 'HEX' | 'STUNNED';
@@ -456,6 +459,148 @@ export interface GameProfileData {
   };
 }
 
+export interface IdleSquadHero {
+  id: string;
+  name: string;
+  title: string;
+  defaultRow: 'front' | 'back';
+  row: 'front' | 'back';
+  role: string;
+  icon: string;
+  spriteKey: string;
+  skillName: string;
+  skillDesc: string;
+  baseAtk: number;
+  baseDef: number;
+  baseHp: number;
+  effectiveAtk: number;
+  effectiveHp: number;
+}
+
+export interface IdleProfessionInfo {
+  id: string;
+  name: string;
+  icon: string;
+  resourceKey: 'shards' | 'coins' | 'xp';
+  resourceLabel: string;
+  baseRatePerHr: number;
+  ratePerLevel: number;
+  squadPerk: string;
+  baseCost: number;
+  level: number;
+  ratePerHr: number;
+  upgradeCost: number;
+}
+
+export interface IdleAscensionRelicInfo {
+  id: string;
+  name: string;
+  icon: string;
+  effectLabel: string;
+  baseEmberCost: number;
+  rank: number;
+  nextCost: number;
+}
+
+export interface IdleMythicMilestoneInfo {
+  id: string;
+  title: string;
+  icon: string;
+  desc: string;
+  reqKey: string;
+  target: number;
+  progress: number;
+  unlocked: boolean;
+  claimed: boolean;
+  mythicReward: {
+    slot: GearSlot;
+    name: string;
+    icon: string;
+    spriteKey: string;
+    rarity: ItemRarity;
+    affix: string;
+    level: number;
+    atk: number;
+    def: number;
+    hp: number;
+    luck: number;
+    crit: number;
+    passiveDesc: string;
+  };
+}
+
+export interface IdleAfkChestState {
+  accumulatedSec: number;
+  capSec: number;
+  shards: number;
+  coins: number;
+  xp: number;
+  itemsRolled: number;
+  lastClaimedAtMs: number;
+}
+
+export interface IdleGambitsConfig {
+  ultPolicy: 'auto_ready' | 'boss_or_broken';
+  healThreshold: 25 | 45 | 70;
+  stageProgression: 'auto_push' | 'farm_stage';
+  focusTarget: 'shield_break' | 'highest_dps';
+}
+
+export interface IdleAutomationConfig {
+  autoEquipBest: boolean;
+  autoSalvageMaxRarity: 'off' | 'common' | 'uncommon' | 'rare';
+}
+
+export interface IdleGameState {
+  stage: number;
+  maxStage: number;
+  wave: number;
+  isBossWave: boolean;
+  wavesClearedTotal: number;
+  realm: {
+    key: string;
+    name: string;
+    minStage: number;
+    accent: string;
+  };
+  currentEnemy: {
+    key: string;
+    name: string;
+    hp: number;
+    maxHp: number;
+    shields: number;
+    maxShields: number;
+    isBoss: boolean;
+  };
+  squadHeroes: IdleSquadHero[];
+  formation: {
+    front: string[];
+    back: string[];
+  };
+  gambits: IdleGambitsConfig;
+  automation: IdleAutomationConfig;
+  professions: IdleProfessionInfo[];
+  ascensions: number;
+  celestialEmbers: number;
+  totalEmbersEarned: number;
+  canAscend: boolean;
+  pendingEmbers: number;
+  ascensionRelics: IdleAscensionRelicInfo[];
+  mythicMilestones: IdleMythicMilestoneInfo[];
+  afkChest: IdleAfkChestState;
+  overdriveActive: boolean;
+  overdriveRemainingSec: number;
+  speedMultiplier: number;
+  ascensionMult: number;
+  midasMult: number;
+  effectiveLuck: number;
+  squadPower: number;
+  squadDps: number;
+  shardsPerHr: number;
+  coinsPerHr: number;
+  xpPerHr: number;
+}
+
 export interface GameState {
   mode: GameMode;
   profile: GameProfileData;
@@ -465,6 +610,7 @@ export interface GameState {
     activeAlly: PartyAllyInfo | null;
     allies: PartyAllyInfo[];
   };
+  idle?: IdleGameState;
   biome: {
     key: string;
     name: string;

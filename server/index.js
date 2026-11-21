@@ -19,6 +19,8 @@ import {
   advanceMythicSideStory,
   buildGameState,
   claimHeroicDeed,
+  claimIdleAfkChest,
+  claimIdleMythicMilestone,
   craftAtNpc,
   dungeonExtract,
   dungeonMove,
@@ -33,6 +35,8 @@ import {
   heroLevelFromXp,
   managePartyAlly,
   moveInVillage,
+  performIdleAscension,
+  processIdleWaveTick,
   resolveCombatAction,
   resolveEventChoice,
   resolvePuzzleChoice,
@@ -43,8 +47,11 @@ import {
   selectSpecialization,
   startVanguardTrial,
   talkToNpc,
+  updateIdleConfig,
+  upgradeAscensionRelic,
   upgradeGameItem,
   upgradeHeroStat,
+  upgradeIdleProfession,
 } from './gameEngine.js';
 import { buildShopState, purchaseShopItem, rerollDailyShop } from './shopEngine.js';
 import { UNIVERSITY_COURSES, UNIVERSITY_PORTAL_URL } from './universityData.js';
@@ -1237,6 +1244,23 @@ app.post('/api/game/deed', authMiddleware, withGameHandler((req, user, stats) =>
   deedId: String(req.body?.deedId || ''),
 })));
 app.post('/api/game/trial', authMiddleware, withGameHandler((_req, user, stats) => startVanguardTrial(db, user, stats)));
+app.post('/api/game/idle/tick', authMiddleware, withGameHandler((req, user, stats) => processIdleWaveTick(db, user, stats, {
+  wavesCleared: req.body?.wavesCleared !== undefined ? Number(req.body.wavesCleared) : 1,
+  timerRunning: Boolean(req.body?.timerRunning),
+  triggerUltimate: Boolean(req.body?.triggerUltimate),
+})));
+app.post('/api/game/idle/claim-afk', authMiddleware, withGameHandler((_req, user, stats) => claimIdleAfkChest(db, user, stats)));
+app.post('/api/game/idle/config', authMiddleware, withGameHandler((req, user, stats) => updateIdleConfig(db, user, stats, req.body || {})));
+app.post('/api/game/idle/upgrade-profession', authMiddleware, withGameHandler((req, user, stats) => upgradeIdleProfession(db, user, stats, {
+  professionId: String(req.body?.professionId || ''),
+})));
+app.post('/api/game/idle/ascend', authMiddleware, withGameHandler((_req, user, stats) => performIdleAscension(db, user, stats)));
+app.post('/api/game/idle/upgrade-relic', authMiddleware, withGameHandler((req, user, stats) => upgradeAscensionRelic(db, user, stats, {
+  relicId: String(req.body?.relicId || ''),
+})));
+app.post('/api/game/idle/forge-mythic', authMiddleware, withGameHandler((req, user, stats) => claimIdleMythicMilestone(db, user, stats, {
+  milestoneId: String(req.body?.milestoneId || ''),
+})));
 
 app.post('/api/university/sync-subjects', authMiddleware, (req, res) => {
   ensureUniversitySeed(req.user.id);

@@ -31,6 +31,8 @@ import {
   BootstrapData,
   FloatingEmoji,
   GameActionResponse,
+  IdleAutomationConfig,
+  IdleGambitsConfig,
   SessionGameRewards,
   ShopBuyResponse,
   StudyTask,
@@ -1081,31 +1083,27 @@ export function App() {
     }
   }
 
-  const handleVillageMove = (dx: number, dy: number) => callGameApi('/api/game/village/move', { dx, dy });
-  const handleNpcTalk = (npcId: string, choiceId?: string) => callGameApi('/api/game/npc/talk', { npcId, choiceId });
-  const handleNpcCraft = (craftKey: string, targetItemId?: number) => callGameApi('/api/game/npc/craft', { craftKey, targetItemId });
-  const handleDungeonEnter = (floor?: number) => callGameApi('/api/game/dungeon/enter', floor ? { floor } : {});
-  const handleDungeonMove = (dx: number, dy: number) => callGameApi('/api/game/dungeon/move', { dx, dy });
-  const handleDungeonSearch = () => callGameApi('/api/game/dungeon/search');
-  const handleDungeonTorch = () => callGameApi('/api/game/dungeon/torch');
-  const handleDungeonExtract = () => callGameApi('/api/game/dungeon/extract');
-  const handleDungeonPuzzle = (optionIndex: number) => callGameApi('/api/game/dungeon/puzzle', { optionIndex });
-  const handleGameCombat = (action: 'attack' | 'dash' | 'skill' | 'ally_skill' | 'finisher' | 'guard' | 'potion' | 'flee') =>
-    callGameApi('/api/game/combat', { action });
-  const handleGameChoice = (choice: string) => callGameApi('/api/game/choice', { choice });
+  const handleIdleTick = (payload?: { wavesCleared?: number; timerRunning?: boolean; triggerUltimate?: boolean }) =>
+    callGameApi('/api/game/idle/tick', payload || {});
+  const handleIdleClaimAfk = () => callGameApi('/api/game/idle/claim-afk');
+  const handleIdleConfig = (payload: {
+    gambits?: Partial<IdleGambitsConfig>;
+    automation?: Partial<IdleAutomationConfig>;
+    swapHeroRow?: string;
+    stage?: number;
+  }) => callGameApi('/api/game/idle/config', payload);
+  const handleIdleUpgradeProf = (professionId: string) =>
+    callGameApi('/api/game/idle/upgrade-profession', { professionId });
+  const handleIdleAscend = () => callGameApi('/api/game/idle/ascend');
+  const handleIdleUpgradeRelic = (relicId: string) => callGameApi('/api/game/idle/upgrade-relic', { relicId });
+  const handleIdleForgeMythic = (milestoneId: string) => callGameApi('/api/game/idle/forge-mythic', { milestoneId });
   const handleGameEquip = (itemId: number) => callGameApi('/api/game/equip', { itemId });
   const handleGameUpgradeItem = (itemId: number) => callGameApi('/api/game/upgrade-item', { itemId });
   const handleGameSalvage = (payload: { itemId?: number; maxRarity?: string }) =>
     callGameApi('/api/game/salvage', payload);
   const handleGameUpgradeStat = (stat: 'atk' | 'vit' | 'luck' | 'crit') =>
     callGameApi('/api/game/upgrade-stat', { stat });
-  const handleGameSelectFloor = (floor: number) => callGameApi('/api/game/floor-select', { floor });
   const handleSelectSpecialization = (specKey: string) => callGameApi('/api/game/specialization', { specKey });
-  const handleManagePartyAlly = (allyId: string) => callGameApi('/api/game/party', { allyId });
-  const handleAdvanceMythicStory = (storyId: string, choiceId: string) =>
-    callGameApi('/api/game/side-story', { storyId, choiceId });
-  const handleClaimHeroicDeed = (deedId: string) => callGameApi('/api/game/deed', { deedId });
-  const handleStartVanguardTrial = () => callGameApi('/api/game/trial');
   const handleStudyCast = async (payload: { cardId: number; selectedIndex?: number; grade?: number }) => {
     const res = await callGameApi('/api/game/study-cast', payload);
     await refreshBootstrap();
@@ -1644,27 +1642,19 @@ export function App() {
                     user={user}
                     game={data.game}
                     shop={data.shop}
-                    onVillageMove={handleVillageMove}
-                    onNpcTalk={handleNpcTalk}
-                    onNpcCraft={handleNpcCraft}
-                    onDungeonEnter={handleDungeonEnter}
-                    onDungeonMove={handleDungeonMove}
-                    onDungeonSearch={handleDungeonSearch}
-                    onDungeonTorch={handleDungeonTorch}
-                    onDungeonExtract={handleDungeonExtract}
-                    onDungeonPuzzle={handleDungeonPuzzle}
-                    onCombatAction={handleGameCombat}
-                    onEventChoice={handleGameChoice}
+                    isStudying={isRunning && mode !== 'break'}
+                    onIdleTick={handleIdleTick}
+                    onIdleClaimAfk={handleIdleClaimAfk}
+                    onIdleConfig={handleIdleConfig}
+                    onIdleUpgradeProf={handleIdleUpgradeProf}
+                    onIdleAscend={handleIdleAscend}
+                    onIdleUpgradeRelic={handleIdleUpgradeRelic}
+                    onIdleForgeMythic={handleIdleForgeMythic}
                     onEquipItem={handleGameEquip}
                     onUpgradeItem={handleGameUpgradeItem}
                     onSalvageItem={handleGameSalvage}
                     onUpgradeStat={handleGameUpgradeStat}
-                    onSelectFloor={handleGameSelectFloor}
                     onSelectSpecialization={handleSelectSpecialization}
-                    onManagePartyAlly={handleManagePartyAlly}
-                    onAdvanceMythicStory={handleAdvanceMythicStory}
-                    onClaimHeroicDeed={handleClaimHeroicDeed}
-                    onStartVanguardTrial={handleStartVanguardTrial}
                     onStudyCast={handleStudyCast}
                     flashcards={data.university?.flashcards}
                     onBuyShopItem={handleBuyShopItem}

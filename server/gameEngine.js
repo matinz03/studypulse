@@ -2,6 +2,12 @@ import {
   BOUNTY_DEFINITIONS,
   DUNGEON_RIDDLES,
   HEROIC_DEEDS,
+  IDLE_ASCENSION_RELICS,
+  IDLE_MYTHIC_BOUNTIES,
+  IDLE_PROFESSIONS,
+  IDLE_REALMS,
+  IDLE_SQUAD_HEROES,
+  IDLE_STAGE_ENEMIES,
   LORE_CODEX,
   MYTHIC_SIDE_STORIES,
   NPCS,
@@ -294,10 +300,25 @@ function parseJsonSafe(str, fallback) {
   }
 }
 
+export function computeItemPower(item) {
+  return Math.round(
+    (item?.atk || 0) * 3 +
+      (item?.def || 0) * 2.2 +
+      (item?.hp || 0) * 0.45 +
+      (item?.luck || 0) * 2 +
+      (item?.crit || 0) * 2.5
+  );
+}
+
 export function formatGameItem(row) {
   if (!row) return null;
   const rar = RARITIES[row.rarity] || RARITIES.common;
   const scale = 1 + (row.upgrade_level || 0) * 0.14;
+  const atk = Math.round((row.atk || 0) * scale);
+  const def = Math.round((row.def || 0) * scale);
+  const hp = Math.round((row.hp || 0) * scale);
+  const luck = Math.round((row.luck || 0) * scale);
+  const crit = Math.round((row.crit || 0) * scale);
   return {
     id: row.id,
     userId: row.user_id,
@@ -309,11 +330,12 @@ export function formatGameItem(row) {
     affix: row.affix || '',
     level: row.level,
     upgradeLevel: row.upgrade_level || 0,
-    atk: Math.round((row.atk || 0) * scale),
-    def: Math.round((row.def || 0) * scale),
-    hp: Math.round((row.hp || 0) * scale),
-    luck: Math.round((row.luck || 0) * scale),
-    crit: Math.round((row.crit || 0) * scale),
+    atk,
+    def,
+    hp,
+    luck,
+    crit,
+    power: computeItemPower({ atk, def, hp, luck, crit }),
     baseAtk: row.atk || 0,
     baseDef: row.def || 0,
     baseHp: row.hp || 0,
@@ -595,15 +617,69 @@ export function rollLootSpec(floor, totalLuck, opts = {}) {
 
 function insertLootSpec(db, userId, spec) {
   const now = Date.now();
+  const profile = db.prepare('SELECT story_flags_json FROM game_profiles WHERE user_id = ?').get(userId);
+  const flags = parseJsonSafe(profile?.story_flags_json, {});
+  const autoCfg = flags?.idle?.automation || { autoEquipBest: true, autoSalvageMaxRarity: 'common' };
+
+  const curEquippedRow = db
+    .prepare('SELECT * FROM game_items WHERE user_id = ? AND slot = ? AND equipped = 1')
+    .get(userId, spec.slot);
+  const curEquippedPower = curEquippedRow ? computeItemPower(formatGameItem(curEquippedRow)) : -1;
+  const newPower = computeItemPower(spec);
+  const shouldAutoEquip = Boolean(autoCfg.autoEquipBest) && (!curEquippedRow || newPower > curEquippedPower);
+
+  const rarOrderIdx = RARITY_ORDER.indexOf(spec.rarity);
+  const salvageCap = autoCfg.autoSalvageMaxRarity || 'common';
+  const salvageCapIdx = salvageCap === 'off' ? -1 : Math.min(2, RARITY_ORDER.indexOf(salvageCap)); // Never auto-salvage epic+
+  const shouldAutoSalvage =
+    !shouldAutoEquip &&
+    salvageCapIdx >= 0 &&
+    rarOrderIdx >= 0 &&
+    rarOrderIdx <= salvageCapIdx &&
+    spec.rarity !== 'mythic';
+
+  if (shouldAutoSalvage) {
+    const salvageVal = (RARITIES[spec.rarity]?.salvage || 6) + Math.floor((spec.level || 1) * 1.5);
+    db.prepare('UPDATE game_profiles SET shards = shards + ? WHERE user_id = ?').run(salvageVal, userId);
+    return {
+      ...formatSatchelPreview(spec, -999),
+      power: newPower,
+      salvageValue: salvageVal,
+      autoSalvagedShards: salvageVal,
+      autoEquipped: false,
+    };
+  }
+
+  if (shouldAutoEquip) {
+    db.prepare('UPDATE game_items SET equipped = 0 WHERE user_id = ? AND slot = ?').run(userId, spec.slot);
+  }
+
   const info = db.prepare(`
     INSERT INTO game_items (user_id, slot, name, icon, sprite_key, rarity, affix, level, upgrade_level, atk, def, hp, luck, crit, equipped, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0, ?)
-  `).run(userId, spec.slot, spec.name, spec.icon, spec.spriteKey, spec.rarity, spec.affix, spec.level, spec.atk, spec.def, spec.hp, spec.luck, spec.crit, now);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    userId,
+    spec.slot,
+    spec.name,
+    spec.icon,
+    spec.spriteKey,
+    spec.rarity,
+    spec.affix,
+    spec.level,
+    spec.atk,
+    spec.def,
+    spec.hp,
+    spec.luck,
+    spec.crit,
+    shouldAutoEquip ? 1 : 0,
+    now
+  );
   if (spec.rarity === 'legendary' || spec.rarity === 'mythic') {
     db.prepare('UPDATE game_profiles SET legendaries_found = legendaries_found + 1 WHERE user_id = ?').run(userId);
   }
   trimBackpackIfNeeded(db, userId);
-  return formatGameItem(db.prepare('SELECT * FROM game_items WHERE id = ?').get(Number(info.lastInsertRowid)));
+  const inserted = formatGameItem(db.prepare('SELECT * FROM game_items WHERE id = ?').get(Number(info.lastInsertRowid)));
+  return { ...inserted, autoEquipped: shouldAutoEquip, autoSalvagedShards: 0 };
 }
 
 export function generateLootItem(db, userId, floor, totalLuck, opts = {}) {
@@ -662,6 +738,242 @@ function computeIntentValue(enemy, intent, floor) {
   }
 }
 
+export function getIdleRealmForStage(stage) {
+  let active = IDLE_REALMS[0];
+  for (const r of IDLE_REALMS) {
+    if (stage >= r.minStage) active = r;
+  }
+  return active;
+}
+
+export function ensureIdleState(flags, profile, now = Date.now()) {
+  const existing = flags.idle && typeof flags.idle === 'object' ? flags.idle : {};
+  const stage = Math.max(1, Number(existing.stage || profile.floor || 1));
+  const maxStage = Math.max(stage, Number(existing.maxStage || profile.best_floor || 1));
+  return {
+    stage,
+    maxStage,
+    wave: Math.max(1, Math.min(10, Number(existing.wave || 1))),
+    wavesClearedTotal: Number(existing.wavesClearedTotal || 0),
+    overdriveWavesCleared: Number(existing.overdriveWavesCleared || 0),
+    ascensions: Number(existing.ascensions || 0),
+    celestialEmbers: Number(existing.celestialEmbers || 0),
+    totalEmbersEarned: Number(existing.totalEmbersEarned || 0),
+    overdriveUntilMs: Number(existing.overdriveUntilMs || 0),
+    lastTickAtMs: Number(existing.lastTickAtMs || now),
+    gambits: {
+      ultPolicy: existing.gambits?.ultPolicy === 'boss_or_broken' ? 'boss_or_broken' : 'auto_ready',
+      healThreshold: [25, 45, 70].includes(Number(existing.gambits?.healThreshold))
+        ? Number(existing.gambits.healThreshold)
+        : 45,
+      stageProgression: existing.gambits?.stageProgression === 'farm_stage' ? 'farm_stage' : 'auto_push',
+      focusTarget: existing.gambits?.focusTarget === 'highest_dps' ? 'highest_dps' : 'shield_break',
+    },
+    automation: {
+      autoEquipBest: existing.automation?.autoEquipBest !== undefined ? Boolean(existing.automation.autoEquipBest) : true,
+      autoSalvageMaxRarity: ['off', 'common', 'uncommon', 'rare'].includes(existing.automation?.autoSalvageMaxRarity)
+        ? existing.automation.autoSalvageMaxRarity
+        : 'common',
+    },
+    formation: {
+      front: Array.isArray(existing.formation?.front) && existing.formation.front.length === 2
+        ? existing.formation.front
+        : ['solarius', 'kaelis'],
+      back: Array.isArray(existing.formation?.back) && existing.formation.back.length === 2
+        ? existing.formation.back
+        : ['aurelia', 'seraphina'],
+    },
+    professions: {
+      astral_mining: Math.max(1, Number(existing.professions?.astral_mining || 1)),
+      alchemy_lab: Math.max(1, Number(existing.professions?.alchemy_lab || 1)),
+      rune_scribes: Math.max(1, Number(existing.professions?.rune_scribes || 1)),
+    },
+    ascensionRelics: {
+      relic_warlord: Math.max(0, Number(existing.ascensionRelics?.relic_warlord || 0)),
+      relic_chronos: Math.max(0, Number(existing.ascensionRelics?.relic_chronos || 0)),
+      relic_midas: Math.max(0, Number(existing.ascensionRelics?.relic_midas || 0)),
+      relic_seeker: Math.max(0, Number(existing.ascensionRelics?.relic_seeker || 0)),
+    },
+    afkChest: {
+      accumulatedSec: Math.max(0, Math.min(43200, Number(existing.afkChest?.accumulatedSec || 0))),
+      shards: Math.max(0, Number(existing.afkChest?.shards || 0)),
+      coins: Math.max(0, Number(existing.afkChest?.coins || 0)),
+      xp: Math.max(0, Number(existing.afkChest?.xp || 0)),
+      itemsRolled: Math.max(0, Number(existing.afkChest?.itemsRolled || 0)),
+      lastClaimedAtMs: Number(existing.afkChest?.lastClaimedAtMs || now),
+    },
+    claimedMilestones: Array.isArray(existing.claimedMilestones) ? existing.claimedMilestones : [],
+  };
+}
+
+export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
+  const warlordRank = idle.ascensionRelics.relic_warlord || 0;
+  const chronosRank = idle.ascensionRelics.relic_chronos || 0;
+  const midasRank = idle.ascensionRelics.relic_midas || 0;
+  const seekerRank = idle.ascensionRelics.relic_seeker || 0;
+
+  const miningLvl = idle.professions.astral_mining || 1;
+  const alchemyLvl = idle.professions.alchemy_lab || 1;
+  const scribesLvl = idle.professions.rune_scribes || 1;
+
+  const ascensionMult = 1 + (idle.ascensions || 0) * 0.35 + warlordRank * 0.25;
+  const profAtkMult = 1 + (miningLvl - 1) * 0.04;
+  const profHpMult = 1 + (alchemyLvl - 1) * 0.05;
+  const overdriveActive = (idle.overdriveUntilMs || 0) > now;
+  const studyFeverMult = heroStats.studyBonuses?.focusFever ? 1.25 : 1.0;
+  const baseSpeedMult = 1 + chronosRank * 0.2;
+  const speedMultiplier = Math.round((overdriveActive ? 4.0 : 1.0) * baseSpeedMult * studyFeverMult * 10) / 10;
+
+  const squadPower = Math.round(
+    (heroStats.atk * 4.2 * profAtkMult +
+      heroStats.maxHp * 0.35 * profHpMult +
+      heroStats.def * 2.5 +
+      heroStats.critPct * 2.2 +
+      heroStats.luck * 1.4) *
+      ascensionMult
+  );
+  const squadDps = Math.max(18, Math.round(heroStats.atk * 3.1 * profAtkMult * ascensionMult * (1 + (heroStats.critPct + (scribesLvl - 1) * 2) * 0.008)));
+
+  const midasMult = 1 + midasRank * 0.3;
+  const shardsPerHr = Math.round((45 + (miningLvl - 1) * 28 + idle.stage * 10) * midasMult * (overdriveActive ? 1.6 : 1));
+  const coinsPerHr = Math.round((30 + (alchemyLvl - 1) * 18 + idle.stage * 7) * midasMult * (overdriveActive ? 1.5 : 1));
+  const xpPerHr = Math.round((120 + (scribesLvl - 1) * 75 + idle.stage * 22) * (overdriveActive ? 1.6 : 1));
+
+  return {
+    overdriveActive,
+    overdriveRemainingSec: overdriveActive ? Math.max(0, Math.round((idle.overdriveUntilMs - now) / 1000)) : 0,
+    speedMultiplier,
+    ascensionMult: Math.round(ascensionMult * 100) / 100,
+    midasMult: Math.round(midasMult * 100) / 100,
+    effectiveLuck: heroStats.luck + (scribesLvl - 1) * 4 + seekerRank * 15,
+    squadPower,
+    squadDps,
+    shardsPerHr,
+    coinsPerHr,
+    xpPerHr,
+  };
+}
+
+function accrueIdleProgress(db, profile, flags, heroStats, now = Date.now()) {
+  const idle = ensureIdleState(flags, profile, now);
+  const elapsedSec = Math.min(43200, Math.max(0, Math.floor((now - (idle.lastTickAtMs || now)) / 1000)));
+  if (elapsedSec >= 5) {
+    const metrics = computeIdleMetrics(idle, heroStats, now);
+    const addSec = Math.min(43200 - idle.afkChest.accumulatedSec, elapsedSec);
+    if (addSec > 0) {
+      const hrFraction = addSec / 3600;
+      idle.afkChest.accumulatedSec += addSec;
+      idle.afkChest.shards += Math.max(1, Math.round(metrics.shardsPerHr * hrFraction));
+      idle.afkChest.coins += Math.max(1, Math.round(metrics.coinsPerHr * hrFraction));
+      idle.afkChest.xp += Math.max(2, Math.round(metrics.xpPerHr * hrFraction));
+      idle.afkChest.itemsRolled = Math.min(8, Math.floor(idle.afkChest.accumulatedSec / 300) + (idle.afkChest.shards >= 15 ? 1 : 0));
+    }
+    idle.lastTickAtMs = now;
+    flags.idle = idle;
+    db.prepare('UPDATE game_profiles SET story_flags_json = ?, updated_at = ? WHERE user_id = ?').run(
+      JSON.stringify(flags),
+      now,
+      profile.user_id
+    );
+  }
+  return idle;
+}
+
+function buildIdleClientState(idle, heroStats, now = Date.now()) {
+  const metrics = computeIdleMetrics(idle, heroStats, now);
+  const realm = getIdleRealmForStage(idle.stage);
+  const enemyTemplate = IDLE_STAGE_ENEMIES[(idle.stage + idle.wave - 2) % IDLE_STAGE_ENEMIES.length] || IDLE_STAGE_ENEMIES[0];
+  const isBossWave = idle.wave === 10;
+  const enemyMaxHp = Math.round((42 + idle.stage * 26 + idle.wave * 6) * (isBossWave ? 2.4 : 1));
+  const enemyMaxShields = isBossWave ? 3 : enemyTemplate.shields;
+
+  const professions = IDLE_PROFESSIONS.map((p) => {
+    const level = Math.max(1, Number(idle.professions[p.id] || 1));
+    const ratePerHr = Math.round((p.baseRatePerHr + (level - 1) * p.ratePerLevel) * metrics.midasMult);
+    const upgradeCost = Math.round(p.baseCost * Math.pow(1.45, level - 1));
+    return {
+      ...p,
+      level,
+      ratePerHr,
+      upgradeCost,
+    };
+  });
+
+  const ascensionRelics = IDLE_ASCENSION_RELICS.map((r) => {
+    const rank = Math.max(0, Number(idle.ascensionRelics[r.id] || 0));
+    return {
+      ...r,
+      rank,
+      nextCost: r.baseEmberCost + rank,
+    };
+  });
+
+  const maxProfLevel = Math.max(
+    idle.professions.astral_mining || 1,
+    idle.professions.alchemy_lab || 1,
+    idle.professions.rune_scribes || 1
+  );
+  const mythicMilestones = IDLE_MYTHIC_BOUNTIES.map((m) => {
+    let progress = 0;
+    if (m.reqKey === 'wavesClearedTotal') progress = idle.wavesClearedTotal || 0;
+    else if (m.reqKey === 'stageOrProf') progress = Math.max(idle.maxStage || 1, maxProfLevel);
+    else if (m.reqKey === 'ascensions') progress = idle.ascensions || 0;
+    else if (m.reqKey === 'wavesForPhoenix') progress = Math.max(idle.maxStage || 1, idle.wavesClearedTotal || 0);
+    const claimed = (idle.claimedMilestones || []).includes(m.id);
+    return {
+      ...m,
+      progress: Math.min(m.target, progress),
+      unlocked: progress >= m.target,
+      claimed,
+    };
+  });
+
+  const canAscend = idle.maxStage >= 2 || idle.wavesClearedTotal >= 4;
+  const pendingEmbers = canAscend
+    ? Math.max(2, idle.maxStage + Math.floor((idle.wavesClearedTotal || 0) / 6))
+    : 0;
+
+  return {
+    stage: idle.stage,
+    maxStage: idle.maxStage,
+    wave: idle.wave,
+    isBossWave,
+    wavesClearedTotal: idle.wavesClearedTotal || 0,
+    realm,
+    currentEnemy: {
+      key: isBossWave ? 'dragon' : enemyTemplate.key,
+      name: isBossWave ? `${realm.name} Warden` : enemyTemplate.name,
+      hp: enemyMaxHp,
+      maxHp: enemyMaxHp,
+      shields: enemyMaxShields,
+      maxShields: enemyMaxShields,
+      isBoss: isBossWave,
+    },
+    squadHeroes: IDLE_SQUAD_HEROES.map((h) => ({
+      ...h,
+      row: idle.formation.front.includes(h.id) ? 'front' : 'back',
+      effectiveAtk: Math.round((h.baseAtk + heroStats.atk * 0.65) * metrics.ascensionMult),
+      effectiveHp: Math.round((h.baseHp + heroStats.maxHp * 0.45) * metrics.ascensionMult),
+    })),
+    formation: idle.formation,
+    gambits: idle.gambits,
+    automation: idle.automation,
+    professions,
+    ascensions: idle.ascensions || 0,
+    celestialEmbers: idle.celestialEmbers || 0,
+    totalEmbersEarned: idle.totalEmbersEarned || 0,
+    canAscend,
+    pendingEmbers,
+    ascensionRelics,
+    mythicMilestones,
+    afkChest: {
+      ...idle.afkChest,
+      capSec: 43200,
+    },
+    ...metrics,
+  };
+}
+
 export function buildGameState(db, user, userStats) {
   const profile = ensureGameProfile(db, user.id);
   const rawItems = db
@@ -683,6 +995,9 @@ export function buildGameState(db, user, userStats) {
   const encounter = parseJsonSafe(profile.active_encounter_json, null);
   const recentLogs = parseJsonSafe(profile.last_log_json, []);
   const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idleRaw = accrueIdleProgress(db, profile, flags, heroStats, now);
+  const idle = buildIdleClientState(idleRaw, heroStats, now);
   const affinity = parseJsonSafe(profile.npc_affinity_json, { rowan: 0, bram: 0, lyra: 0, pip: 0 });
   const quests = parseJsonSafe(profile.active_quests_json, []);
   const dungeon = profile.mode === 'dungeon' ? parseJsonSafe(profile.dungeon_state_json, null) : null;
@@ -858,6 +1173,7 @@ export function buildGameState(db, user, userStats) {
     equippedBySlot,
     encounter: activeEncounter,
     recentLogs: Array.isArray(recentLogs) ? recentLogs : [],
+    idle,
   };
 }
 
@@ -866,32 +1182,51 @@ export function grantStudyRewardsToGame(db, user, userStats, durationSec, purity
   const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
   const studyBonuses = computeStudyBonuses(user, userStats);
   const heroStats = computeHeroStats(profile, rawItems, studyBonuses);
+  const now = Date.now();
 
   const mins = Math.max(1, Math.round(durationSec / 60));
   const energyGained = Math.max(2, Math.min(20, Math.round(mins / 5) + (strictMode && purityPct >= 95 ? 2 : 0)));
   const shardsGained = Math.max(6, Math.round(mins * 0.9 + (purityPct >= 95 ? 5 : 0)));
 
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const idle = ensureIdleState(flags, profile, now);
+  const overdriveBonusMins = Math.max(15, mins + (idle.ascensionRelics.relic_chronos || 0) * 15);
+  idle.overdriveUntilMs = Math.max(now, idle.overdriveUntilMs || 0) + overdriveBonusMins * 60_000;
+  idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + Math.max(1, Math.floor(mins / 10));
+  idle.lastTickAtMs = now;
+  flags.idle = idle;
+
   db.prepare(`
     UPDATE game_profiles
-    SET energy = MIN(99, energy + ?), shards = shards + ?, focus_charge = MIN(100, focus_charge + 30), updated_at = ?
+    SET energy = MIN(99, energy + ?), shards = shards + ?, focus_charge = MIN(100, focus_charge + 30),
+        story_flags_json = ?, updated_at = ?
     WHERE user_id = ?
-  `).run(energyGained, shardsGained, Date.now(), user.id);
+  `).run(energyGained, shardsGained, JSON.stringify(flags), now, user.id);
 
   let droppedItem = null;
   const shouldDrop = durationSec >= 1200 || Math.random() < Math.min(0.65, 0.25 + heroStats.luck * 0.006);
   const updatedProf = db.prepare('SELECT * FROM game_profiles WHERE user_id = ?').get(user.id);
   if (shouldDrop) {
     const minRarity = durationSec >= 2700 ? 'rare' : durationSec >= 1200 ? 'uncommon' : 'common';
-    droppedItem = generateLootItem(db, user.id, profile.floor, heroStats.luck, { minRarity });
-    const logs = appendLogs(updatedProf, [`📚 Focus Drop (${mins}m): +${energyGained} ⚡, +${shardsGained} ✦ & found [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`]);
+    droppedItem = generateLootItem(db, user.id, idle.stage, heroStats.luck, { minRarity });
+    const logs = appendLogs(updatedProf, [
+      `📚 Focus Drop (${mins}m): +${shardsGained}✦, +${overdriveBonusMins}m 4× OVERDRIVE & found [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`,
+    ]);
     db.prepare('UPDATE game_profiles SET last_log_json = ? WHERE user_id = ?').run(logs, user.id);
   } else {
-    const logs = appendLogs(updatedProf, [`📚 Study Charge (${mins}m): +${energyGained} ⚡ Energy & +${shardsGained} ✦ Shards`]);
+    const logs = appendLogs(updatedProf, [
+      `📚 Study Overdrive (${mins}m): +${shardsGained}✦ Shards & +${overdriveBonusMins}m 4.0× Idle Squad Speed!`,
+    ]);
     db.prepare('UPDATE game_profiles SET last_log_json = ? WHERE user_id = ?').run(logs, user.id);
   }
 
   return {
     energyGained,
+    shardsGained,
+    droppedItem,
+    focusFeverActive: studyBonuses.focusFever,
+  };
+}
     shardsGained,
     droppedItem,
     focusFeverActive: studyBonuses.focusFever,
@@ -2510,14 +2845,81 @@ export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, g
     };
   }
 
+  // When outside legacy encounters (Idle RPG mode), answering a University question activates 30m 4.0x Overdrive & clears bonus waves!
+  const latestProfile = ensureGameProfile(db, user.id);
+  const flags = parseJsonSafe(latestProfile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, latestProfile, now);
+  let droppedItem = null;
+  let msg = '';
+  let bonusWaves = isCorrect ? 2 : 1;
+
+  if (isCorrect) {
+    const overdriveDurationMs = (30 + (idle.ascensionRelics.relic_chronos || 0) * 15) * 60_000;
+    idle.overdriveUntilMs = Math.max(now, idle.overdriveUntilMs || 0) + overdriveDurationMs;
+    idle.overdriveWavesCleared = (idle.overdriveWavesCleared || 0) + bonusWaves;
+  }
+
+  let nextWave = idle.wave + bonusWaves;
+  let nextStage = idle.stage;
+  let nextMaxStage = idle.maxStage;
+  let bossKills = 0;
+  while (nextWave > 10) {
+    nextWave -= 10;
+    bossKills += 1;
+    nextMaxStage = Math.max(nextMaxStage, nextStage + 1);
+    if (idle.gambits.stageProgression === 'auto_push') {
+      nextStage += 1;
+    }
+  }
+  idle.wave = nextWave;
+  idle.stage = nextStage;
+  idle.maxStage = nextMaxStage;
+  idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + bonusWaves;
+  idle.lastTickAtMs = now;
+  flags.idle = idle;
+
+  const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
+  const heroStats = computeHeroStats(latestProfile, rawItems, computeStudyBonuses(refreshedUser, userStats));
+  const extraShards = isCorrect ? 18 + idle.stage * 3 : 5;
+  const extraXp = isCorrect ? 25 + idle.stage * 5 : 8;
+  if (isCorrect) {
+    droppedItem = generateLootItem(db, user.id, idle.stage, heroStats.luck + 10, { minRarity: 'uncommon' });
+    msg = `🎓 Study Overdrive [${card.concept_title || card.subject_name}]! +30m 4.0× Speed, +2 Waves & +${extraShards}✦!`;
+  } else {
+    msg = `📖 Study Spark [${card.concept_title || card.subject_name}]: +${shardsGain + extraShards}✦ & +1 Wave progress!`;
+  }
+
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards + ?, hero_xp = hero_xp + ?, floor = ?, best_floor = ?,
+        monsters_slain = monsters_slain + ?, bosses_slain = bosses_slain + ?,
+        story_flags_json = ?, last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(
+    extraShards,
+    extraXp,
+    idle.stage,
+    idle.maxStage,
+    bonusWaves,
+    bossKills,
+    JSON.stringify(flags),
+    appendLogs(latestProfile, [msg]),
+    now,
+    user.id
+  );
+
   return {
-    game: buildGameState(db, refreshedUser, userStats),
-    events: [{ kind: isCorrect ? 'secret' : 'hit', target: 'hero', text: isCorrect ? `+${shardsGain}✦ RECALL` : 'REVIEWED' }],
-    droppedItem: null,
+    game: buildGameState(db, db.prepare('SELECT * FROM users WHERE id = ?').get(user.id), userStats),
+    events: [
+      { kind: isCorrect ? 'finisher' : 'hit', target: 'enemy', text: isCorrect ? '⚡ 4× OVERDRIVE!' : 'STUDY SPARK' },
+    ],
+    droppedItem,
+    message: msg,
     isCorrect,
-    xpGain,
+    xpGain: xpGain + extraXp,
     coinsGain,
-    shardsGain,
+    shardsGain: shardsGain + extraShards,
   };
 }
 
@@ -2758,5 +3160,391 @@ export function startVanguardTrial(db, user, userStats) {
     game: buildGameState(db, user, userStats),
     message: msg,
     events: [{ kind: 'step', target: 'hero', text: 'VANGUARD TRIAL!' }],
+  };
+}
+
+// ==========================================
+// AETHELGARD: ASTRAL VANGUARD IDLE RPG ENGINE
+// ==========================================
+
+export function processIdleWaveTick(db, user, userStats, { wavesCleared = 1, timerRunning = false, triggerUltimate = false } = {}) {
+  const profile = ensureGameProfile(db, user.id);
+  const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
+  const studyBonuses = computeStudyBonuses(user, userStats);
+  const heroStats = computeHeroStats(profile, rawItems, studyBonuses);
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+
+  if (timerRunning) {
+    idle.overdriveUntilMs = Math.max(idle.overdriveUntilMs || 0, now + 90_000);
+  }
+
+  const metrics = computeIdleMetrics(idle, heroStats, now);
+  const steps = Math.max(1, Math.min(5, Math.round(Number(wavesCleared || 1))));
+  const wasBoss = idle.wave === 10 || steps >= 10;
+
+  let curWave = idle.wave + steps;
+  let curStage = idle.stage;
+  let curMaxStage = idle.maxStage;
+  let bossesSlainDelta = 0;
+
+  while (curWave > 10) {
+    curWave -= 10;
+    bossesSlainDelta += 1;
+    curMaxStage = Math.max(curMaxStage, curStage + 1);
+    if (idle.gambits.stageProgression === 'auto_push') {
+      curStage += 1;
+    }
+  }
+
+  idle.wave = curWave;
+  idle.stage = curStage;
+  idle.maxStage = curMaxStage;
+  idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + steps;
+  if (metrics.overdriveActive || timerRunning) {
+    idle.overdriveWavesCleared = (idle.overdriveWavesCleared || 0) + steps;
+  }
+  idle.lastTickAtMs = now;
+  flags.idle = idle;
+
+  const mult = metrics.midasMult * (metrics.overdriveActive || timerRunning ? 2.2 : 1.0) * (triggerUltimate ? 1.35 : 1.0);
+  const shardsGain = Math.max(3, Math.round((4 + curStage * 2 + (bossesSlainDelta > 0 ? 12 : 0)) * steps * mult));
+  const coinsGain = Math.max(2, Math.round((2 + curStage + (bossesSlainDelta > 0 ? 8 : 0)) * steps * metrics.midasMult));
+  const xpGain = Math.max(8, Math.round((10 + curStage * 5 + (bossesSlainDelta > 0 ? 25 : 0)) * steps * mult));
+
+  let droppedItem = null;
+  const dropChance = bossesSlainDelta > 0 || triggerUltimate ? 1.0 : Math.min(0.65, 0.28 + metrics.effectiveLuck * 0.004);
+  if (Math.random() < dropChance) {
+    const minRarity = bossesSlainDelta > 0 ? 'rare' : metrics.overdriveActive ? 'uncommon' : 'common';
+    droppedItem = generateLootItem(db, user.id, curStage, metrics.effectiveLuck, { minRarity });
+  }
+
+  const events = [
+    {
+      kind: triggerUltimate ? 'finisher' : bossesSlainDelta > 0 ? 'crit' : 'hit',
+      target: 'enemy',
+      text: triggerUltimate ? '🌟 SQUAD FINISHER!' : bossesSlainDelta > 0 ? `👑 STAGE ${curStage} CLEAR!` : `+${shardsGain}✦`,
+    },
+  ];
+  let logText = `⚔️ Squad cleared Wave ${idle.wave}/10 (Stage ${curStage}): +${shardsGain}✦, +${coinsGain}🪙, +${xpGain} XP`;
+  if (droppedItem) {
+    if (droppedItem.autoEquipped) {
+      logText += ` & ⚡ Auto-Equipped [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`;
+    } else if (droppedItem.autoSalvagedShards > 0) {
+      logText += ` (+${droppedItem.autoSalvagedShards}✦ Auto-Salvaged weaker drop)`;
+    } else {
+      logText += ` & Looted ${droppedItem.name}!`;
+    }
+  }
+  const nextLogs = wasBoss || triggerUltimate || droppedItem ? appendLogs(profile, [logText]) : profile.last_log_json;
+
+  db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(coinsGain, user.id);
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards + ?, hero_xp = hero_xp + ?, floor = ?, best_floor = ?,
+        monsters_slain = monsters_slain + ?, bosses_slain = bosses_slain + ?,
+        story_flags_json = ?, last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(
+    shardsGain,
+    xpGain,
+    curStage,
+    curMaxStage,
+    steps,
+    bossesSlainDelta,
+    JSON.stringify(flags),
+    nextLogs,
+    now,
+    user.id
+  );
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    droppedItem: droppedItem && !droppedItem.autoSalvagedShards ? droppedItem : null,
+    shardsGained: shardsGain,
+    coinsGained: coinsGain,
+    xpGained: xpGain,
+    events,
+    message: triggerUltimate || bossesSlainDelta > 0 ? logText : undefined,
+  };
+}
+
+export function claimIdleAfkChest(db, user, userStats) {
+  const profile = ensureGameProfile(db, user.id);
+  const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
+  const heroStats = computeHeroStats(profile, rawItems, computeStudyBonuses(user, userStats));
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = accrueIdleProgress(db, profile, flags, heroStats, now);
+  const metrics = computeIdleMetrics(idle, heroStats, now);
+
+  const shardsGain = Math.max(12, idle.afkChest.shards || 0);
+  const coinsGain = Math.max(8, idle.afkChest.coins || 0);
+  const xpGain = Math.max(30, idle.afkChest.xp || 0);
+  const lootRolls = Math.max(1, Math.min(3, idle.afkChest.itemsRolled || 1));
+
+  let bestDrop = null;
+  for (let i = 0; i < lootRolls; i++) {
+    const drop = generateLootItem(db, user.id, idle.stage, metrics.effectiveLuck, { minRarity: i === 0 ? 'uncommon' : 'common' });
+    if (!bestDrop || computeItemPower(drop) > computeItemPower(bestDrop)) {
+      bestDrop = drop;
+    }
+  }
+
+  idle.afkChest = {
+    accumulatedSec: 0,
+    shards: 0,
+    coins: 0,
+    xp: 0,
+    itemsRolled: 0,
+    lastClaimedAtMs: now,
+  };
+  idle.lastTickAtMs = now;
+  flags.idle = idle;
+
+  const msg = `🎁 Claimed AFK Loot Chest (+${shardsGain}✦, +${coinsGain}🪙, +${xpGain} Hero XP & ${lootRolls} Gear Roll${lootRolls > 1 ? 's' : ''})!`;
+  const nextLogs = appendLogs(profile, [msg]);
+
+  db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(coinsGain, user.id);
+  db.prepare(`
+    UPDATE game_profiles
+    SET shards = shards + ?, hero_xp = hero_xp + ?, chests_opened = chests_opened + 1,
+        story_flags_json = ?, last_log_json = ?, updated_at = ?
+    WHERE user_id = ?
+  `).run(shardsGain, xpGain, JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    droppedItem: bestDrop && !bestDrop.autoSalvagedShards ? bestDrop : null,
+    shardsGained: shardsGain,
+    message: msg,
+    events: [{ kind: 'loot', target: 'hero', text: `🎁 +${shardsGain}✦ +${coinsGain}🪙` }],
+  };
+}
+
+export function updateIdleConfig(db, user, userStats, payload = {}) {
+  const profile = ensureGameProfile(db, user.id);
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+  let msg = '';
+
+  if (payload.gambits && typeof payload.gambits === 'object') {
+    const g = payload.gambits;
+    if (g.ultPolicy === 'auto_ready' || g.ultPolicy === 'boss_or_broken') {
+      idle.gambits.ultPolicy = g.ultPolicy;
+    }
+    if ([25, 45, 70].includes(Number(g.healThreshold))) {
+      idle.gambits.healThreshold = Number(g.healThreshold);
+    }
+    if (g.stageProgression === 'auto_push' || g.stageProgression === 'farm_stage') {
+      idle.gambits.stageProgression = g.stageProgression;
+    }
+    if (g.focusTarget === 'shield_break' || g.focusTarget === 'highest_dps') {
+      idle.gambits.focusTarget = g.focusTarget;
+    }
+    msg = '⚙️ Updated Squad AI Gambit tactics!';
+  }
+
+  if (payload.automation && typeof payload.automation === 'object') {
+    const a = payload.automation;
+    if (a.autoEquipBest !== undefined) {
+      idle.automation.autoEquipBest = Boolean(a.autoEquipBest);
+    }
+    if (['off', 'common', 'uncommon', 'rare'].includes(a.autoSalvageMaxRarity)) {
+      idle.automation.autoSalvageMaxRarity = a.autoSalvageMaxRarity;
+    }
+    msg = `🤖 Automation: Auto-Equip ${idle.automation.autoEquipBest ? 'ON' : 'OFF'} • Auto-Salvage: ${idle.automation.autoSalvageMaxRarity.toUpperCase()}`;
+  }
+
+  if (payload.swapHeroRow && typeof payload.swapHeroRow === 'string') {
+    const heroId = payload.swapHeroRow;
+    if (idle.formation.front.includes(heroId)) {
+      const idxF = idle.formation.front.indexOf(heroId);
+      const swapTarget = idle.formation.back[0];
+      idle.formation.front[idxF] = swapTarget;
+      idle.formation.back[0] = heroId;
+      msg = `🔄 Moved ${heroId} to Back Row and ${swapTarget} to Front Vanguard!`;
+    } else if (idle.formation.back.includes(heroId)) {
+      const idxB = idle.formation.back.indexOf(heroId);
+      const swapTarget = idle.formation.front[1];
+      idle.formation.back[idxB] = swapTarget;
+      idle.formation.front[1] = heroId;
+      msg = `🔄 Moved ${heroId} to Front Vanguard and ${swapTarget} to Back Row!`;
+    }
+  }
+
+  if (payload.stage !== undefined) {
+    const reqStage = Number(payload.stage);
+    if (Number.isInteger(reqStage) && reqStage >= 1 && reqStage <= idle.maxStage) {
+      idle.stage = reqStage;
+      idle.wave = 1;
+      msg = `🗺️ Moved Squad to Stage ${reqStage} (${getIdleRealmForStage(reqStage).name})!`;
+    }
+  }
+
+  flags.idle = idle;
+  const nextLogs = msg ? appendLogs(profile, [msg]) : profile.last_log_json;
+  db.prepare(`
+    UPDATE game_profiles SET floor = ?, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(idle.stage, JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg || 'Updated Squad settings',
+    events: [],
+  };
+}
+
+export function upgradeIdleProfession(db, user, userStats, { professionId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const profDef = IDLE_PROFESSIONS.find((p) => p.id === professionId);
+  if (!profDef) throw new Error('Unknown Guild Profession');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+  const curLvl = Math.max(1, Number(idle.professions[profDef.id] || 1));
+  const cost = Math.round(profDef.baseCost * Math.pow(1.45, curLvl - 1));
+  if (profile.shards < cost) throw new Error(`Need ${cost} ✦ Shards to upgrade ${profDef.name}!`);
+
+  idle.professions[profDef.id] = curLvl + 1;
+  flags.idle = idle;
+  const msg = `🏛️ Upgraded ${profDef.name} to Lv.${curLvl + 1} (${profDef.squadPerk})!`;
+  const nextLogs = appendLogs(profile, [msg]);
+
+  db.prepare(`
+    UPDATE game_profiles SET shards = shards - ?, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(cost, JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg,
+    events: [{ kind: 'loot', target: 'hero', text: `🏛️ LV.${curLvl + 1}!` }],
+  };
+}
+
+export function performIdleAscension(db, user, userStats) {
+  const profile = ensureGameProfile(db, user.id);
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+
+  if (idle.maxStage < 2 && (idle.wavesClearedTotal || 0) < 4) {
+    throw new Error('Reach Stage 2 or clear at least 4 Waves before Ascending!');
+  }
+
+  const embersEarned = Math.max(2, idle.maxStage + Math.floor((idle.wavesClearedTotal || 0) / 6));
+  idle.ascensions = (idle.ascensions || 0) + 1;
+  idle.celestialEmbers = (idle.celestialEmbers || 0) + embersEarned;
+  idle.totalEmbersEarned = (idle.totalEmbersEarned || 0) + embersEarned;
+  idle.stage = 1;
+  idle.wave = 1;
+  flags.idle = idle;
+
+  const msg = `🔥 CELESTIAL ASCENSION #${idle.ascensions}! Earned +${embersEarned} 🔥 Celestial Embers (+35% Permanent Squad Power per Ascension)!`;
+  const nextLogs = appendLogs(profile, [msg]);
+
+  db.prepare(`
+    UPDATE game_profiles SET floor = 1, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg,
+    events: [{ kind: 'finisher', target: 'hero', text: `🔥 +${embersEarned} EMBERS!` }],
+  };
+}
+
+export function upgradeAscensionRelic(db, user, userStats, { relicId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const relicDef = IDLE_ASCENSION_RELICS.find((r) => r.id === relicId);
+  if (!relicDef) throw new Error('Unknown Ascension Relic');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+  const curRank = Math.max(0, Number(idle.ascensionRelics[relicDef.id] || 0));
+  const cost = relicDef.baseEmberCost + curRank;
+  if ((idle.celestialEmbers || 0) < cost) {
+    throw new Error(`Need ${cost} 🔥 Celestial Embers (Ascend at Stage 2+ to earn Embers)!`);
+  }
+
+  idle.celestialEmbers -= cost;
+  idle.ascensionRelics[relicDef.id] = curRank + 1;
+  flags.idle = idle;
+
+  const msg = `👑 Upgraded ${relicDef.name} to Rank ${curRank + 1}!`;
+  const nextLogs = appendLogs(profile, [msg]);
+  db.prepare(`
+    UPDATE game_profiles SET story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    message: msg,
+    events: [{ kind: 'loot', target: 'hero', text: `👑 RANK ${curRank + 1}` }],
+  };
+}
+
+export function claimIdleMythicMilestone(db, user, userStats, { milestoneId }) {
+  const profile = ensureGameProfile(db, user.id);
+  const mDef = IDLE_MYTHIC_BOUNTIES.find((m) => m.id === milestoneId);
+  if (!mDef) throw new Error('Unknown Mythic Milestone');
+
+  const flags = parseJsonSafe(profile.story_flags_json, {});
+  const now = Date.now();
+  const idle = ensureIdleState(flags, profile, now);
+  const claimed = new Set(idle.claimedMilestones || []);
+  if (claimed.has(mDef.id)) throw new Error('Mythic Relic already forged!');
+
+  const maxProfLevel = Math.max(
+    idle.professions.astral_mining || 1,
+    idle.professions.alchemy_lab || 1,
+    idle.professions.rune_scribes || 1
+  );
+  let progress = 0;
+  if (mDef.reqKey === 'wavesClearedTotal') progress = idle.wavesClearedTotal || 0;
+  else if (mDef.reqKey === 'stageOrProf') progress = Math.max(idle.maxStage || 1, maxProfLevel);
+  else if (mDef.reqKey === 'ascensions') progress = idle.ascensions || 0;
+  else if (mDef.reqKey === 'wavesForPhoenix') progress = Math.max(idle.maxStage || 1, idle.wavesClearedTotal || 0);
+
+  if (progress < mDef.target) {
+    throw new Error(`Milestone in progress (${progress}/${mDef.target}) — keep auto-battling!`);
+  }
+
+  claimed.add(mDef.id);
+  idle.claimedMilestones = [...claimed];
+  flags.idle = idle;
+
+  const droppedItem = insertLootSpec(db, user.id, {
+    ...mDef.mythicReward,
+    level: Math.max(mDef.mythicReward.level || 5, idle.maxStage),
+  });
+  if (droppedItem?.id > 0) {
+    db.prepare('UPDATE game_items SET equipped = 0 WHERE user_id = ? AND slot = ?').run(user.id, mDef.mythicReward.slot);
+    db.prepare('UPDATE game_items SET equipped = 1 WHERE id = ? AND user_id = ?').run(droppedItem.id, user.id);
+    droppedItem.equipped = true;
+  }
+
+  const msg = `👑 MYTHIC RELIC FORGED & EQUIPPED: [${mDef.mythicReward.name}]!`;
+  const nextLogs = appendLogs(profile, [msg]);
+  db.prepare(`
+    UPDATE game_profiles SET shards = shards + 50, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
+  `).run(JSON.stringify(flags), nextLogs, now, user.id);
+
+  const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  return {
+    game: buildGameState(db, refreshedUser, userStats),
+    droppedItem,
+    message: msg,
+    events: [{ kind: 'finisher', target: 'hero', text: '👑 MYTHIC FORGED!' }],
   };
 }

@@ -1,40 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
   Swords,
-  Shield,
   ChevronLeft,
   ChevronRight,
   Volume2,
   VolumeX,
   Hammer,
   Trash2,
-  BookOpen,
   Backpack,
-  TrendingUp,
   ShoppingBag,
-  ScrollText,
-  Compass,
   Flame,
-  KeyRound,
-  Search,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  LogOut,
-  X,
-  Heart,
+  Gift,
+  Crown,
+  Building2,
+  Sliders,
 } from 'lucide-react';
 import {
-  EnemyIntent,
   FlashcardItem,
   GameActionResponse,
   GameItem,
   GameState,
   GameTurnEvent,
   GearSlot,
+  IdleAutomationConfig,
+  IdleGambitsConfig,
   ItemRarity,
   ShopBuyResponse,
   ShopState,
@@ -44,33 +35,28 @@ import { PixelCanvas } from '../game/PixelCanvas';
 import { StorePanel } from './StorePanel';
 import { soundEngine } from '../utils/soundEngine';
 
-interface QuestViewProps {
+export interface QuestViewProps {
   user: User;
   game: GameState;
   shop: ShopState;
-  onVillageMove: (dx: number, dy: number) => Promise<GameActionResponse>;
-  onNpcTalk: (npcId: string, choiceId?: string) => Promise<GameActionResponse>;
-  onNpcCraft: (craftKey: string, targetItemId?: number) => Promise<GameActionResponse>;
-  onDungeonEnter: (floor?: number) => Promise<GameActionResponse>;
-  onDungeonMove: (dx: number, dy: number) => Promise<GameActionResponse>;
-  onDungeonSearch: () => Promise<GameActionResponse>;
-  onDungeonTorch: () => Promise<GameActionResponse>;
-  onDungeonExtract: () => Promise<GameActionResponse>;
-  onDungeonPuzzle: (optionIndex: number) => Promise<GameActionResponse>;
-  onCombatAction: (
-    action: 'attack' | 'dash' | 'skill' | 'ally_skill' | 'finisher' | 'guard' | 'potion' | 'flee'
-  ) => Promise<GameActionResponse>;
-  onEventChoice: (choice: string) => Promise<GameActionResponse>;
+  isStudying?: boolean;
+  onIdleTick?: (payload?: { wavesCleared?: number; timerRunning?: boolean; triggerUltimate?: boolean }) => Promise<GameActionResponse>;
+  onIdleClaimAfk?: () => Promise<GameActionResponse>;
+  onIdleConfig?: (payload: {
+    gambits?: Partial<IdleGambitsConfig>;
+    automation?: Partial<IdleAutomationConfig>;
+    swapHeroRow?: string;
+    stage?: number;
+  }) => Promise<GameActionResponse>;
+  onIdleUpgradeProf?: (professionId: string) => Promise<GameActionResponse>;
+  onIdleAscend?: () => Promise<GameActionResponse>;
+  onIdleUpgradeRelic?: (relicId: string) => Promise<GameActionResponse>;
+  onIdleForgeMythic?: (milestoneId: string) => Promise<GameActionResponse>;
   onEquipItem: (itemId: number) => Promise<GameActionResponse>;
   onUpgradeItem: (itemId: number) => Promise<GameActionResponse>;
   onSalvageItem: (payload: { itemId?: number; maxRarity?: string }) => Promise<GameActionResponse>;
   onUpgradeStat: (stat: 'atk' | 'vit' | 'luck' | 'crit') => Promise<GameActionResponse>;
-  onSelectFloor: (floor: number) => Promise<GameActionResponse>;
   onSelectSpecialization?: (specKey: string) => Promise<GameActionResponse>;
-  onManagePartyAlly?: (allyId: string) => Promise<GameActionResponse>;
-  onAdvanceMythicStory?: (storyId: string, choiceId: string) => Promise<GameActionResponse>;
-  onClaimHeroicDeed?: (deedId: string) => Promise<GameActionResponse>;
-  onStartVanguardTrial?: () => Promise<GameActionResponse>;
   onStudyCast?: (payload: { cardId: number; selectedIndex?: number; grade?: number }) => Promise<GameActionResponse>;
   flashcards?: FlashcardItem[];
   onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
@@ -78,7 +64,7 @@ interface QuestViewProps {
   onGoToFocus: () => void;
 }
 
-type QuestSubTab = 'party' | 'story' | 'gear' | 'upgrades' | 'store';
+type IdleSubTab = 'squad' | 'guild' | 'ascension' | 'armory' | 'store';
 
 const RARITY_CLASS: Record<ItemRarity, string> = {
   common: 'rarity-common',
@@ -93,41 +79,8 @@ const SLOT_LABELS: { slot: GearSlot; label: string; emptyIcon: string }[] = [
   { slot: 'weapon', label: 'Weapon', emptyIcon: '🗡️' },
   { slot: 'armor', label: 'Armor', emptyIcon: '🛡️' },
   { slot: 'charm', label: 'Charm', emptyIcon: '🍀' },
-  { slot: 'companion', label: 'Pet', emptyIcon: '🦉' },
+  { slot: 'companion', label: 'Pet', emptyIcon: '🦅' },
 ];
-
-const INTENT_GUIDE: Record<EnemyIntent, { title: (v?: number) => string; advice: string; tone: string }> = {
-  STRIKE: {
-    title: (v) => `⚔️ Enemy Intent: Strike (${v || '?'} DMG)`,
-    advice: 'Balanced turn — attack boldly or Ward to charge Focus.',
-    tone: 'border-amber-500/40 bg-amber-500/10',
-  },
-  HEAVY: {
-    title: (v) => `💥 CRUSHING BLOW (${v || '?'} DMG)!`,
-    advice: 'Use 🛡️ Parry & Ward to negate 85%, STUN foe & Riposte!',
-    tone: 'border-rose-500/60 bg-rose-500/15',
-  },
-  SHELL: {
-    title: () => '🛡️ IRON SHELL + THORNS!',
-    advice: 'Melee Strike reflects damage! Use ⚡ Focus Break (40%) to SHATTER!',
-    tone: 'border-sky-500/60 bg-sky-500/15',
-  },
-  RITUAL: {
-    title: () => '🩸 DARK RITUAL (+25% HP & +4 ATK)!',
-    advice: 'Interrupt immediately with ⚡ Focus Break or lose momentum!',
-    tone: 'border-purple-500/60 bg-purple-500/15',
-  },
-  HEX: {
-    title: (v) => `☠️ VENOM HEX (${v || '?'} DMG + Poison)!`,
-    advice: 'Use 🛡️ Parry & Ward to block Venom, or 🧪 Potion to cleanse.',
-    tone: 'border-emerald-500/55 bg-emerald-500/12',
-  },
-  STUNNED: {
-    title: () => '💫 ENEMY STUNNED!',
-    advice: 'Open punish window — deal heavy damage safely!',
-    tone: 'border-yellow-400/60 bg-yellow-400/15',
-  },
-};
 
 function formatItemStats(item: GameItem) {
   return [
@@ -141,242 +94,163 @@ function formatItemStats(item: GameItem) {
     .join(' • ');
 }
 
+function formatDurationCompact(sec: number) {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const rem = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${rem}s`;
+  return `${rem}s`;
+}
+
 export function QuestView({
   user,
   game,
   shop,
-  onVillageMove,
-  onNpcTalk,
-  onNpcCraft,
-  onDungeonEnter,
-  onDungeonMove,
-  onDungeonSearch,
-  onDungeonTorch,
-  onDungeonExtract,
-  onDungeonPuzzle,
-  onCombatAction,
-  onEventChoice,
+  isStudying = false,
+  onIdleTick,
+  onIdleClaimAfk,
+  onIdleConfig,
+  onIdleUpgradeProf,
+  onIdleAscend,
+  onIdleUpgradeRelic,
+  onIdleForgeMythic,
   onEquipItem,
   onUpgradeItem,
   onSalvageItem,
   onUpgradeStat,
-  onSelectFloor,
   onSelectSpecialization,
-  onManagePartyAlly,
-  onAdvanceMythicStory,
-  onClaimHeroicDeed,
-  onStartVanguardTrial,
   onStudyCast,
   flashcards = [],
   onBuyShopItem,
   onRerollDailyShop,
   onGoToFocus,
 }: QuestViewProps) {
-  const [subTab, setSubTab] = useState<QuestSubTab>('party');
+  const [subTab, setSubTab] = useState<IdleSubTab>('squad');
   const [busy, setBusy] = useState(false);
-  const [activeNpcId, setActiveNpcId] = useState<string | null>(null);
-  const [showVillagePad, setShowVillagePad] = useState(false);
   const [lastEvents, setLastEvents] = useState<GameTurnEvent[]>([]);
   const [eventSeq, setEventSeq] = useState(0);
   const [recentDrop, setRecentDrop] = useState<GameItem | null>(null);
   const [sfxMuted, setSfxMuted] = useState(() => soundEngine.isSfxMuted());
-  const [showStudyCast, setShowStudyCast] = useState(false);
+  const [showStudyQuiz, setShowStudyQuiz] = useState(false);
   const [quizCardIdx, setQuizCardIdx] = useState(0);
 
   const quizCards = flashcards.filter((c) => c.options && c.options.length > 0);
   const activeQuizCard = quizCards.length > 0 ? quizCards[quizCardIdx % quizCards.length] : null;
 
-  const { mode, profile, heroStats, biome, village, dungeon, story, encounter, items, equippedBySlot, recentLogs } = game;
-  const hpPct = Math.round((heroStats.hp / Math.max(1, heroStats.maxHp)) * 100);
+  const { profile, heroStats, items, equippedBySlot, recentLogs, idle } = game;
   const unequippedItems = items.filter((i) => !i.equipped);
   const greatForgeChance = Math.min(35, Math.round(6 + heroStats.luck * 0.45));
-  const activeNpc = activeNpcId ? village.npcs.find((n) => n.id === activeNpcId) || null : null;
-  const currentChap = story.chapters.find((c) => c.chapter === story.chapter) || story.chapters[story.chapters.length - 1];
 
-  function playSfxForEvents(events: GameTurnEvent[] = [], dropped?: GameItem | null) {
-    if (dropped) {
-      soundEngine.playPixelLoot(dropped.rarity === 'mythic' ? 'legendary' : dropped.rarity);
-      return;
-    }
-    for (const ev of events) {
-      if (ev.kind === 'finisher') {
-        soundEngine.playPixelCrit();
-        return;
-      }
-      if (ev.kind === 'parry') {
-        soundEngine.playPixelParry();
-        return;
-      }
-      if (ev.kind === 'secret') {
-        soundEngine.playPixelSecret();
-        return;
-      }
-      if (ev.kind === 'trap' || ev.kind === 'defeat') {
-        soundEngine.playPixelTrap();
-        return;
-      }
-      if (ev.kind === 'crit') {
-        soundEngine.playPixelCrit();
-        return;
-      }
-      if (ev.kind === 'hit') {
-        soundEngine.playPixelHit();
-        return;
-      }
-      if (ev.kind === 'guard' || ev.kind === 'heal') {
-        soundEngine.playPixelGuard();
-        return;
-      }
-      if (ev.kind === 'step' && ev.text) {
-        soundEngine.playPixelStep();
-        return;
-      }
-    }
-  }
-
-  async function runAction(fn: () => Promise<GameActionResponse>) {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const res = await fn();
-      if (res.events?.length) {
-        setLastEvents(res.events);
-        setEventSeq((s) => s + 1);
-      }
-      if (res.droppedItem) {
-        setRecentDrop(res.droppedItem);
-      }
-      if (res.interactedNpcId) {
-        setActiveNpcId(res.interactedNpcId);
-      }
-      if (res.atGate) {
-        onDungeonEnter(profile.floor);
-      }
-      playSfxForEvents(res.events || [], res.droppedItem);
-      return res;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // Keyboard Navigation (WASD / Arrows / E Search)
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) {
-        return;
-      }
-      if (busy || encounter) return;
-      let dx = 0;
-      let dy = 0;
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dy = -1;
-      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dy = 1;
-      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dx = -1;
-      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dx = 1;
-      else if ((e.key === 'e' || e.key === 'E') && mode === 'dungeon') {
-        e.preventDefault();
-        runAction(onDungeonSearch);
-        return;
-      } else {
-        return;
-      }
-      e.preventDefault();
-      if (mode === 'dungeon') runAction(() => onDungeonMove(dx, dy));
-      else runAction(() => onVillageMove(dx, dy));
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  });
-
-  function handleCanvasTileClick(tx: number, ty: number) {
-    if (busy || encounter) return;
-    if (mode === 'dungeon' && dungeon) {
-      const dx = tx - dungeon.playerX;
-      const dy = ty - dungeon.playerY;
-      if (dx === 0 && dy === 0) {
-        if (dungeon.tiles[ty]?.[tx] === 'E' && (dungeon.satchel.shards > 0 || dungeon.bossDefeated)) {
-          runAction(onDungeonExtract);
-        } else {
-          runAction(onDungeonSearch);
+  const runAction = useCallback(
+    async (fn: () => Promise<GameActionResponse>) => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const res = await fn();
+        if (res.events?.length) {
+          setLastEvents(res.events);
+          setEventSeq((s) => s + 1);
         }
-        return;
+        if (res.droppedItem) {
+          setRecentDrop(res.droppedItem);
+          soundEngine.playPixelLoot(res.droppedItem.rarity === 'mythic' ? 'legendary' : res.droppedItem.rarity);
+        }
+        return res;
+      } finally {
+        setBusy(false);
       }
-      const stepX = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) : 0;
-      const stepY = Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0;
-      runAction(() => onDungeonMove(stepX, stepY));
-    } else {
-      const npc = village.npcs.find((n) => n.x === tx && n.y === ty);
-      if (npc) {
-        setActiveNpcId(npc.id);
-        return;
-      }
-      if (tx === 4 && ty === 0) {
-        runAction(() => onDungeonEnter(profile.floor));
-        return;
-      }
-      const dx = tx - village.x;
-      const dy = ty - village.y;
-      if (dx === 0 && dy === 0) return;
-      const stepX = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) : 0;
-      const stepY = Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0;
-      runAction(() => onVillageMove(stepX, stepY));
-    }
-  }
+    },
+    [busy]
+  );
 
-  function toggleMute() {
-    const next = !sfxMuted;
-    soundEngine.setSfxMuted(next);
-    setSfxMuted(next);
-  }
+  // Silent wave clear sync from the 60fps side-scrolling canvas
+  const handleAutoWaveClear = useCallback(
+    async (opts: { isBossWave: boolean; triggerUltimate: boolean }) => {
+      if (!onIdleTick) return;
+      try {
+        const res = await onIdleTick({
+          wavesCleared: 1,
+          timerRunning: isStudying,
+          triggerUltimate: opts.triggerUltimate,
+        });
+        if (res.events?.length) {
+          setLastEvents(res.events);
+          setEventSeq((s) => s + 1);
+        }
+        if (res.droppedItem) {
+          setRecentDrop(res.droppedItem);
+        }
+      } catch {
+        // Ignore transient network errors during background idle tick
+      }
+    },
+    [onIdleTick, isStudying]
+  );
 
-  const canExtractNow =
-    Boolean(dungeon) &&
-    ((dungeon!.playerX === dungeon!.entranceX && dungeon!.playerY === dungeon!.entranceY) || dungeon!.bossDefeated);
+  // Periodic background tick while Focus Timer runs
+  useEffect(() => {
+    if (!isStudying || !onIdleTick) return;
+    const id = window.setInterval(() => {
+      onIdleTick({ wavesCleared: 1, timerRunning: true }).catch(() => {});
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [isStudying, onIdleTick]);
+
+  const overdriveActive = Boolean(idle?.overdriveActive || isStudying);
+  const afkSeconds = idle?.afkChest?.accumulatedSec || 0;
 
   return (
-    <div className="space-y-3.5">
-      {/* Main Interactive Game Stage Card */}
-      <div className="glass-card rounded-3xl p-3.5 space-y-3">
-        {/* Top World / Biome Header */}
-        <div className="flex items-center justify-between gap-2">
+    <div className="space-y-3.5 pb-6">
+      {/* Main Idle Auto-Battler Cockpit Card */}
+      <div className="glass-card rounded-3xl p-4 space-y-3">
+        {/* Realm Stage-Wave & Audio/Focus Header */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="font-pixel text-[10px] text-white tracking-tight truncate">
-                {mode === 'dungeon' ? `SPIRE F${dungeon?.floor || profile.floor}` : 'OAKHAVEN'}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
+                ⚔️ Aethelgard: Astral Vanguard
               </span>
-              <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold shrink-0">
-                Ch.{story.chapter}
-              </span>
-              <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold shrink-0">
-                Lv.{heroStats.heroLevel}
-              </span>
+              {overdriveActive ? (
+                <span className="px-2 py-0.5 rounded-full bg-sky-500/25 border border-sky-400/60 text-sky-200 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
+                  <Flame className="w-3 h-3 text-amber-300" />
+                  {(idle?.speedMultiplier || 4.0).toFixed(1)}× STUDY OVERDRIVE
+                  {idle?.overdriveRemainingSec ? ` (${formatDurationCompact(idle.overdriveRemainingSec)})` : ''}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold text-slate-300">
+                  ⚡ {(idle?.speedMultiplier || 1.0).toFixed(1)}× Base Idle
+                </span>
+              )}
             </div>
-            <div className="text-[11px] text-slate-400 truncate mt-0.5">
-              {mode === 'dungeon' ? `${biome.name} • Fog of War` : `Town Hub • ${currentChap.title}`}
+            <div className="text-xs font-extrabold text-white mt-0.5">
+              {idle?.realm?.name || 'Verdant Sky-Bastion'} · Stage {idle?.stage || 1} — Wave {idle?.wave || 1}/10
+              {idle?.isBossWave ? ' 👑 BOSS' : ''}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {mode === 'village' && (
-              <div className="flex items-center rounded-xl sp-inset px-1 py-0.5 gap-0.5">
+          <div className="flex items-center gap-1.5">
+            {idle && idle.maxStage > 1 && onIdleConfig && (
+              <div className="flex items-center gap-1 sp-inset rounded-xl p-1">
                 <button
                   type="button"
-                  disabled={busy || profile.floor <= 1}
-                  onClick={() => runAction(() => onSelectFloor(profile.floor - 1))}
-                  className="p-1 rounded-lg hover:opacity-80 disabled:opacity-35 cursor-pointer"
-                  aria-label="Previous floor"
+                  disabled={busy || idle.stage <= 1}
+                  onClick={() => runAction(() => onIdleConfig({ stage: idle.stage - 1 }))}
+                  aria-label="Previous Stage"
+                  className="p-1 rounded-lg sp-badge disabled:opacity-40 cursor-pointer"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-                <span className="font-mono-num text-[11px] font-extrabold px-1 text-white">
-                  F{profile.floor}/{profile.bestFloor}
+                <span className="text-[10px] font-mono-num font-bold px-1.5 text-white">
+                  S{idle.stage}/{idle.maxStage}
                 </span>
                 <button
                   type="button"
-                  disabled={busy || profile.floor >= profile.bestFloor}
-                  onClick={() => runAction(() => onSelectFloor(profile.floor + 1))}
-                  className="p-1 rounded-lg hover:opacity-80 disabled:opacity-35 cursor-pointer"
-                  aria-label="Next floor"
+                  disabled={busy || idle.stage >= idle.maxStage}
+                  onClick={() => runAction(() => onIdleConfig({ stage: idle.stage + 1 }))}
+                  aria-label="Next Stage"
+                  className="p-1 rounded-lg sp-badge disabled:opacity-40 cursor-pointer"
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -384,680 +258,173 @@ export function QuestView({
             )}
             <button
               type="button"
-              onClick={toggleMute}
-              aria-label={sfxMuted ? 'Unmute 8-bit SFX' : 'Mute 8-bit SFX'}
-              className="p-1.5 rounded-xl sp-badge cursor-pointer"
+              onClick={() => {
+                const next = !sfxMuted;
+                soundEngine.setSfxMuted(next);
+                setSfxMuted(next);
+              }}
+              className="p-1.5 rounded-lg sp-badge cursor-pointer"
+              title={sfxMuted ? 'Unmute RPG SFX' : 'Mute RPG SFX'}
             >
               {sfxMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={onGoToFocus}
+              className="px-2.5 py-1 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+            >
+              ⚡ Study for 4× Speed
             </button>
           </div>
         </div>
 
-        {/* Resource Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-mono-num font-bold">
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="px-2 py-0.5 rounded-full sp-badge" title="Study Energy (2 to enter Spire)">
-              ⚡ {profile.energy}
-            </span>
-            <span className="px-2 py-0.5 rounded-full sp-badge" title="Dungeon Torches">
-              🔥 {profile.torches}
-            </span>
-            <span className="px-2 py-0.5 rounded-full sp-badge" title="Moonpetal Herbs">
-              🌿 {profile.herbs}
-            </span>
-            <span className="px-2 py-0.5 rounded-full sp-badge" title="Arcane Shards">
-              ✦ {profile.shards}
-            </span>
-            <span className="px-2 py-0.5 rounded-full sp-badge" title="Healing Potions">
-              🧪 {profile.potions}
-            </span>
+        {/* 4-Metric Idle Telemetry Strip */}
+        <div className="grid grid-cols-4 gap-1.5 text-center">
+          <div className="p-2 rounded-xl sp-inset">
+            <div className="font-mono-num text-xs font-extrabold text-white">
+              ⚔️ {idle?.squadPower ?? heroStats.atk * 10}
+            </div>
+            <div className="text-[9px] text-slate-400">{idle?.squadDps ?? heroStats.atk * 3} DPS</div>
           </div>
-          <span className="px-2 py-0.5 rounded-full sp-badge" title="Focus Purity increases Intuition to sense traps and secret walls">
-            👁️ Int {heroStats.intuition}
-          </span>
+          <div className="p-2 rounded-xl sp-inset">
+            <div className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards}</div>
+            <div className="text-[9px] text-slate-400">+{idle?.shardsPerHr ?? 45}/hr</div>
+          </div>
+          <div className="p-2 rounded-xl sp-inset">
+            <div className="font-mono-num text-xs font-extrabold text-amber-300">🪙 {user.coins}</div>
+            <div className="text-[9px] text-slate-400">+{idle?.coinsPerHr ?? 30}/hr</div>
+          </div>
+          <div className="p-2 rounded-xl sp-inset">
+            <div className="font-mono-num text-xs font-extrabold text-rose-300">
+              🔥 {idle?.celestialEmbers ?? 0}
+            </div>
+            <div className="text-[9px] text-slate-400">Ascend ×{(idle?.ascensionMult ?? 1).toFixed(2)}</div>
+          </div>
         </div>
 
-        {/* Interactive HTML5 Pixel Canvas (Village / Dungeon Fog / Tactical Combat) */}
+        {/* Side-Scrolling 4-Hero Auto-Battler Pixel Canvas */}
         <PixelCanvas
           game={game}
           lastEvents={lastEvents}
           eventSeq={eventSeq}
           focusFever={heroStats.studyBonuses.focusFever}
-          onTileClick={handleCanvasTileClick}
+          isStudying={isStudying}
+          onAutoWaveClear={handleAutoWaveClear}
         />
 
-        {/* Hero HP & Focus Bars */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 rounded-xl sp-inset space-y-1">
-            <div className="flex items-center justify-between text-[10px] font-bold">
-              <span className="text-slate-300">HERO HP</span>
-              <span className="font-mono-num text-white">
-                {heroStats.hp}/{heroStats.maxHp}
+        {/* Quick Action Controls Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+          {onIdleClaimAfk && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(onIdleClaimAfk)}
+              className="py-2.5 px-3 rounded-xl sp-btn-primary text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Gift className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                Claim AFK Chest ({idle?.afkChest?.shards || 0}✦ · {formatDurationCompact(afkSeconds)})
               </span>
-            </div>
-            <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{ width: `${hpPct}%`, backgroundColor: hpPct > 35 ? '#22c55e' : '#ef4444' }}
-              />
-            </div>
-          </div>
-
-          <div className="p-2 rounded-xl sp-inset space-y-1">
-            <div className="flex items-center justify-between text-[10px] font-bold">
-              <span className="text-slate-300">FOCUS BREAK</span>
-              <span className="font-mono-num text-white">{profile.focusCharge}%</span>
-            </div>
-            <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{ width: `${profile.focusCharge}%`, backgroundColor: '#38bdf8' }}
-              />
-            </div>
-          </div>
+            </button>
+          )}
+          {onIdleTick && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(() => onIdleTick({ wavesCleared: 1, timerRunning: isStudying, triggerUltimate: true }))}
+              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-600/90 via-amber-500/90 to-rose-600/90 text-white border border-amber-300/60 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span>🌟 Squad Finisher Burst</span>
+            </button>
+          )}
+          {onStudyCast && activeQuizCard && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setShowStudyQuiz((v) => !v)}
+              className="py-2.5 px-3 rounded-xl sp-tab-active border border-sky-400/50 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>🎓 Study Overdrive Quiz (+30m 4×)</span>
+            </button>
+          )}
         </div>
 
-        {/* Core Hero Stats */}
-        <div className="grid grid-cols-4 gap-1.5 text-center">
-          <div className="p-1.5 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-white">{heroStats.atk}</div>
-            <div className="text-[9px] text-slate-400">ATK</div>
-          </div>
-          <div className="p-1.5 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-white">{heroStats.def}</div>
-            <div className="text-[9px] text-slate-400">DEF</div>
-          </div>
-          <div className="p-1.5 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-white">🍀 {heroStats.luck}</div>
-            <div className="text-[9px] text-slate-400">LUCK</div>
-          </div>
-          <div className="p-1.5 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-white">{heroStats.critPct}%</div>
-            <div className="text-[9px] text-slate-400">CRIT</div>
-          </div>
-        </div>
-
-        {/* CONTEXT CONTROLS: Combat / Riddle / Chest / Shrine / Dungeon Nav / Village Hub */}
-        {encounter?.type === 'combat' && encounter.enemy ? (
-          <div className="space-y-2">
-            {/* Explicit Enemy Intent Banner + Guard Shields & Tactical Stance Bar */}
-            {(() => {
-              const intentKey = (encounter.enemy.intent || 'STRIKE') as EnemyIntent;
-              const guide = INTENT_GUIDE[intentKey] || INTENT_GUIDE.STRIKE;
-              const shields = encounter.enemy.shields ?? 0;
-              const maxShields = encounter.enemy.maxShields ?? (encounter.isBoss ? 3 : 2);
-              const flankingTurns = encounter.heroStatuses?.flankingTurns || 0;
-              const allyWardTurns = encounter.heroStatuses?.allyWardTurns || 0;
-              const allyCooldown = encounter.heroStatuses?.allyCooldown || 0;
-              const comboChain = encounter.heroStatuses?.comboChain || 0;
-              const activeAlly = game.party?.activeAlly || null;
-              const canExecuteFinisher =
-                profile.focusCharge >= 75 ||
-                shields === 0 ||
-                encounter.enemy.hp <= Math.ceil(encounter.enemy.maxHp * 0.35);
-
-              return (
-                <>
-                  <div className={`p-2.5 rounded-2xl border ${guide.tone}`}>
-                    <div className="flex items-center justify-between gap-2 text-xs font-extrabold text-white">
-                      <span>{guide.title(encounter.enemy.intentValue)}</span>
-                      <span className="font-mono-num text-[10px]">
-                        HP {encounter.enemy.hp}/{encounter.enemy.maxHp}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-200 mt-0.5">{guide.advice}</div>
-                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                      {shields > 0 ? (
-                        <span className="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-400/50 text-sky-200 text-[10px] font-extrabold font-mono-num">
-                          🛡️ Guard Shields: {'🛡️'.repeat(shields)} ({shields}/{maxShields})
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-md bg-rose-500/25 border border-rose-400/70 text-amber-200 text-[10px] font-extrabold animate-pulse">
-                          💥 GUARD BROKEN! (+50% DMG & Finisher Ready!)
-                        </span>
-                      )}
-                      {encounter.enemy.stunned && (
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💫 Stunned</span>
-                      )}
-                      {(encounter.enemy.vulnerableTurns || 0) > 0 && (
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">🎯 Vulnerable (+50% DMG)</span>
-                      )}
-                      {(encounter.enemy.armorBrokenTurns || 0) > 0 && (
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold">💔 Armor Broken</span>
-                      )}
-                      {flankingTurns > 0 && (
-                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 text-[9px] font-extrabold">
-                          ⚡ Flanking ({flankingTurns}t: Next Strike Guaranteed Crit + -1🛡️)
-                        </span>
-                      )}
-                      {allyWardTurns > 0 && (
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold text-sky-300">
-                          🛡️ Vanguard Ward (+35% DEF)
-                        </span>
-                      )}
-                      {comboChain > 0 && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-200 text-[9px] font-extrabold font-mono-num">
-                          🔥 Combo ×{comboChain}
-                        </span>
-                      )}
-                      {(encounter.heroStatuses?.poisonTurns || 0) > 0 && (
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold text-emerald-400">
-                          ☠️ Venom ({encounter.heroStatuses!.poisonTurns}t)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Primary Tactical Movements & Strikes Grid */}
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onCombatAction('attack'))}
-                      className="py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <Swords className="w-3.5 h-3.5" />
-                      <span>{flankingTurns > 0 ? '⚡ Flank Backstab!' : 'Strike'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onCombatAction('dash'))}
-                      title="Tactical Sidestep: +45% Evasion, Feint Cut & enters Flanking Stance (next strike Guaranteed Crit & breaks 1 Shield)"
-                      className="py-2.5 px-3 rounded-xl sp-tab-active border border-cyan-400/45 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <span>💨 Dash Flank (+45% Dodge)</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy || profile.focusCharge < 40}
-                      onClick={() => runAction(() => onCombatAction('skill'))}
-                      className="py-2.5 px-3 rounded-xl sp-tab-active border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Focus Break (40% · -2🛡️)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onCombatAction('guard'))}
-                      className="py-2.5 px-3 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Shield className="w-3.5 h-3.5" /> Parry & Ward
-                    </button>
-                  </div>
-
-                  {/* Party Ally Assist & Ultimate Dual-Tech Finisher Row */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {activeAlly ? (
-                      <button
-                        type="button"
-                        disabled={busy || allyCooldown > 0}
-                        onClick={() => runAction(() => onCombatAction('ally_skill'))}
-                        title={activeAlly.skillDesc}
-                        className="py-2.5 px-3 rounded-xl sp-tab-active border border-sky-400/50 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
-                      >
-                        <span>
-                          {activeAlly.skillIcon} {activeAlly.name}: {activeAlly.skillName}
-                          {allyCooldown > 0 ? ` (${allyCooldown}t)` : ''}
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setSubTab('party');
-                          if (onManagePartyAlly) {
-                            runAction(() => onManagePartyAlly('ally_kaelen'));
-                          }
-                        }}
-                        className="py-2.5 px-3 rounded-xl sp-badge border border-dashed border-sky-400/50 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>🤝 Call Sir Kaelen (Free Party Recruit!)</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={busy || !canExecuteFinisher}
-                      onClick={() => runAction(() => onCombatAction('finisher'))}
-                      title={
-                        activeAlly
-                          ? `${activeAlly.finisherName}: ${activeAlly.finisherDesc}`
-                          : 'Unleash Ultimate Finisher (unlocked at 75% Focus Charge, when Enemy is BROKEN, or below 35% HP!)'
-                      }
-                      className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                        canExecuteFinisher
-                          ? 'bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white border border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.35)]'
-                          : 'sp-inset text-slate-400 opacity-50 cursor-not-allowed'
-                      }`}
-                    >
-                      <span>
-                        🌟 {activeAlly ? activeAlly.finisherName : 'Ultimate Finisher'}{' '}
-                        {canExecuteFinisher ? '(READY!)' : '(75%⚡ / Break)'}
-                      </span>
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-
-            <div className="flex gap-1.5">
+        {/* Inline University Quiz Overdrive Card */}
+        {showStudyQuiz && activeQuizCard && onStudyCast && (
+          <div className="p-3 rounded-2xl sp-inset border border-sky-400/40 space-y-2">
+            <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-sky-300">
+              <span>
+                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +30m 4.0× Overdrive, +2 Waves & Gear!
+              </span>
               <button
                 type="button"
-                disabled={busy || profile.potions < 1}
-                onClick={() => runAction(() => onCombatAction('potion'))}
-                className="px-3 py-2 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-45"
+                onClick={() => setQuizCardIdx((i) => i + 1)}
+                className="px-2 py-0.5 rounded sp-badge text-[10px] cursor-pointer shrink-0"
               >
-                🧪 Potion ({profile.potions})
-              </button>
-              {onStudyCast && activeQuizCard && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setShowStudyCast((v) => !v)}
-                  className="flex-1 py-2 rounded-xl sp-tab-active border text-xs font-extrabold cursor-pointer flex items-center justify-center gap-1"
-                >
-                  📖 Study Cast (1.65x + -1🛡️)
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => runAction(() => onCombatAction('flee'))}
-                className="px-3 py-2 rounded-xl sp-inset text-[11px] font-semibold text-slate-400 hover:text-white cursor-pointer"
-              >
-                🏃 Disengage
+                Skip Card
               </button>
             </div>
-            {showStudyCast && activeQuizCard && onStudyCast && (
-              <div className="p-3 rounded-2xl sp-inset border border-white/15 space-y-2">
-                <div className="text-[10px] font-bold text-slate-300">
-                  🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} (Answer correctly for 1.65x Arcane DMG!)
-                </div>
-                <div className="text-xs font-bold text-white">{activeQuizCard.front}</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {activeQuizCard.options.map((opt, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={busy}
-                      onClick={async () => {
-                        setShowStudyCast(false);
-                        setQuizCardIdx((i) => i + 1);
-                        await runAction(() => onStudyCast({ cardId: activeQuizCard.id, selectedIndex: idx }));
-                      }}
-                      className="text-left px-2.5 py-2 rounded-xl sp-btn-primary text-[11px] font-bold cursor-pointer"
-                    >
-                      {String.fromCharCode(65 + idx)}. {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : encounter?.type === 'riddle' && encounter.options ? (
-          <div className="p-3 rounded-2xl sp-tab-active border space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-extrabold text-white">🗿 {encounter.title}</div>
-              {onStudyCast && activeQuizCard && (
+            <div className="text-xs font-bold text-white">{activeQuizCard.front}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {activeQuizCard.options.map((opt, idx) => (
                 <button
+                  key={idx}
                   type="button"
                   disabled={busy}
-                  onClick={() => setShowStudyCast((v) => !v)}
-                  className="px-2 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+                  onClick={async () => {
+                    setShowStudyQuiz(false);
+                    setQuizCardIdx((i) => i + 1);
+                    await runAction(() => onStudyCast({ cardId: activeQuizCard.id, selectedIndex: idx }));
+                  }}
+                  className="text-left px-2.5 py-2 rounded-xl sp-btn-primary text-[11px] font-bold cursor-pointer"
                 >
-                  📖 Vault Quiz
-                </button>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-200 leading-relaxed">{encounter.prompt}</p>
-            {encounter.hint && (
-              <div className="text-[10px] font-bold text-sky-300">👁️ {encounter.hint}</div>
-            )}
-            {showStudyCast && activeQuizCard && onStudyCast && (
-              <div className="p-2.5 rounded-xl sp-inset space-y-1.5 border border-white/15">
-                <div className="text-[11px] font-bold text-white">{activeQuizCard.front}</div>
-                <div className="grid grid-cols-1 gap-1">
-                  {activeQuizCard.options.map((opt, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={busy}
-                      onClick={async () => {
-                        setShowStudyCast(false);
-                        setQuizCardIdx((i) => i + 1);
-                        await runAction(() => onStudyCast({ cardId: activeQuizCard.id, selectedIndex: idx }));
-                      }}
-                      className="text-left px-2.5 py-1.5 rounded-lg sp-badge text-[10px] font-bold cursor-pointer hover:opacity-90"
-                    >
-                      {String.fromCharCode(65 + idx)}. {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-1.5 pt-1">
-              {encounter.options.map((opt, idx) => (
-                <button
-                  key={opt}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onDungeonPuzzle(idx))}
-                  className="py-2 px-2 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer"
-                >
-                  {opt}
+                  {String.fromCharCode(65 + idx)}. {opt}
                 </button>
               ))}
             </div>
           </div>
-        ) : encounter?.type === 'chest' ? (
-          <div className="grid grid-cols-2 gap-2">
+        )}
+
+        {/* Zero-Micromanagement Automation Bar */}
+        {idle && onIdleConfig && (
+          <div className="p-2.5 rounded-2xl sp-inset flex flex-wrap items-center justify-between gap-2 text-[11px]">
             <button
               type="button"
               disabled={busy}
-              onClick={() => runAction(() => onEventChoice('open_safe'))}
-              className="py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
+              onClick={() =>
+                runAction(() =>
+                  onIdleConfig({ automation: { autoEquipBest: !idle.automation.autoEquipBest } })
+                )
+              }
+              className={`px-2.5 py-1.5 rounded-xl border font-extrabold cursor-pointer transition ${
+                idle.automation.autoEquipBest
+                  ? 'sp-tab-active border-emerald-400/60 text-emerald-200'
+                  : 'sp-badge text-slate-400'
+              }`}
             >
-              🧰 Open Safely
+              🤖 Auto-Equip Best: {idle.automation.autoEquipBest ? 'ON' : 'OFF'}
             </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onEventChoice('lockpick'))}
-              className="py-2.5 px-3 rounded-xl sp-tab-active border text-xs font-extrabold cursor-pointer"
-            >
-              🗝️ Lockpick ({encounter.lockpickChance || 50}% 🍀)
-            </button>
-          </div>
-        ) : encounter?.type === 'shrine' ? (
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onEventChoice('shrine_bless'))}
-              className="py-2.5 px-2 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer"
-            >
-              ✨ Pray (+Luck)
-            </button>
-            <button
-              type="button"
-              disabled={busy || user.coins < 20}
-              onClick={() => runAction(() => onEventChoice('shrine_gamble'))}
-              className="py-2.5 px-2 rounded-xl sp-tab-active border text-[11px] font-extrabold cursor-pointer disabled:opacity-45"
-            >
-              🎲 Gamble 20🪙
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onEventChoice('camp_rest'))}
-              className="py-2.5 px-2 rounded-xl sp-badge text-[11px] font-bold cursor-pointer"
-            >
-              🔥 Heal 55%
-            </button>
-          </div>
-        ) : mode === 'dungeon' && dungeon ? (
-          <div className="space-y-2.5">
-            {/* Torch + Satchel Status Bar */}
-            <div className="p-2.5 rounded-2xl sp-inset space-y-1.5 text-[11px]">
-              <div className="flex items-center justify-between gap-2">
-                <span className={`font-bold flex items-center gap-1 ${dungeon.torch < 25 ? 'text-rose-400' : 'text-amber-400'}`}>
-                  <Flame className="w-3.5 h-3.5" />
-                  Torchlight: {dungeon.torch}% {dungeon.torch < 25 ? '(DIM: +25% Enemy DMG!)' : ''}
-                </span>
-                <span className="font-mono-num font-bold text-slate-300 flex items-center gap-1">
-                  <KeyRound className="w-3 h-3" /> Key {dungeon.keys}/1
-                </span>
-              </div>
-              <div className="text-[10px] font-mono-num text-slate-300 flex flex-wrap items-center justify-between gap-2">
-                <span>
-                  🎒 Satchel (Unbanked): +{dungeon.satchel.shards}✦ • +{dungeon.satchel.coins}🪙 • +{dungeon.satchel.herbs}🌿 •{' '}
-                  {dungeon.satchel.items.length} Gear
-                </span>
-              </div>
-              {dungeon.sensedHint && (
-                <div className="text-[10px] font-bold text-sky-400">👁️ {dungeon.sensedHint}</div>
-              )}
+
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] font-bold text-slate-400 mr-1">♻️ Auto-Salvage:</span>
+              {(['off', 'common', 'uncommon', 'rare'] as const).map((cap) => {
+                const active = idle.automation.autoSalvageMaxRarity === cap;
+                return (
+                  <button
+                    key={cap}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(() => onIdleConfig({ automation: { autoSalvageMaxRarity: cap } }))}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase cursor-pointer ${
+                      active ? 'sp-tab-active border border-amber-400/50 text-white' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    {cap}
+                  </button>
+                );
+              })}
             </div>
-
-            {/* Tactile D-Pad + Search / Torch / Extract */}
-            {(() => {
-              const isDirOpen = (dx: number, dy: number) => {
-                const ch = dungeon.tiles[dungeon.playerY + dy]?.[dungeon.playerX + dx];
-                return Boolean(ch && ch !== 'W' && ch !== 'S');
-              };
-              const dirCls = (dx: number, dy: number) =>
-                isDirOpen(dx, dy)
-                  ? 'sp-tab-active border border-emerald-400/50 text-white'
-                  : 'sp-inset border border-white/10 opacity-35 text-slate-500';
-
-              return (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="grid grid-cols-3 gap-1 w-32 shrink-0">
-                    <div />
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onDungeonMove(0, -1))}
-                      aria-label="Move North"
-                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(0, -1)}`}
-                    >
-                      <ArrowUp className="w-4 h-4" />
-                    </button>
-                    <div />
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onDungeonMove(-1, 0))}
-                      aria-label="Move West"
-                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(-1, 0)}`}
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(onDungeonSearch)}
-                      aria-label="Search area"
-                      title="Search for hidden traps & cracked secret walls (E)"
-                      className="h-9 rounded-xl sp-tab-active border flex items-center justify-center cursor-pointer active:scale-95"
-                    >
-                      <Search className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onDungeonMove(1, 0))}
-                      aria-label="Move East"
-                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(1, 0)}`}
-                    >
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                    <div />
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onDungeonMove(0, 1))}
-                      aria-label="Move South"
-                      className={`h-9 rounded-xl flex items-center justify-center cursor-pointer active:scale-95 transition ${dirCls(0, 1)}`}
-                    >
-                      <ArrowDown className="w-4 h-4" />
-                    </button>
-                    <div />
-                  </div>
-
-              <div className="flex-1 flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(onDungeonSearch)}
-                  className="py-2 px-2.5 rounded-xl sp-tab-active border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Search className="w-3.5 h-3.5" /> Search Secret / Disarm (E)
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || profile.torches < 1}
-                  onClick={() => runAction(onDungeonTorch)}
-                  className="py-2 px-2.5 rounded-xl sp-badge text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45"
-                >
-                  <Flame className="w-3.5 h-3.5" /> Light Torch ({profile.torches})
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !canExtractNow}
-                  onClick={() => runAction(onDungeonExtract)}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-                    canExtractNow ? 'sp-btn-primary' : 'sp-inset text-slate-500 opacity-55 cursor-not-allowed'
-                  }`}
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>{canExtractNow ? 'Extract Loot Safely' : 'Walk to Stairs 🚪 to Extract'}</span>
-                </button>
-              </div>
-            </div>
-              );
-            })()}
-          </div>
-        ) : (
-          /* Oakhaven Village Hub Controls */
-          <div className="space-y-2.5">
-            <div className="grid grid-cols-4 gap-1.5">
-              {village.npcs.map((npc) => (
-                <button
-                  key={npc.id}
-                  type="button"
-                  onClick={() => setActiveNpcId((prev) => (prev === npc.id ? null : npc.id))}
-                  className={`p-2 rounded-xl border text-center cursor-pointer transition relative ${
-                    activeNpcId === npc.id ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
-                  }`}
-                >
-                  {npc.hasAction && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-400 text-zinc-950 text-[10px] font-black flex items-center justify-center">
-                      !
-                    </span>
-                  )}
-                  <div className="text-[11px] font-extrabold truncate">{npc.name.split(' ')[0]}</div>
-                  <div className="text-[9px] text-slate-400 truncate">{npc.rankLabel}</div>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                disabled={busy || profile.energy < 2}
-                type="button"
-                onClick={() => runAction(() => onDungeonEnter(profile.floor))}
-                className="flex-1 py-2.5 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Compass className="w-4 h-4 shrink-0" />
-                <span className="truncate">
-                  {profile.energy < 2
-                    ? 'Need 2 ⚡ Energy'
-                    : `Spire Floor ${profile.floor} (-2 ⚡)`}
-                </span>
-              </motion.button>
-              {onStartVanguardTrial && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(onStartVanguardTrial)}
-                  title="Enter a 0-Energy tactical arena battle to test your Party Allies, Dash Flank, Shield Break & Dual-Tech Finishers!"
-                  className="py-2.5 px-3 rounded-xl sp-tab-active border border-amber-400/50 text-xs font-extrabold flex items-center justify-center gap-1 cursor-pointer shrink-0"
-                >
-                  <Swords className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Trial Battle (0⚡)</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setShowVillagePad((v) => !v)}
-                className="px-2.5 py-2.5 rounded-xl sp-badge text-xs font-bold cursor-pointer shrink-0"
-                title="Toggle town walking D-Pad (or tap map / WASD)"
-              >
-                {showVillagePad ? 'Hide' : '🕹️'}
-              </button>
-            </div>
-
-            {showVillagePad && (
-              <div className="flex items-center justify-center gap-2 pt-1">
-                <button type="button" onClick={() => runAction(() => onVillageMove(-1, 0))} className="px-3 py-1.5 rounded-lg sp-badge cursor-pointer">
-                  ←
-                </button>
-                <button type="button" onClick={() => runAction(() => onVillageMove(0, -1))} className="px-3 py-1.5 rounded-lg sp-badge cursor-pointer">
-                  ↑
-                </button>
-                <button type="button" onClick={() => runAction(() => onVillageMove(0, 1))} className="px-3 py-1.5 rounded-lg sp-badge cursor-pointer">
-                  ↓
-                </button>
-                <button type="button" onClick={() => runAction(() => onVillageMove(1, 0))} className="px-3 py-1.5 rounded-lg sp-badge cursor-pointer">
-                  →
-                </button>
-              </div>
-            )}
-
-            {/* NPC Dialogue & Service Panel */}
-            <AnimatePresence>
-              {activeNpc && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="p-3 rounded-2xl sp-tab-active border space-y-2.5"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-extrabold text-white">{activeNpc.name}</span>
-                        <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-bold flex items-center gap-0.5">
-                          <Heart className="w-2.5 h-2.5" /> {activeNpc.rankLabel} ({activeNpc.affinity})
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        {activeNpc.role} • {activeNpc.trustedPerk}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setActiveNpcId(null)}
-                      aria-label="Close NPC dialog"
-                      className="p-1 rounded-lg sp-badge cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <p className="text-[11px] text-slate-200 leading-relaxed italic">“{activeNpc.dialogue.greeting}”</p>
-
-                  <div className="space-y-1.5">
-                    {activeNpc.dialogue.options.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        disabled={busy || opt.disabled}
-                        onClick={() =>
-                          runAction(() =>
-                            opt.craftKey ? onNpcCraft(opt.craftKey, opt.targetItemId) : onNpcTalk(activeNpc.id, opt.id)
-                          )
-                        }
-                        className={`w-full text-left p-2 rounded-xl border transition cursor-pointer disabled:opacity-45 ${
-                          opt.style === 'primary'
-                            ? 'sp-btn-primary'
-                            : opt.style === 'tab'
-                              ? 'sp-inset hover:border-white/30'
-                              : 'sp-badge'
-                        }`}
-                      >
-                        <div className="text-[11px] font-extrabold">{opt.label}</div>
-                        <div className="text-[10px] opacity-80">{opt.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         )}
 
@@ -1068,20 +435,20 @@ export function QuestView({
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="p-2.5 rounded-2xl sp-tab-active border flex items-center justify-between gap-2"
+              className={`p-2.5 rounded-2xl border flex items-center justify-between gap-2 ${RARITY_CLASS[recentDrop.rarity]}`}
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-xl">{recentDrop.icon}</span>
                 <div className="min-w-0">
                   <div className="text-[10px] font-extrabold uppercase">
-                    Loot Drop • {recentDrop.rarity} {recentDrop.id < 0 ? '(In Satchel — Extract to Bank)' : ''}
+                    Loot Drop • {recentDrop.rarity} {recentDrop.autoEquipped ? '• ⚡ Auto-Equipped!' : ''}
                   </div>
                   <div className="text-xs font-extrabold text-white truncate">{recentDrop.name}</div>
-                  <div className="text-[10px] font-mono-num text-slate-300">{formatItemStats(recentDrop)}</div>
+                  <div className="text-[10px] font-mono-num text-slate-200">{formatItemStats(recentDrop)}</div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {recentDrop.id > 0 && (
+                {recentDrop.id > 0 && !recentDrop.equipped && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1117,14 +484,14 @@ export function QuestView({
         )}
       </div>
 
-      {/* 5 RPG Command Sub-Tabs: Party & Mythic | Story & Deeds | Gear | Upgrades | Store */}
+      {/* 5 Idle RPG Management Tabs */}
       <div className="p-1 rounded-2xl sp-inset grid grid-cols-5 gap-1">
         {(
           [
-            { key: 'party', label: 'Party & Mythic', icon: Swords },
-            { key: 'story', label: 'Story & Deeds', icon: ScrollText },
-            { key: 'gear', label: 'Gear', icon: Backpack },
-            { key: 'upgrades', label: 'Upgrades', icon: TrendingUp },
+            { key: 'squad', label: 'Squad & AI', icon: Swords },
+            { key: 'guild', label: 'Guild & AFK', icon: Building2 },
+            { key: 'ascension', label: 'Ascend', icon: Crown },
+            { key: 'armory', label: 'Armory', icon: Backpack },
             { key: 'store', label: 'Store', icon: ShoppingBag },
           ] as const
         ).map((t) => {
@@ -1146,616 +513,302 @@ export function QuestView({
         })}
       </div>
 
-      {/* Sub-Tab 0: Vanguard Party Recruitment & 3-Act Mythic Side Stories */}
-      {subTab === 'party' && (
+      {/* Tab 1: 4-Hero Squad Formation & AI Gambits */}
+      {subTab === 'squad' && idle && (
         <div className="space-y-3">
-          {/* Vanguard Party Squad Recruitment & Active Ally Selector */}
           <div className="glass-card rounded-3xl p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                  🤝 Vanguard Party Squad & Dual-Tech Allies
+                  ⚔️ 4-Hero Vanguard Squad Formation
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Recruited allies fight beside you on the canvas, grant passive auras, and unlock Ally Assists & Dual-Tech Ultimate Finishers!
+                  Front Row absorbs hits & shatters shields; Back Row gains +10% Crit Power. Tap Swap Row to reposition any hero.
                 </p>
               </div>
-              {onStartVanguardTrial && !encounter && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(onStartVanguardTrial)}
-                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shrink-0"
-                >
-                  <Swords className="w-3.5 h-3.5" />
-                  <span>⚔️ Vanguard Trial Arena (0⚡)</span>
-                </button>
-              )}
+              <span className="px-2.5 py-1 rounded-full sp-badge text-[10px] font-mono-num font-bold shrink-0">
+                Hero Lv.{heroStats.heroLevel}
+              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {(game.party?.allies || []).map((ally) => {
-                const canAfford = ally.canRecruitFree || profile.shards >= ally.effectiveShardCost;
-                return (
-                  <div
-                    key={ally.id}
-                    className={`p-3 rounded-2xl border space-y-2 transition ${
-                      ally.active
-                        ? 'sp-tab-active border-sky-400/60 shadow-[0_0_16px_rgba(56,189,248,0.18)]'
-                        : 'sp-inset border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
-                          {ally.icon}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-extrabold text-white truncate">{ally.name}</span>
-                            {ally.active && (
-                              <span className="px-1.5 py-0.5 rounded bg-sky-500/25 border border-sky-400/50 text-sky-200 text-[9px] font-extrabold">
-                                ACTIVE
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-sky-300 font-bold truncate">{ally.role}</div>
+              {idle.squadHeroes.map((h) => (
+                <div
+                  key={h.id}
+                  className={`p-3 rounded-2xl border space-y-2 ${
+                    h.row === 'front' ? 'sp-tab-active border-sky-400/45' : 'sp-inset border-white/15'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
+                        {h.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-extrabold text-white truncate">{h.name}</span>
+                          <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-extrabold uppercase">
+                            {h.row === 'front' ? 'Front Row' : 'Back Row'}
+                          </span>
                         </div>
+                        <div className="text-[10px] text-sky-300 font-bold truncate">{h.role}</div>
                       </div>
-
+                    </div>
+                    {onIdleConfig && (
                       <button
                         type="button"
-                        disabled={busy || ally.active || (!ally.recruited && !canAfford)}
-                        onClick={() => onManagePartyAlly && runAction(() => onManagePartyAlly(ally.id))}
-                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer shrink-0 ${
-                          ally.active
-                            ? 'sp-badge text-emerald-300 cursor-default'
-                            : ally.recruited
-                              ? 'sp-btn-primary'
-                              : canAfford
-                                ? 'sp-btn-primary'
-                                : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
+                        disabled={busy}
+                        onClick={() => runAction(() => onIdleConfig({ swapHeroRow: h.id }))}
+                        className="px-2 py-1 rounded-lg sp-badge text-[10px] font-bold hover:text-white cursor-pointer shrink-0"
+                      >
+                        Swap Row
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-[10px] font-mono-num text-slate-300">
+                    ⚔️ {h.effectiveAtk} ATK • ❤️ {h.effectiveHp} HP
+                  </div>
+                  <div className="p-2 rounded-xl sp-inset text-[10px] text-slate-200">
+                    <span className="font-extrabold text-amber-300">Auto-Skill [{h.skillName}]:</span> {h.skillDesc}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* AI Gambit Rules Configurator */}
+          <div className="glass-card rounded-3xl p-4 space-y-3">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5" /> Squad Auto-Skill AI Gambits
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
+                <div className="font-extrabold text-white">🌟 Squad Finisher Timing</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { ultPolicy: 'auto_ready' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.ultPolicy === 'auto_ready' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    Fire When Ready
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { ultPolicy: 'boss_or_broken' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.ultPolicy === 'boss_or_broken' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    Boss / Broken Only
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
+                <div className="font-extrabold text-white">🎯 Auto-Target Priority</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { focusTarget: 'shield_break' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.focusTarget === 'shield_break' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    🛡️ Shatter Shields
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { focusTarget: 'highest_dps' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.focusTarget === 'highest_dps' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    ⚔️ All-Out DPS
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
+                <div className="font-extrabold text-white">🗺️ Stage Progression Rule</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { stageProgression: 'auto_push' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.stageProgression === 'auto_push' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    Auto-Push Next Stage
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { stageProgression: 'farm_stage' } }))}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      idle.gambits.stageProgression === 'farm_stage' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                    }`}
+                  >
+                    Farm Current Stage
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
+                <div className="font-extrabold text-white">✨ Seraphina Heal Threshold</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {([25, 45, 70] as const).map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { healThreshold: pct } }))}
+                      className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold font-mono-num cursor-pointer ${
+                        idle.gambits.healThreshold === pct ? 'sp-btn-primary' : 'sp-badge text-slate-400'
+                      }`}
+                    >
+                      &lt;{pct}% HP
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Idle Guild Professions & 12h Offline AFK Chest */}
+      {subTab === 'guild' && idle && (
+        <div className="space-y-3">
+          {/* 12h AFK Loot Chest Card */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5 border border-amber-400/40">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Gift className="w-4 h-4" /> 12-Hour Offline AFK Loot Chest
+                </h3>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Accumulates Shards, Focus Coins, Hero XP & scaled Gear Rolls 24/7 while you study, work, or sleep (cap 12h).
+                </p>
+              </div>
+              {onIdleClaimAfk && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => runAction(onIdleClaimAfk)}
+                  className="px-3.5 py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer shrink-0"
+                >
+                  🎁 Collect Chest
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-center font-mono-num text-xs">
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-extrabold text-white">{formatDurationCompact(idle.afkChest.accumulatedSec)}</div>
+                <div className="text-[9px] text-slate-400">Stored / 12h</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-extrabold text-sky-300">+{idle.afkChest.shards}✦</div>
+                <div className="text-[9px] text-slate-400">Shards</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-extrabold text-amber-300">+{idle.afkChest.coins}🪙</div>
+                <div className="text-[9px] text-slate-400">Coins</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-extrabold text-emerald-300">+{idle.afkChest.xp} XP</div>
+                <div className="text-[9px] text-slate-400">{Math.max(1, idle.afkChest.itemsRolled)} Gear</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Upgradable 24/7 Guild Facilities */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
+                🏛️ 24/7 Idle Guild Professions
+              </h3>
+              <span className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards} Shards</span>
+            </div>
+
+            <div className="space-y-2">
+              {idle.professions.map((p) => {
+                const canAfford = profile.shards >= p.upgradeCost;
+                return (
+                  <div key={p.id} className="p-3 rounded-2xl sp-inset flex items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-10 h-10 rounded-xl sp-badge flex items-center justify-center text-xl shrink-0">
+                        {p.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-white">
+                          {p.name}{' '}
+                          <span className="font-mono-num text-[10px] text-sky-300">Lv.{p.level}</span>
+                        </div>
+                        <div className="text-[10px] font-mono-num text-emerald-300 font-bold">
+                          +{p.ratePerHr} {p.resourceLabel} • {p.squadPerk}
+                        </div>
+                      </div>
+                    </div>
+                    {onIdleUpgradeProf && (
+                      <button
+                        type="button"
+                        disabled={busy || !canAfford}
+                        onClick={() => runAction(() => onIdleUpgradeProf(p.id))}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold font-mono-num cursor-pointer shrink-0 ${
+                          canAfford ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
                         }`}
                       >
-                        {ally.active
-                          ? '✓ In Vanguard'
-                          : ally.recruited
-                            ? 'Deploy Ally'
-                            : ally.effectiveShardCost === 0
-                              ? 'Recruit (Free)'
-                              : `Recruit (${ally.effectiveShardCost}✦)`}
+                        Upgrade ✦{p.upgradeCost}
                       </button>
-                    </div>
-
-                    <p className="text-[10px] text-slate-300 leading-relaxed">{ally.lore}</p>
-
-                    <div className="p-2 rounded-xl sp-inset space-y-1 text-[10px]">
-                      <div className="text-emerald-300 font-bold">✨ Aura: {ally.passiveLabel}</div>
-                      <div className="text-slate-200">
-                        <span className="font-extrabold text-sky-300">
-                          {ally.skillIcon} Assist [{ally.skillName}]:
-                        </span>{' '}
-                        {ally.skillDesc}
-                      </div>
-                      <div className="text-amber-200">
-                        <span className="font-extrabold text-amber-300">
-                          🌟 Dual-Tech [{ally.finisherName}]:
-                        </span>{' '}
-                        {ally.finisherDesc}
-                      </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* 3-Act Branching Mythic Side Stories & Mythic Relics */}
-          <div className="glass-card rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300">
-                  👑 Mythic Side Stories & Relics ({(story.mythicSideStories || []).filter((s) => s.completed).length}/
-                  {(story.mythicSideStories || []).length} Forged)
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Follow 3-Act heroic side stories and make narrative choices to forge guaranteed [MYTHIC] Relics with unique combat passives!
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {(story.mythicSideStories || []).map((ms) => (
-                <div
-                  key={ms.id}
-                  className={`p-3.5 rounded-2xl border space-y-2.5 ${
-                    ms.completed
-                      ? 'border-rose-500/60 bg-rose-500/10'
-                      : 'sp-inset border-white/15'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
-                        {ms.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-extrabold text-white">{ms.title}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-rose-500/20 border border-rose-400/50 text-rose-200">
-                            {ms.completed ? '✓ Mythic Forged' : `Act ${ms.actIndex + 1} of ${ms.totalActs}`}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {ms.subtitle} • With {ms.npcName}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Mythic Relic Reward Preview Banner */}
-                  <div className="p-2.5 rounded-xl border border-rose-500/50 bg-rose-950/35 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-lg shrink-0">{ms.mythicReward.icon}</span>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-extrabold text-rose-200 truncate">
-                          [MYTHIC {ms.mythicReward.slot.toUpperCase()}] {ms.mythicReward.name}
-                        </div>
-                        <div className="text-[10px] font-mono-num text-amber-200">
-                          +{ms.mythicReward.atk} ATK • +{ms.mythicReward.def} DEF • +{ms.mythicReward.hp} HP • +
-                          {ms.mythicReward.luck} LUCK • +{ms.mythicReward.crit}% CRIT
-                        </div>
-                        <div className="text-[10px] text-slate-300 italic">{ms.mythicReward.passiveDesc}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Current Act Narrative & Interactive Choices */}
-                  {ms.currentAct && !ms.completed ? (
-                    <div className="p-2.5 rounded-xl sp-inset space-y-2 border border-white/10">
-                      <div className="text-[11px] font-extrabold text-amber-300">{ms.currentAct.title}</div>
-                      <p className="text-[11px] text-slate-200 leading-relaxed">{ms.currentAct.narrative}</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                        {ms.currentAct.choices.map((ch) => (
-                          <button
-                            key={ch.id}
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              onAdvanceMythicStory && runAction(() => onAdvanceMythicStory(ms.id, ch.id))
-                            }
-                            className="text-left p-2.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer transition hover:opacity-95"
-                          >
-                            <div>⚔️ {ch.label}</div>
-                            <div className="text-[9px] opacity-80 font-mono-num mt-0.5">
-                              Reward: +{ch.shards}✦ Shards • +{ch.xp} Hero XP
-                              {ms.actIndex + 1 === ms.totalActs ? ' • 👑 Forges Mythic Relic!' : ''}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[11px] font-bold text-emerald-300">
-                      ✓ All 3 Acts completed — {ms.mythicReward.name} has been forged into your armory!
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sub-Tab 1: Story Chronicle, Heroic Deeds, Quests, NPCs & Lore */}
-      {subTab === 'story' && (
-        <div className="space-y-3">
-          <div className="glass-card rounded-3xl p-4 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                📖 Chronicle: Chapter {currentChap.chapter} — {currentChap.title}
-              </h3>
-              <span className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-bold">
-                {currentChap.bossDefeated ? 'Boss Defeated!' : `Floor ${currentChap.floorReq}`}
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">{currentChap.synopsis}</p>
-            <div className="p-2.5 rounded-xl sp-inset text-[11px] font-bold text-white flex items-center justify-between gap-2">
-              <span>🎯 {currentChap.objective}</span>
-              <span className="font-mono-num text-[10px] text-slate-400">
-                +{currentChap.rewards.coins}🪙 +{currentChap.rewards.shards}✦
-              </span>
-            </div>
-          </div>
-
-          {/* Heroic Deeds & Permanent Combat Feats Ledger */}
-          {story.heroicDeeds && story.heroicDeeds.length > 0 && (
-            <div className="glass-card rounded-3xl p-4 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
-                  🏅 Heroic Deeds & Titles ({story.heroicDeeds.filter((d) => d.claimed).length}/{story.heroicDeeds.length})
-                </h3>
-                <span className="text-[10px] text-slate-400">Permanent Stat Perks + Heroic Titles</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {story.heroicDeeds.map((deed) => (
-                  <div
-                    key={deed.id}
-                    className={`p-2.5 rounded-2xl border space-y-1.5 ${
-                      deed.claimed
-                        ? 'border-emerald-500/40 bg-emerald-500/10'
-                        : deed.completed
-                          ? 'border-amber-400/70 bg-amber-500/15'
-                          : 'sp-inset border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-base">{deed.icon}</span>
-                        <span className="text-xs font-extrabold text-white truncate">{deed.title}</span>
-                      </div>
-                      <span className="font-mono-num text-[10px] font-extrabold sp-badge px-2 py-0.5 rounded-full shrink-0">
-                        {deed.progress}/{deed.target}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-slate-300 leading-snug">{deed.desc}</div>
-                    <div className="flex items-center justify-between gap-2 pt-0.5">
-                      <span className="text-[9px] font-bold text-amber-200">{deed.perkLabel}</span>
-                      {deed.claimed ? (
-                        <span className="text-[10px] font-extrabold text-emerald-300 shrink-0">✓ Claimed</span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={busy || !deed.completed}
-                          onClick={() => onClaimHeroicDeed && runAction(() => onClaimHeroicDeed(deed.id))}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer shrink-0 ${
-                            deed.completed
-                              ? 'sp-btn-primary'
-                              : 'sp-badge opacity-45 cursor-not-allowed'
-                          }`}
-                        >
-                          {deed.completed ? `Claim +${deed.reward.shards}✦` : 'In Progress'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
+          {/* Sanctuary Hero Training Upgrades */}
           <div className="glass-card rounded-3xl p-4 space-y-2.5">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-              📌 Active Quests & Bounties ({story.quests.filter((q) => !q.claimed).length})
+              🏋️ Squad Sanctuary Mastery Training
             </h3>
-            {story.quests.filter((q) => !q.claimed).length === 0 ? (
-              <div className="p-3 rounded-2xl sp-inset text-xs text-slate-400">
-                Talk to Bram, Lyra, or Pip in Oakhaven to pick up Side Quests and Notice Board Bounties!
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {story.quests
-                  .filter((q) => !q.claimed)
-                  .map((q) => (
-                    <div key={q.id} className="p-2.5 rounded-2xl sp-inset flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">{q.title}</div>
-                        <div className="text-[10px] text-slate-400">{q.desc}</div>
-                      </div>
-                      <span className="font-mono-num text-[11px] font-extrabold sp-badge px-2 py-0.5 rounded-full shrink-0">
-                        {q.progress}/{q.target}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-
-          <div className="glass-card rounded-3xl p-4 space-y-2">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-              📜 Lore Codex ({story.loreCodex.filter((l) => l.unlocked).length}/{story.loreCodex.length})
-            </h3>
-            <div className="space-y-1.5 max-h-56 overflow-y-auto glass-scroll pr-1">
-              {story.loreCodex.map((l) => (
-                <div key={l.id} className={`p-2.5 rounded-2xl sp-inset ${l.unlocked ? '' : 'opacity-45'}`}>
-                  <div className="text-xs font-extrabold text-white">{l.unlocked ? l.title : '🔒 Undiscovered Tablet'}</div>
-                  <div className="text-[10px] text-slate-300 mt-0.5 leading-relaxed">
-                    {l.unlocked ? l.text : 'Explore the Pixel Spire and solve Runic Riddles to uncover this chronicle.'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sub-Tab 2: Gear & Bag */}
-      {subTab === 'gear' && (
-        <div className="glass-card rounded-3xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-              Equipped Gear (Forge Great-Success {greatForgeChance}% 🍀)
-            </h3>
-            <span className="font-mono-num text-[11px] font-bold text-slate-400">
-              ✦ {profile.shards} • 🪙 {user.coins}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {SLOT_LABELS.map(({ slot, label, emptyIcon }) => {
-              const eq = equippedBySlot[slot];
-              if (!eq) {
-                return (
-                  <div key={slot} className="p-3 rounded-2xl sp-inset flex items-center gap-2.5 opacity-60">
-                    <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg">{emptyIcon}</span>
-                    <div>
-                      <div className="text-[10px] uppercase font-bold text-slate-400">{label}</div>
-                      <div className="text-xs text-slate-400">Empty slot</div>
-                    </div>
-                  </div>
-                );
-              }
-              const shardCost = 15 + eq.upgradeLevel * 12;
-              const coinCost = 10 + eq.upgradeLevel * 8;
-              const maxed = eq.upgradeLevel >= 10;
-              const canForge = !maxed && profile.shards >= shardCost && user.coins >= coinCost;
-              return (
-                <div key={slot} className={`p-3 rounded-2xl sp-inset border ${RARITY_CLASS[eq.rarity]} space-y-2`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xl shrink-0">{eq.icon}</span>
-                      <div className="min-w-0">
-                        <div className="text-xs font-extrabold text-white truncate">
-                          {eq.name} {eq.upgradeLevel > 0 ? `+${eq.upgradeLevel}` : ''}
-                        </div>
-                        <div className="text-[10px] uppercase font-bold">
-                          {label} • {eq.rarity}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy || !canForge}
-                      onClick={() => runAction(() => onUpgradeItem(eq.id))}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer shrink-0 ${
-                        canForge ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
-                      }`}
-                    >
-                      <Hammer className="w-3 h-3" />
-                      <span>{maxed ? 'MAX' : `✦${shardCost} 🪙${coinCost}`}</span>
-                    </button>
-                  </div>
-                  <div className="text-[10px] font-mono-num text-slate-300">{formatItemStats(eq)}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="pt-2 border-t border-white/10 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-extrabold text-slate-300">Backpack ({unequippedItems.length}/40)</span>
-              {unequippedItems.some((i) => i.rarity === 'common') && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onSalvageItem({ maxRarity: 'common' }))}
-                  className="px-2.5 py-1 rounded-lg sp-badge text-[10px] font-bold hover:opacity-90 cursor-pointer"
-                >
-                  ♻️ Salvage Commons
-                </button>
-              )}
-            </div>
-
-            {unequippedItems.length === 0 ? (
-              <div className="p-3 rounded-2xl sp-inset text-center text-xs text-slate-400">
-                Delve into the Pixel Spire or study 20m+ blocks to extract new gear!
-              </div>
-            ) : (
-              <div className="space-y-1.5 max-h-64 overflow-y-auto glass-scroll pr-1">
-                {unequippedItems.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-2 p-2.5 rounded-2xl sp-inset">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-8 h-8 rounded-xl sp-badge flex items-center justify-center text-base shrink-0">
-                        {item.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-white truncate">{item.name}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${RARITY_CLASS[item.rarity]}`}>
-                            {item.rarity}
-                          </span>
-                        </div>
-                        <div className="text-[10px] font-mono-num text-slate-400 truncate">
-                          {item.slot.toUpperCase()} • {formatItemStats(item)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => runAction(() => onEquipItem(item.id))}
-                        className="px-2.5 py-1 rounded-lg sp-tab-active border text-[10px] font-extrabold cursor-pointer"
-                      >
-                        Equip
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => runAction(() => onSalvageItem({ itemId: item.id }))}
-                        className="px-2 py-1 rounded-lg sp-badge text-[10px] font-bold cursor-pointer hover:text-rose-400"
-                      >
-                        <span className="flex items-center gap-0.5 font-mono-num">
-                          <Trash2 className="w-3 h-3" /> +{item.salvageValue}✦
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Sub-Tab 3: Study Coupling, Intuition, Luck Odds & Sanctuary Upgrades */}
-      {subTab === 'upgrades' && (
-        <div className="space-y-3">
-          <div className="glass-card rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5" />
-                Powered by Your Studying
-              </h3>
-              <button
-                type="button"
-                onClick={onGoToFocus}
-                className="px-2.5 py-1 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
-              >
-                Study to Recharge ⚡
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="p-2.5 rounded-2xl sp-inset">
-                <div className="text-slate-400">Scholar Lv.{heroStats.studyBonuses.scholarLevel}</div>
-                <div className="font-mono-num font-extrabold text-white mt-0.5">
-                  +{heroStats.studyBonuses.studyAtk} ATK • +{heroStats.studyBonuses.studyHp} HP
-                </div>
-              </div>
-              <div className="p-2.5 rounded-2xl sp-inset">
-                <div className="text-slate-400">Streak ({heroStats.studyBonuses.streakDays}d)</div>
-                <div className="font-mono-num font-extrabold text-white mt-0.5">
-                  +{heroStats.studyBonuses.streakLuck} LUCK Fortune
-                </div>
-              </div>
-              <div className="p-2.5 rounded-2xl sp-inset">
-                <div className="text-slate-400">Purity ({heroStats.studyBonuses.avgPurity}%) Intuition</div>
-                <div className="font-mono-num font-extrabold text-white mt-0.5">
-                  👁️ {heroStats.intuition} Sense • +{heroStats.studyBonuses.purityCrit}% Crit
-                </div>
-              </div>
-              <div className="p-2.5 rounded-2xl sp-inset">
-                <div className="text-slate-400">Daily Goal Lantern</div>
-                <div className="font-mono-num font-extrabold text-white mt-0.5">
-                  {heroStats.studyBonuses.focusFever
-                    ? '🔥 Fever (+20% ATK, +1 Vision)'
-                    : `${heroStats.studyBonuses.todayMins}/${heroStats.studyBonuses.dailyGoalMins}m to Fever`}
-                </div>
-              </div>
-            </div>
-
-            <div className="p-2.5 rounded-2xl sp-inset space-y-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-extrabold text-white">🍀 Live Drop Odds ({heroStats.luck} Total Luck)</span>
-                <span className="font-mono-num text-[10px] text-slate-400">
-                  Vision: {heroStats.visionRadius} tiles
-                </span>
-              </div>
-              <div className="grid grid-cols-5 gap-1 text-center font-mono-num text-[10px]">
-                {(
-                  [
-                    ['common', 'Common'],
-                    ['uncommon', 'Uncom'],
-                    ['rare', 'Rare'],
-                    ['epic', 'Epic'],
-                    ['legendary', 'Legend'],
-                  ] as const
-                ).map(([k, lbl]) => (
-                  <div key={k} className={`p-1.5 rounded-lg border ${RARITY_CLASS[k]}`}>
-                    <div className="font-extrabold">{heroStats.dropOdds[k]}%</div>
-                    <div className="text-[9px] opacity-80">{lbl}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Class Specialization & Companion Evolution */}
-            {(heroStats.specializations || heroStats.companionEvolution) && (
-              <div className="p-3 rounded-2xl sp-inset space-y-2.5 border border-white/10">
-                {heroStats.companionEvolution && (
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-slate-300">🦉 Companion Evolution</span>
-                    <span className="px-2 py-0.5 rounded-full sp-badge font-bold text-white">
-                      {heroStats.companionEvolution.label}
-                    </span>
-                  </div>
-                )}
-                {heroStats.specializations && heroStats.specializations.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] font-extrabold text-white">🌟 Class Mastery Specialization</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {heroStats.specializations.map((sp) => {
-                        const active = heroStats.specialization === sp.key;
-                        return (
-                          <button
-                            key={sp.key}
-                            type="button"
-                            disabled={busy || !onSelectSpecialization}
-                            onClick={() => onSelectSpecialization && runAction(() => onSelectSpecialization(sp.key))}
-                            className={`text-left p-2.5 rounded-xl border transition cursor-pointer ${
-                              active ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
-                            }`}
-                          >
-                            <div className="text-[11px] font-extrabold text-white">
-                              {active ? '✓ ' : ''}{sp.name}
-                            </div>
-                            <div className="text-[9px] text-slate-300 leading-snug mt-0.5">{sp.perk}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="glass-card rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                Sanctuary Permanent Upgrades
-              </h3>
-              <span className="sp-badge px-2.5 py-0.5 rounded-full text-[11px] font-mono-num font-bold">
-                ✦ {profile.shards} Shards
-              </span>
-            </div>
-
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(
                 [
-                  { key: 'atk', name: 'Might Mastery', effect: '+3 Hero ATK per rank', icon: '⚔️' },
-                  { key: 'vit', name: 'Iron Vitality', effect: '+20 Max HP & +2 DEF per rank', icon: '❤️' },
-                  { key: 'luck', name: 'Fortune Shrine (Luck)', effect: '+4 LUCK per rank (boosts loot & Intuition)', icon: '🍀' },
-                  { key: 'crit', name: 'Focus Precision', effect: '+2% Critical Strike Chance per rank', icon: '🎯' },
+                  { key: 'atk', name: 'Might Mastery', effect: '+3 Squad Base ATK', icon: '⚔️' },
+                  { key: 'vit', name: 'Iron Vitality', effect: '+20 Max HP & +2 DEF', icon: '❤️' },
+                  { key: 'luck', name: 'Fortune Shrine', effect: '+4 LUCK (Mythic Odds)', icon: '🍀' },
+                  { key: 'crit', name: 'Focus Precision', effect: '+2% Critical Strike', icon: '🎯' },
                 ] as const
               ).map((u) => {
                 const rank = profile.upgrades[u.key];
                 const cost = profile.upgradeCosts[u.key];
-                const maxed = rank >= 20;
-                const canUpgrade = !maxed && profile.shards >= cost;
+                const canUpgrade = rank < 20 && profile.shards >= cost;
                 return (
-                  <div key={u.key} className="flex items-center justify-between gap-2.5 p-3 rounded-2xl sp-inset">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
-                        {u.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="text-xs font-extrabold text-white">
-                          {u.name} <span className="font-mono-num text-[10px] opacity-75">Rank {rank}/20</span>
-                        </div>
-                        <div className="text-[10px] text-slate-400">{u.effect}</div>
+                  <div key={u.key} className="p-2.5 rounded-2xl sp-inset flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-white">
+                        {u.icon} {u.name} <span className="font-mono-num text-[10px] opacity-75">R{rank}/20</span>
                       </div>
+                      <div className="text-[10px] text-slate-400">{u.effect}</div>
                     </div>
                     <button
                       type="button"
                       disabled={busy || !canUpgrade}
                       onClick={() => runAction(() => onUpgradeStat(u.key))}
-                      className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-extrabold font-mono-num cursor-pointer ${
-                        canUpgrade ? 'sp-btn-primary' : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
+                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold font-mono-num cursor-pointer shrink-0 ${
+                        canUpgrade ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
                       }`}
                     >
-                      {maxed ? 'MAX' : `✦ ${cost}`}
+                      ✦{cost}
                     </button>
                   </div>
                 );
@@ -1765,7 +818,285 @@ export function QuestView({
         </div>
       )}
 
-      {/* Sub-Tab 4: In-Quest Store */}
+      {/* Tab 3: Celestial Ascension Rebirth & Mythic Forge Milestones */}
+      {subTab === 'ascension' && idle && (
+        <div className="space-y-3">
+          {/* Ascension Rebirth Portal */}
+          <div className="glass-card rounded-3xl p-4 space-y-3 border border-rose-500/50">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300 flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-amber-400" /> Celestial Ascension & Rebirth (Ascension #{idle.ascensions})
+                </h3>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Reset Stage progress back to Stage 1-1 to awaken permanent{' '}
+                  <strong className="text-amber-300">Celestial Embers (🔥)</strong> & +35% Multiplicative Squad Power! Keeps all Gear, Relics & Guild Levels.
+                </p>
+              </div>
+              {onIdleAscend && (
+                <button
+                  type="button"
+                  disabled={busy || !idle.canAscend}
+                  onClick={() => runAction(onIdleAscend)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-extrabold cursor-pointer shrink-0 ${
+                    idle.canAscend
+                      ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white border border-amber-300'
+                      : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  {idle.canAscend ? `🔥 Ascend (+${idle.pendingEmbers} Embers)` : 'Need Stage 2 or 4 Waves'}
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {idle.ascensionRelics.map((rel) => {
+                const canAfford = idle.celestialEmbers >= rel.nextCost;
+                return (
+                  <div key={rel.id} className="p-3 rounded-2xl sp-inset border border-white/10 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-white">
+                        {rel.icon} {rel.name}{' '}
+                        <span className="font-mono-num text-[10px] text-amber-300">Rank {rel.rank}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-300 mt-0.5">{rel.effectLabel}</div>
+                    </div>
+                    {onIdleUpgradeRelic && (
+                      <button
+                        type="button"
+                        disabled={busy || !canAfford}
+                        onClick={() => runAction(() => onIdleUpgradeRelic(rel.id))}
+                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold font-mono-num cursor-pointer shrink-0 ${
+                          canAfford ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
+                        }`}
+                      >
+                        🔥 {rel.nextCost}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Aethelgard Mythic Forge Milestones */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300">
+              👑 Aethelgard Mythic Relic Milestones ({idle.mythicMilestones.filter((m) => m.claimed).length}/
+              {idle.mythicMilestones.length})
+            </h3>
+            <div className="space-y-2">
+              {idle.mythicMilestones.map((m) => (
+                <div
+                  key={m.id}
+                  className={`p-3 rounded-2xl border space-y-2 ${
+                    m.claimed
+                      ? 'border-emerald-500/45 bg-emerald-500/10'
+                      : m.unlocked
+                        ? 'border-rose-400/70 bg-rose-500/15'
+                        : 'sp-inset border-white/10'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-base">{m.icon}</span>
+                        <span className="text-xs font-extrabold text-white">{m.title}</span>
+                        <span className="px-2 py-0.5 rounded-full sp-badge text-[9px] font-mono-num font-bold">
+                          {m.progress}/{m.target}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-300 mt-0.5">{m.desc}</div>
+                    </div>
+
+                    {m.claimed ? (
+                      <span className="text-[10px] font-extrabold text-emerald-300 shrink-0">✓ Forged</span>
+                    ) : (
+                      onIdleForgeMythic && (
+                        <button
+                          type="button"
+                          disabled={busy || !m.unlocked}
+                          onClick={() => runAction(() => onIdleForgeMythic(m.id))}
+                          className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold cursor-pointer shrink-0 ${
+                            m.unlocked ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
+                          }`}
+                        >
+                          {m.unlocked ? '👑 Forge Mythic' : 'In Progress'}
+                        </button>
+                      )
+                    )}
+                  </div>
+                  <div className="p-2 rounded-xl sp-inset text-[10px] text-rose-200">
+                    <strong>[{m.mythicReward.rarity.toUpperCase()} {m.mythicReward.slot.toUpperCase()}] {m.mythicReward.name}:</strong>{' '}
+                    +{m.mythicReward.atk} ATK • +{m.mythicReward.def} DEF • +{m.mythicReward.hp} HP • {m.mythicReward.passiveDesc}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Armory, Gear Power Score & Class Specialization */}
+      {subTab === 'armory' && (
+        <div className="space-y-3">
+          <div className="glass-card rounded-3xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
+                Equipped Squad Relics (Great-Success {greatForgeChance}% 🍀)
+              </h3>
+              <span className="font-mono-num text-[11px] font-bold text-slate-400">
+                ✦ {profile.shards} • 🪙 {user.coins}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {SLOT_LABELS.map(({ slot, label, emptyIcon }) => {
+                const eq = equippedBySlot[slot];
+                if (!eq) {
+                  return (
+                    <div key={slot} className="p-3 rounded-2xl sp-inset flex items-center gap-2.5 opacity-60">
+                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg">{emptyIcon}</span>
+                      <div>
+                        <div className="text-[10px] uppercase font-bold text-slate-400">{label}</div>
+                        <div className="text-xs text-slate-400">Empty slot</div>
+                      </div>
+                    </div>
+                  );
+                }
+                const shardCost = 15 + eq.upgradeLevel * 12;
+                const coinCost = 10 + eq.upgradeLevel * 8;
+                const maxed = eq.upgradeLevel >= 10;
+                const canForge = !maxed && profile.shards >= shardCost && user.coins >= coinCost;
+                return (
+                  <div key={slot} className={`p-3 rounded-2xl sp-inset border ${RARITY_CLASS[eq.rarity]} space-y-2`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xl shrink-0">{eq.icon}</span>
+                        <div className="min-w-0">
+                          <div className="text-xs font-extrabold text-white truncate">
+                            {eq.name} {eq.upgradeLevel > 0 ? `+${eq.upgradeLevel}` : ''}
+                          </div>
+                          <div className="text-[10px] uppercase font-bold">
+                            {label} • {eq.rarity} • ⚡{eq.power ?? 0} PWR
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy || !canForge}
+                        onClick={() => runAction(() => onUpgradeItem(eq.id))}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer shrink-0 ${
+                          canForge ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
+                        }`}
+                      >
+                        <Hammer className="w-3 h-3" />
+                        <span>{maxed ? 'MAX' : `✦${shardCost} 🪙${coinCost}`}</span>
+                      </button>
+                    </div>
+                    <div className="text-[10px] font-mono-num text-slate-300">{formatItemStats(eq)}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {heroStats.specializations && heroStats.specializations.length > 0 && onSelectSpecialization && (
+              <div className="p-3 rounded-2xl sp-inset space-y-2 border border-white/10">
+                <div className="text-[11px] font-extrabold text-white">🌟 Commander Mastery Specialization</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {heroStats.specializations.map((sp) => {
+                    const active = heroStats.specialization === sp.key;
+                    return (
+                      <button
+                        key={sp.key}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => runAction(() => onSelectSpecialization(sp.key))}
+                        className={`text-left p-2.5 rounded-xl border transition cursor-pointer ${
+                          active ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
+                        }`}
+                      >
+                        <div className="text-[11px] font-extrabold text-white">
+                          {active ? '✓ ' : ''}
+                          {sp.name}
+                        </div>
+                        <div className="text-[9px] text-slate-300 leading-snug mt-0.5">{sp.perk}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-white/10 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-slate-300">Backpack ({unequippedItems.length}/40)</span>
+                {unequippedItems.some((i) => i.rarity === 'common') && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(() => onSalvageItem({ maxRarity: 'common' }))}
+                    className="px-2.5 py-1 rounded-lg sp-badge text-[10px] font-bold hover:opacity-90 cursor-pointer"
+                  >
+                    ♻️ Salvage Commons
+                  </button>
+                )}
+              </div>
+
+              {unequippedItems.length === 0 ? (
+                <div className="p-3 rounded-2xl sp-inset text-center text-xs text-slate-400">
+                  Auto-Equip & Auto-Salvage keep your armory optimized while your 4-Hero Squad battles 24/7!
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto glass-scroll pr-1">
+                  {unequippedItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-2 p-2.5 rounded-2xl sp-inset">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-8 h-8 rounded-xl sp-badge flex items-center justify-center text-base shrink-0">
+                          {item.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-white truncate">{item.name}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${RARITY_CLASS[item.rarity]}`}>
+                              {item.rarity}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-mono-num text-slate-400 truncate">
+                            {item.slot.toUpperCase()} • ⚡{item.power ?? 0} PWR • {formatItemStats(item)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => runAction(() => onEquipItem(item.id))}
+                          className="px-2.5 py-1 rounded-lg sp-tab-active border text-[10px] font-extrabold cursor-pointer"
+                        >
+                          Equip
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => runAction(() => onSalvageItem({ itemId: item.id }))}
+                          className="px-2 py-1 rounded-lg sp-badge text-[10px] font-bold cursor-pointer hover:text-rose-400"
+                        >
+                          <span className="flex items-center gap-0.5 font-mono-num">
+                            <Trash2 className="w-3 h-3" /> +{item.salvageValue}✦
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 5: Focus Coin Store */}
       {subTab === 'store' && (
         <StorePanel
           user={user}

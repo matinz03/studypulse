@@ -130,6 +130,16 @@ Here is a plain-English breakdown of every feature added to StudyPulse across ea
   - **Heroic Deeds & Titles Ledger + 0-Energy Trial Arena:** Complete 6 tracked combat/story deeds for permanent stat upgrades (`+ATK`, `+DEF`, `+Max HP`, `+LUCK`) and Heroic Titles, and jump into a **`⚔️ Trial Battle (0⚡)`** anytime to test your squad.
 - **Where it lives:** `server/storyData.js`, `server/gameEngine.js`, `server/index.js`, `src/game/PixelCanvas.tsx`, `src/components/QuestView.tsx`, `src/types.ts`
 
+### Step 17 — *Aethelgard: Astral Vanguard* (Hybrid 24/7 + Study-Overdrive Side-Scrolling 4-Hero Idle RPG Reboot)
+- **What it does in simple terms:** Rebooted the Quest tab into a full **24/7 Side-Scrolling 4-Hero Idle Auto-Battler** synced with your focus sessions:
+  - **Side-Scrolling 4-Hero Auto-Battler Canvas:** Watch your 2×2 Squad (*Solarius*, *Kaelis*, *Aurelia*, *Seraphina*) + flying Familiar Pet march continuously across 5 parallax realms (*Verdant Sky-Bastion*, *Chrono-Forge Citadel*, *Prism Frost Caverns*, *Eclipse Void Sanctum*, *Singularity Throne*), breaking Enemy Guard Shields (`🛡️` -> `💥 BROKEN!`) and firing synchronized **Squad Ultimate Cross-Slash Finishers** automatically.
+  - **Hybrid 24/7 + `4.0×` Study Overdrive Loop:** Your squad farms 24/7 (including offline up to a **12-Hour AFK Loot Chest**), and accelerates into **`3.5×–5.0×` Study Overdrive** whenever your **Focus Timer runs** or after answering a **`🎓 Study Overdrive Quiz`** from the 320-question University bank (`+30m 4.0×` speed & `+2` bonus waves).
+  - **4-Hero Formation & AI Gambits:** Swap heroes between Front Vanguard and Back Row (`Swap Row`) and set AI rules (*Squad Finisher Timing*, *Auto-Target Priority*, *Stage Auto-Push vs. Farm*, and *Seraphina Heal Threshold*).
+  - **24/7 Idle Guild Professions:** Upgrade the *Astral Shard Quarry* (`⛏️`), *Starlight Alchemy Guild* (`⚗️`), and *Chrono-Rune Archive* (`📜`) for continuous hourly yields and permanent Squad multipliers.
+  - **Zero-Micromanagement Auto-Equip & Auto-Salvage:** Toggle **Auto-Equip Best Gear** (compares item Power Score automatically) and **Auto-Salvage (`Off | Common | Uncommon | Rare`)** so your inventory manages itself cleanly.
+  - **Celestial Ascension Rebirth & `[MYTHIC]` Forges:** Ascend at Stage 2+ to earn permanent **Celestial Embers (`🔥`)** and rank up 4 multiplicative **Ascension Relics**, plus forge 4 Aethelgard `[MYTHIC]` Relics (*Dawnstar Greatsword*, *Aegis of the Eternal Rift*, *Chrono-Singularity Core*, *Solaria, Mythic Astral Phoenix*).
+- **Where it lives:** `server/storyData.js`, `server/gameEngine.js`, `server/index.js`, `src/game/PixelCanvas.tsx`, `src/components/QuestView.tsx`, `src/types.ts`, `src/App.tsx`
+
 ---
 
 ## 2. Tech Stack & Repository Layout
