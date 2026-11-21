@@ -1227,11 +1227,6 @@ export function grantStudyRewardsToGame(db, user, userStats, durationSec, purity
     focusFeverActive: studyBonuses.focusFever,
   };
 }
-    shardsGained,
-    droppedItem,
-    focusFeverActive: studyBonuses.focusFever,
-  };
-}
 
 function consumeLuckBuffCharge(db, profile) {
   if ((profile.luck_buff_charges || 0) <= 0) return;
