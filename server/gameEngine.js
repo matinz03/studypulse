@@ -761,6 +761,7 @@ export function ensureIdleState(flags, profile, now = Date.now()) {
     totalEmbersEarned: Number(existing.totalEmbersEarned || 0),
     overdriveUntilMs: Number(existing.overdriveUntilMs || 0),
     lastTickAtMs: Number(existing.lastTickAtMs || now),
+    bossWallStuck: Boolean(existing.bossWallStuck),
     gambits: {
       ultPolicy: existing.gambits?.ultPolicy === 'boss_or_broken' ? 'boss_or_broken' : 'auto_ready',
       healThreshold: [25, 45, 70].includes(Number(existing.gambits?.healThreshold))
@@ -768,6 +769,9 @@ export function ensureIdleState(flags, profile, now = Date.now()) {
         : 45,
       stageProgression: existing.gambits?.stageProgression === 'farm_stage' ? 'farm_stage' : 'auto_push',
       focusTarget: existing.gambits?.focusTarget === 'highest_dps' ? 'highest_dps' : 'shield_break',
+      battlePace: ['1x', '2x', 'overdrive'].includes(existing.gambits?.battlePace)
+        ? existing.gambits.battlePace
+        : '1x',
     },
     automation: {
       autoEquipBest: existing.automation?.autoEquipBest !== undefined ? Boolean(existing.automation.autoEquipBest) : true,
@@ -839,6 +843,13 @@ export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
   const coinsPerHr = Math.round((30 + (alchemyLvl - 1) * 18 + idle.stage * 7) * midasMult * (overdriveActive ? 1.5 : 1));
   const xpPerHr = Math.round((120 + (scribesLvl - 1) * 75 + idle.stage * 22) * (overdriveActive ? 1.6 : 1));
 
+  const recommendedPower = Math.round(135 * Math.pow(1.36, Math.max(0, idle.stage - 1)));
+  const bossRecPower = Math.round(165 * Math.pow(1.36, Math.max(0, idle.stage - 1)));
+  const enemyDps = Math.max(
+    9,
+    Math.round(11 * Math.pow(1.32, Math.max(0, idle.stage - 1)) * (idle.wave === 10 ? 1.55 : 0.85 + idle.wave * 0.04))
+  );
+
   return {
     overdriveActive,
     overdriveRemainingSec: overdriveActive ? Math.max(0, Math.round((idle.overdriveUntilMs - now) / 1000)) : 0,
@@ -848,6 +859,10 @@ export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
     effectiveLuck: heroStats.luck + (scribesLvl - 1) * 4 + seekerRank * 15,
     squadPower,
     squadDps,
+    recommendedPower,
+    bossRecPower,
+    enemyDps,
+    bossWallStuck: Boolean(idle.bossWallStuck),
     shardsPerHr,
     coinsPerHr,
     xpPerHr,
@@ -883,9 +898,11 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
   const metrics = computeIdleMetrics(idle, heroStats, now);
   const realm = getIdleRealmForStage(idle.stage);
   const enemyTemplate = IDLE_STAGE_ENEMIES[(idle.stage + idle.wave - 2) % IDLE_STAGE_ENEMIES.length] || IDLE_STAGE_ENEMIES[0];
+  const secondaryTemplate = IDLE_STAGE_ENEMIES[(idle.stage + idle.wave) % IDLE_STAGE_ENEMIES.length] || IDLE_STAGE_ENEMIES[1];
   const isBossWave = idle.wave === 10;
-  const enemyMaxHp = Math.round((42 + idle.stage * 26 + idle.wave * 6) * (isBossWave ? 2.4 : 1));
+  const enemyMaxHp = Math.round((85 + idle.stage * 45 + idle.wave * 10) * (isBossWave ? 2.5 : 1));
   const enemyMaxShields = isBossWave ? 3 : enemyTemplate.shields;
+  const secondaryMaxHp = Math.round(enemyMaxHp * 0.65);
 
   const professions = IDLE_PROFESSIONS.map((p) => {
     const level = Math.max(1, Number(idle.professions[p.id] || 1));
@@ -948,6 +965,15 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
       shields: enemyMaxShields,
       maxShields: enemyMaxShields,
       isBoss: isBossWave,
+    },
+    secondaryEnemy: {
+      key: isBossWave ? 'armor' : secondaryTemplate.key,
+      name: isBossWave ? `${realm.name} Guard` : secondaryTemplate.name,
+      hp: secondaryMaxHp,
+      maxHp: secondaryMaxHp,
+      shields: isBossWave ? 2 : 1,
+      maxShields: isBossWave ? 2 : 1,
+      isBoss: false,
     },
     squadHeroes: IDLE_SQUAD_HEROES.map((h) => ({
       ...h,
@@ -3162,7 +3188,12 @@ export function startVanguardTrial(db, user, userStats) {
 // AETHELGARD: ASTRAL VANGUARD IDLE RPG ENGINE
 // ==========================================
 
-export function processIdleWaveTick(db, user, userStats, { wavesCleared = 1, timerRunning = false, triggerUltimate = false } = {}) {
+export function processIdleWaveTick(
+  db,
+  user,
+  userStats,
+  { wavesCleared = 1, timerRunning = false, triggerUltimate = false, outcome = 'clear' } = {}
+) {
   const profile = ensureGameProfile(db, user.id);
   const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
   const studyBonuses = computeStudyBonuses(user, userStats);
@@ -3175,21 +3206,53 @@ export function processIdleWaveTick(db, user, userStats, { wavesCleared = 1, tim
     idle.overdriveUntilMs = Math.max(idle.overdriveUntilMs || 0, now + 90_000);
   }
 
+  // Boss Wall / Wipe retreat -> drops back to Waves 1-9 farming mode until challenged again
+  if (outcome === 'wipe') {
+    idle.bossWallStuck = true;
+    idle.wave = Math.max(1, idle.wave === 10 ? 9 : idle.wave - 1);
+    idle.gambits.stageProgression = 'farm_stage';
+    idle.lastTickAtMs = now;
+    flags.idle = idle;
+
+    const recoveryShards = 4 + idle.stage;
+    const msg = `💀 BOSS WALL on Stage ${idle.stage}! Enemy counter-assault overwhelmed the Frontline — farming Wave ${idle.wave}/9 (+${recoveryShards}✦). Upgrade Gear, tweak Gambits, or Study for 4× Overdrive, then tap 👑 Challenge Boss!`;
+    db.prepare(`
+      UPDATE game_profiles
+      SET shards = shards + ?, story_flags_json = ?, last_log_json = ?, updated_at = ?
+      WHERE user_id = ?
+    `).run(recoveryShards, JSON.stringify(flags), appendLogs(profile, [msg]), now, user.id);
+
+    const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    return {
+      game: buildGameState(db, refreshedUser, userStats),
+      shardsGained: recoveryShards,
+      events: [{ kind: 'defeat', target: 'hero', text: '💀 BOSS WALL!' }],
+      message: msg,
+    };
+  }
+
   const metrics = computeIdleMetrics(idle, heroStats, now);
   const steps = Math.max(1, Math.min(5, Math.round(Number(wavesCleared || 1))));
   const wasBoss = idle.wave === 10 || steps >= 10;
 
-  let curWave = idle.wave + steps;
+  let curWave = idle.wave;
   let curStage = idle.stage;
   let curMaxStage = idle.maxStage;
   let bossesSlainDelta = 0;
 
-  while (curWave > 10) {
-    curWave -= 10;
-    bossesSlainDelta += 1;
-    curMaxStage = Math.max(curMaxStage, curStage + 1);
-    if (idle.gambits.stageProgression === 'auto_push') {
-      curStage += 1;
+  if (idle.gambits.stageProgression === 'farm_stage' && !triggerUltimate) {
+    // Farm Waves 1-9 safely while prepping for Boss Challenge
+    curWave = ((idle.wave - 1 + steps) % 9) + 1;
+  } else {
+    curWave = idle.wave + steps;
+    while (curWave > 10) {
+      curWave -= 10;
+      bossesSlainDelta += 1;
+      curMaxStage = Math.max(curMaxStage, curStage + 1);
+      idle.bossWallStuck = false;
+      if (idle.gambits.stageProgression === 'auto_push') {
+        curStage += 1;
+      }
     }
   }
 
@@ -3337,11 +3400,22 @@ export function updateIdleConfig(db, user, userStats, payload = {}) {
     }
     if (g.stageProgression === 'auto_push' || g.stageProgression === 'farm_stage') {
       idle.gambits.stageProgression = g.stageProgression;
+      if (g.stageProgression === 'auto_push') idle.bossWallStuck = false;
     }
     if (g.focusTarget === 'shield_break' || g.focusTarget === 'highest_dps') {
       idle.gambits.focusTarget = g.focusTarget;
     }
+    if (g.battlePace === '1x' || g.battlePace === '2x' || g.battlePace === 'overdrive') {
+      idle.gambits.battlePace = g.battlePace;
+    }
     msg = '⚙️ Updated Squad AI Gambit tactics!';
+  }
+
+  if (payload.challengeBoss === true) {
+    idle.wave = 10;
+    idle.bossWallStuck = false;
+    idle.gambits.stageProgression = 'auto_push';
+    msg = `👑 Challenging Stage ${idle.stage} Boss Warden!`;
   }
 
   if (payload.automation && typeof payload.automation === 'object') {

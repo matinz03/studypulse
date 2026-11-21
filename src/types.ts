@@ -544,6 +544,7 @@ export interface IdleGambitsConfig {
   healThreshold: 25 | 45 | 70;
   stageProgression: 'auto_push' | 'farm_stage';
   focusTarget: 'shield_break' | 'highest_dps';
+  battlePace?: '1x' | '2x' | 'overdrive';
 }
 
 export interface IdleAutomationConfig {
@@ -572,6 +573,19 @@ export interface IdleGameState {
     maxShields: number;
     isBoss: boolean;
   };
+  secondaryEnemy?: {
+    key: string;
+    name: string;
+    hp: number;
+    maxHp: number;
+    shields: number;
+    maxShields: number;
+    isBoss: boolean;
+  };
+  recommendedPower?: number;
+  bossRecPower?: number;
+  enemyDps?: number;
+  bossWallStuck?: boolean;
   squadHeroes: IdleSquadHero[];
   formation: {
     front: string[];

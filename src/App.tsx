@@ -1083,14 +1083,19 @@ export function App() {
     }
   }
 
-  const handleIdleTick = (payload?: { wavesCleared?: number; timerRunning?: boolean; triggerUltimate?: boolean }) =>
-    callGameApi('/api/game/idle/tick', payload || {});
+  const handleIdleTick = (payload?: {
+    wavesCleared?: number;
+    timerRunning?: boolean;
+    triggerUltimate?: boolean;
+    outcome?: 'clear' | 'wipe';
+  }) => callGameApi('/api/game/idle/tick', payload || {});
   const handleIdleClaimAfk = () => callGameApi('/api/game/idle/claim-afk');
   const handleIdleConfig = (payload: {
     gambits?: Partial<IdleGambitsConfig>;
     automation?: Partial<IdleAutomationConfig>;
     swapHeroRow?: string;
     stage?: number;
+    challengeBoss?: boolean;
   }) => callGameApi('/api/game/idle/config', payload);
   const handleIdleUpgradeProf = (professionId: string) =>
     callGameApi('/api/game/idle/upgrade-profession', { professionId });

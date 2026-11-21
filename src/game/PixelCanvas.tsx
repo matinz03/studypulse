@@ -17,7 +17,7 @@ interface PixelCanvasProps {
   eventSeq: number;
   focusFever: boolean;
   isStudying?: boolean;
-  onAutoWaveClear?: (opts: { isBossWave: boolean; triggerUltimate: boolean }) => void;
+  onAutoWaveClear?: (opts: { isBossWave: boolean; triggerUltimate: boolean; outcome?: 'clear' | 'wipe' }) => void;
   onTileClick?: (tx: number, ty: number) => void;
 }
 
@@ -73,17 +73,21 @@ export function PixelCanvas({
 
   const idleSimRef = useRef({
     waveKey: '',
-    enemyHp: 60,
-    enemyMaxHp: 60,
-    shields: 2,
-    maxShields: 2,
-    ultCharge: 35,
+    phase: 'marching' as 'marching' | 'combat' | 'wipe_pause',
+    marchFrames: 75,
+    wipePauseFrames: 0,
+    heroes: [
+      { id: 'solarius', hp: 180, maxHp: 180, shield: 0, atb: 20, lunge: 0, hurtFlash: 0, turnCount: 0 },
+      { id: 'kaelis', hp: 140, maxHp: 140, shield: 0, atb: 45, lunge: 0, hurtFlash: 0, turnCount: 0 },
+      { id: 'aurelia', hp: 130, maxHp: 130, shield: 0, atb: 10, lunge: 0, hurtFlash: 0, turnCount: 0 },
+      { id: 'seraphina', hp: 150, maxHp: 150, shield: 0, atb: 30, lunge: 0, hurtFlash: 0, turnCount: 0 },
+    ],
+    enemy1: { hp: 120, maxHp: 120, shields: 2, maxShields: 2, atb: 15, lunge: 0, shake: 0, vulnerable: 0, intent: 'CLEAVE' },
+    enemy2: { hp: 80, maxHp: 80, shields: 1, maxShields: 1, atb: 35, lunge: 0, shake: 0, vulnerable: 0, intent: 'VOLLEY' },
+    ultCharge: 30,
     scrollX: 0,
-    attackTimer: 0,
-    activeStrikerIdx: 0,
-    heroLunges: [0, 0, 0, 0],
+    bossTimerFrames: 1500, // 25s @ 60fps
     ultBeamLife: 0,
-    waveClearCooldown: 0,
     pendingClearDispatched: false,
   });
 
@@ -776,26 +780,71 @@ export function PixelCanvas({
       const fx = fxRef.current;
       const { isStudying: studying, onAutoWaveClear: onClear } = stateRef.current;
       const overdrive = idle.overdriveActive || studying;
-      const speedMult = overdrive ? Math.max(3.5, idle.speedMultiplier || 4.0) : Math.max(1.0, idle.speedMultiplier || 1.0);
+      const battlePace = idle.gambits?.battlePace || '1x';
+      const paceBase = battlePace === 'overdrive' ? 2.4 : battlePace === '2x' ? 1.8 : 1.0;
+      const paceFactor = overdrive ? (battlePace === 'overdrive' ? 3.4 : battlePace === '2x' ? 2.5 : 1.65) : paceBase;
 
-      // Sync wave enemy stats when stage/wave updates
+      // Initialize heroes & wave enemies when stage/wave updates
       const nextKey = `${idle.stage}-${idle.wave}`;
       if (sim.waveKey !== nextKey) {
+        const isFreshStage = !sim.waveKey || !sim.waveKey.startsWith(`${idle.stage}-`);
         sim.waveKey = nextKey;
-        sim.enemyMaxHp = Math.max(40, idle.currentEnemy.maxHp);
-        sim.enemyHp = sim.enemyMaxHp;
-        sim.maxShields = idle.currentEnemy.maxShields;
-        sim.shields = idle.currentEnemy.shields;
+        sim.phase = 'marching';
+        sim.marchFrames = Math.round(78 / Math.min(2.2, paceFactor));
+        sim.wipePauseFrames = 0;
         sim.pendingClearDispatched = false;
-        sim.waveClearCooldown = 14;
+        sim.bossTimerFrames = 1500; // 25s @ 60fps
+
+        // Reconcile Hero maxHP & heal +20% between waves (full heal on new stage or wipe recovery)
+        sim.heroes = sim.heroes.map((h, i) => {
+          const serverHero = idle.squadHeroes.find((sh) => sh.id === h.id) || idle.squadHeroes[i];
+          const maxHp = Math.max(80, serverHero?.effectiveHp || 150);
+          const nextHp = isFreshStage || h.hp <= 0 ? maxHp : Math.min(maxHp, Math.round(h.hp + maxHp * 0.22));
+          return {
+            ...h,
+            hp: nextHp,
+            maxHp,
+            shield: Math.round(h.shield * 0.4),
+            atb: 15 + i * 18,
+            lunge: 0,
+            hurtFlash: 0,
+          };
+        });
+
+        const e1Max = Math.max(80, idle.currentEnemy.maxHp);
+        const e2Max = Math.max(55, idle.secondaryEnemy?.maxHp || Math.round(e1Max * 0.65));
+        sim.enemy1 = {
+          hp: e1Max,
+          maxHp: e1Max,
+          shields: idle.currentEnemy.shields,
+          maxShields: idle.currentEnemy.maxShields,
+          atb: 20,
+          lunge: 0,
+          shake: 0,
+          vulnerable: 0,
+          intent: idle.isBossWave ? 'CLEAVE' : 'STRIKE',
+        };
+        sim.enemy2 = {
+          hp: e2Max,
+          maxHp: e2Max,
+          shields: idle.secondaryEnemy?.shields ?? 1,
+          maxShields: idle.secondaryEnemy?.maxShields ?? 1,
+          atb: 45,
+          lunge: 0,
+          shake: 0,
+          vulnerable: 0,
+          intent: 'VOLLEY',
+        };
       }
 
       const biome = BIOME_PALETTES[idle.realm.key] || BIOME_PALETTES.moss_library;
       ctx!.fillStyle = biome.bg;
       ctx!.fillRect(0, 0, 320, 208);
 
-      // Scroll parallax backdrop & road
-      sim.scrollX = (sim.scrollX + (overdrive ? 2.1 : 0.75)) % 68;
+      // Scroll parallax backdrop & road ONLY during Marching phase
+      if (sim.phase === 'marching') {
+        sim.scrollX = (sim.scrollX + 1.8 * Math.min(2.2, paceFactor)) % 68;
+      }
       const wallOffset = Math.floor(sim.scrollX * 0.5) % 34;
 
       for (let row = 0; row < 7; row++) {
@@ -810,12 +859,10 @@ export function PixelCanvas({
         }
       }
 
-      // Scrolling torches along upper stone wall
       for (let tx = 40; tx <= 340; tx += 120) {
         drawTorch(tx - wallOffset, 56, animFrame, overdrive ? '#38bdf8' : biome.torchGlow);
       }
 
-      // Scrolling cobblestone road floor
       const roadOffset = Math.floor(sim.scrollX) % 32;
       ctx!.fillStyle = biome.floorA;
       ctx!.fillRect(0, 128, 320, 80);
@@ -830,144 +877,335 @@ export function PixelCanvas({
         }
       }
 
-      // Decay lunge & beam effects
-      for (let i = 0; i < 4; i++) {
-        if (sim.heroLunges[i] > 0) sim.heroLunges[i] = Math.max(0, sim.heroLunges[i] - 1.4);
+      // Decay lunge, flash & shake timers
+      for (const h of sim.heroes) {
+        if (h.lunge > 0) h.lunge = Math.max(0, h.lunge - 1.5);
+        if (h.hurtFlash > 0) h.hurtFlash--;
       }
-      if (fx.enemyShake > 0) fx.enemyShake--;
+      if (sim.enemy1.lunge < 0) sim.enemy1.lunge = Math.min(0, sim.enemy1.lunge + 1.5);
+      if (sim.enemy2.lunge < 0) sim.enemy2.lunge = Math.min(0, sim.enemy2.lunge + 1.5);
+      if (sim.enemy1.shake > 0) sim.enemy1.shake--;
+      if (sim.enemy2.shake > 0) sim.enemy2.shake--;
       if (sim.ultBeamLife > 0) sim.ultBeamLife--;
 
-      // Automatic Combat Simulation Loop
-      if (sim.waveClearCooldown > 0) {
-        sim.waveClearCooldown--;
-      } else if (sim.enemyHp > 0) {
-        sim.attackTimer += speedMult;
-        const strikeThreshold = 42;
-        if (sim.attackTimer >= strikeThreshold) {
-          sim.attackTimer = 0;
-          const idx = sim.activeStrikerIdx % 4;
-          sim.activeStrikerIdx++;
-          sim.heroLunges[idx] = 16;
+      // Phase Machine: Marching -> Two-Way ATB Clash -> Victory / Wipe Retreat
+      let marchEnemySlideOffset = 0;
+      if (sim.phase === 'marching') {
+        sim.marchFrames--;
+        marchEnemySlideOffset = Math.max(0, sim.marchFrames * 1.4);
+        if (sim.marchFrames <= 0) {
+          sim.phase = 'combat';
+        }
+      } else if (sim.phase === 'wipe_pause') {
+        sim.wipePauseFrames--;
+        if (sim.wipePauseFrames <= 0) {
+          sim.waveKey = ''; // Force re-sync on next frame
+        }
+      } else if (sim.phase === 'combat') {
+        // Boss Enrage Countdown on Wave 10
+        let enrageMult = 1.0;
+        if (idle.isBossWave) {
+          sim.bossTimerFrames = Math.max(0, sim.bossTimerFrames - paceFactor);
+          if (sim.bossTimerFrames <= 0) {
+            enrageMult = 2.6;
+          }
+        }
 
-          const heroObj = idle.squadHeroes[idx] || idle.squadHeroes[0];
-          const isBack = heroObj?.row === 'back';
-          const shieldBreakCount = idle.gambits.focusTarget === 'shield_break' || idx === 0 ? 1 : 0;
+        const anyHeroAlive = sim.heroes.some((h) => h.hp > 0);
+        const anyEnemyAlive = sim.enemy1.hp > 0 || sim.enemy2.hp > 0;
 
-          if (sim.shields > 0 && shieldBreakCount > 0) {
-            sim.shields = Math.max(0, sim.shields - 1);
-            if (sim.shields === 0) {
-              fx.floaters.push({ x: 222, y: 74, vy: -0.5, text: '💥 BROKEN!', color: '#facc15', life: 42 });
+        if (anyHeroAlive && anyEnemyAlive) {
+          // 1) Advance Living Heroes ATB & Resolve Skills
+          const atbRates: Record<string, number> = { solarius: 0.72, kaelis: 0.96, aurelia: 0.66, seraphina: 0.80 };
+          for (let i = 0; i < sim.heroes.length; i++) {
+            const hero = sim.heroes[i];
+            if (hero.hp <= 0) continue;
+            const rate = atbRates[hero.id] || 0.75;
+            hero.atb += rate * paceFactor;
+            if (hero.atb < 100) continue;
+
+            hero.atb = 0;
+            hero.turnCount++;
+            hero.lunge = 15;
+
+            const heroMeta = idle.squadHeroes.find((sh) => sh.id === hero.id);
+            const isBack = heroMeta?.row === 'back';
+            const lowestHero = sim.heroes
+              .filter((x) => x.hp > 0)
+              .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+            const healThresh = idle.gambits?.healThreshold || 45;
+
+            // Check Ultimate Trigger
+            const ultReady =
+              sim.ultCharge >= 100 &&
+              (idle.gambits.ultPolicy === 'auto_ready' ||
+                idle.isBossWave ||
+                sim.enemy1.shields === 0);
+
+            if (ultReady) {
+              sim.ultCharge = 0;
+              sim.ultBeamLife = 30;
+              const baseDps = idle.squadDps || 35;
+              const ultDmg = Math.max(18, Math.round(baseDps * 1.45));
+              for (const t of [sim.enemy1, sim.enemy2]) {
+                if (t.hp <= 0) continue;
+                t.shields = 0;
+                t.hp = Math.max(0, t.hp - ultDmg);
+                t.shake = 18;
+              }
+              fx.floaters.push({ x: 162, y: 54, vy: -0.45, text: `🌟 SQUAD FINISHER -${ultDmg}!`, color: '#fde047', life: 46 });
+              for (let p = 0; p < 18; p++) {
+                fx.particles.push({
+                  x: 222 + (Math.random() * 24 - 12),
+                  y: 112 + (Math.random() * 20 - 10),
+                  vx: (Math.random() - 0.5) * 4.2,
+                  vy: (Math.random() - 0.7) * 3.8,
+                  color: p % 2 === 0 ? '#fde047' : '#f43f5e',
+                  life: 26,
+                  size: 3,
+                });
+              }
+              if (sim.enemy1.hp <= 0 && sim.enemy2.hp <= 0 && !sim.pendingClearDispatched) {
+                sim.pendingClearDispatched = true;
+                fx.floaters.push({ x: 192, y: 66, vy: -0.5, text: idle.isBossWave ? '👑 BOSS CLEARED!' : 'WAVE CLEAR!', color: '#4ade80', life: 42 });
+                if (onClear) onClear({ isBossWave: idle.isBossWave, triggerUltimate: true, outcome: 'clear' });
+              }
+              continue;
+            }
+
+            // Individual Hero Skill Logic
+            const target = sim.enemy1.hp > 0 ? sim.enemy1 : sim.enemy2;
+            const singleDmgBase = Math.max(8, Math.round((heroMeta?.effectiveAtk || hero.maxHp * 0.16) * 0.75 * (isBack ? 1.1 : 1.0)));
+
+            if (hero.id === 'seraphina' && lowestHero && (lowestHero.hp / lowestHero.maxHp) * 100 <= healThresh) {
+              const healAmt = Math.round(lowestHero.maxHp * 0.35);
+              for (const ally of sim.heroes) {
+                if (ally.hp > 0) {
+                  ally.hp = Math.min(ally.maxHp, ally.hp + healAmt);
+                }
+              }
+              fx.floaters.push({ x: 56, y: 82, vy: -0.45, text: `✨ PANACEA +${healAmt} HP`, color: '#4ade80', life: 36 });
+              sim.ultCharge = Math.min(100, sim.ultCharge + 14);
+            } else if (hero.id === 'solarius') {
+              // Paladin: Solar Aegis Squad Barrier + Shield Smash
+              if (hero.turnCount % 2 === 1) {
+                const barrier = Math.round(hero.maxHp * 0.2);
+                for (const ally of sim.heroes) {
+                  if (ally.hp > 0) ally.shield = Math.min(Math.round(ally.maxHp * 0.45), ally.shield + barrier);
+                }
+                fx.floaters.push({ x: 64, y: 82, vy: -0.45, text: `🛡️ AEGIS +${barrier}`, color: '#38bdf8', life: 34 });
+              }
+              if (target.shields > 0) {
+                target.shields = Math.max(0, target.shields - (idle.gambits.focusTarget === 'shield_break' ? 2 : 1));
+                if (target.shields === 0) {
+                  target.vulnerable = 3;
+                  fx.floaters.push({ x: 214, y: 74, vy: -0.5, text: '💥 BROKEN!', color: '#facc15', life: 38 });
+                }
+              }
+              const dmg = Math.round(singleDmgBase * (target.shields === 0 ? 1.5 : 0.9));
+              target.hp = Math.max(0, target.hp - dmg);
+              target.shake = 10;
+              sim.ultCharge = Math.min(100, sim.ultCharge + 16);
+              fx.floaters.push({ x: 215, y: 88, vy: -0.5, text: `-${dmg}`, color: '#ffffff', life: 28 });
+            } else if (hero.id === 'aurelia') {
+              // Mage: Singularity Nova hits BOTH enemies + charges +22% Ult
+              const novDmg = Math.round(singleDmgBase * 0.95);
+              for (const eTarget of [sim.enemy1, sim.enemy2]) {
+                if (eTarget.hp <= 0) continue;
+                if (eTarget.shields > 0 && idle.gambits.focusTarget === 'shield_break') {
+                  eTarget.shields = Math.max(0, eTarget.shields - 1);
+                }
+                const dealt = Math.round(novDmg * (eTarget.shields === 0 ? 1.4 : 0.95));
+                eTarget.hp = Math.max(0, eTarget.hp - dealt);
+                eTarget.shake = 10;
+              }
+              sim.ultCharge = Math.min(100, sim.ultCharge + 22);
+              fx.floaters.push({ x: 224, y: 82, vy: -0.5, text: `☄️ NOVA -${novDmg}`, color: '#c084fc', life: 30 });
+            } else {
+              // Kaelis (Assassin) or Seraphina offensive bolt
+              if (target.shields > 0 && (hero.id === 'kaelis' || idle.gambits.focusTarget === 'shield_break')) {
+                target.shields = Math.max(0, target.shields - 1);
+                if (target.shields === 0) {
+                  fx.floaters.push({ x: 214, y: 74, vy: -0.5, text: '💥 BROKEN!', color: '#facc15', life: 38 });
+                }
+              }
+              const isCrit = Math.random() * 100 < (g.heroStats.critPct || 15) + (hero.id === 'kaelis' ? 22 : 8);
+              const dmg = Math.round(singleDmgBase * (target.shields === 0 ? 1.55 : 0.9) * (isCrit ? 1.65 : 1.0));
+              target.hp = Math.max(0, target.hp - dmg);
+              target.shake = isCrit ? 12 : 7;
+              sim.ultCharge = Math.min(100, sim.ultCharge + 15);
+              fx.floaters.push({
+                x: 215 + (Math.random() * 16 - 8),
+                y: 90,
+                vy: -0.55,
+                text: isCrit ? `⚡${dmg}!` : `-${dmg}`,
+                color: isCrit ? '#fde047' : '#ffffff',
+                life: 30,
+              });
+            }
+
+            if (sim.enemy1.hp <= 0 && sim.enemy2.hp <= 0 && !sim.pendingClearDispatched) {
+              sim.pendingClearDispatched = true;
+              fx.floaters.push({
+                x: 196,
+                y: 66,
+                vy: -0.5,
+                text: idle.isBossWave ? '👑 BOSS CLEARED!' : 'WAVE CLEAR!',
+                color: '#4ade80',
+                life: 44,
+              });
+              if (onClear) onClear({ isBossWave: idle.isBossWave, triggerUltimate: false, outcome: 'clear' });
             }
           }
 
-          sim.ultCharge = Math.min(100, sim.ultCharge + (overdrive ? 26 : 18));
-          const shouldFireUlt =
-            sim.ultCharge >= 100 &&
-            (idle.gambits.ultPolicy === 'auto_ready' || idle.isBossWave || sim.shields === 0);
+          // 2) Advance Living Enemies ATB & Resolve Counterattacks Against Squad!
+          const enemies = [
+            { ref: sim.enemy1, rate: idle.isBossWave ? 0.92 : 0.76, dpsShare: 0.65, isBoss: idle.isBossWave },
+            { ref: sim.enemy2, rate: 0.68, dpsShare: 0.4, isBoss: false },
+          ];
+          const baseEnemyDps = (idle.enemyDps || 14) * enrageMult;
+          const frontIds = idle.formation.front;
 
-          let dmg = Math.max(6, Math.round((idle.squadDps || 30) * 0.28 * (sim.shields === 0 ? 1.55 : 0.85)));
-          let isCrit = Math.random() * 100 < (g.heroStats.critPct || 12) + (isBack ? 10 : 0);
+          for (const e of enemies) {
+            if (e.ref.hp <= 0) continue;
+            e.ref.atb += e.rate * paceFactor;
+            if (e.ref.atb < 100) continue;
 
-          if (shouldFireUlt) {
-            sim.ultCharge = 0;
-            sim.ultBeamLife = 28;
-            sim.shields = 0;
-            dmg = Math.round(dmg * 2.6);
-            isCrit = true;
-            fx.enemyShake = 20;
-            fx.floaters.push({ x: 162, y: 58, vy: -0.45, text: `🌟 SQUAD FINISHER -${dmg}!`, color: '#fde047', life: 48 });
-            for (let p = 0; p < 18; p++) {
-              fx.particles.push({
-                x: 222 + (Math.random() * 20 - 10),
-                y: 112 + (Math.random() * 16 - 8),
-                vx: (Math.random() - 0.5) * 4.2,
-                vy: (Math.random() - 0.7) * 3.8,
-                color: p % 2 === 0 ? '#fde047' : '#f43f5e',
-                life: 28,
-                size: 3,
-              });
+            e.ref.atb = 0;
+            e.ref.lunge = -14;
+            const rawEnemyHit = Math.max(8, Math.round(baseEnemyDps * e.dpsShare * (e.ref.shields === 0 ? 0.75 : 1.15)));
+
+            // AoE Volley if Boss Enraged or Secondary Volley; Cleave hits Front Row first
+            const isAoe = e.ref.intent === 'VOLLEY' || (e.isBoss && Math.random() < 0.4);
+            if (isAoe) {
+              const aoeDmg = Math.max(5, Math.round(rawEnemyHit * 0.55));
+              for (const h of sim.heroes) {
+                if (h.hp <= 0) continue;
+                const absorbed = Math.min(h.shield, aoeDmg);
+                h.shield -= absorbed;
+                const net = aoeDmg - absorbed;
+                h.hp = Math.max(0, h.hp - net);
+                h.hurtFlash = 10;
+              }
+              fx.floaters.push({ x: 54, y: 76, vy: -0.45, text: `☄️ -${aoeDmg} ALL`, color: '#fb7185', life: 34 });
+            } else {
+              const livingFront = sim.heroes.filter((h) => h.hp > 0 && frontIds.includes(h.id));
+              const pool = livingFront.length > 0 ? livingFront : sim.heroes.filter((h) => h.hp > 0);
+              const victim = pool[Math.floor(Math.random() * pool.length)];
+              if (victim) {
+                const absorbed = Math.min(victim.shield, rawEnemyHit);
+                victim.shield -= absorbed;
+                const net = rawEnemyHit - absorbed;
+                victim.hp = Math.max(0, victim.hp - net);
+                victim.hurtFlash = 12;
+                const vIdx = sim.heroes.findIndex((x) => x.id === victim.id);
+                const vx = vIdx >= 2 ? 26 : 72;
+                const vy = vIdx % 2 === 0 ? 94 : 126;
+                fx.floaters.push({
+                  x: vx,
+                  y: vy - 8,
+                  vy: -0.5,
+                  text: net === 0 ? '🛡️ BLOCKED!' : `-${net}`,
+                  color: net === 0 ? '#38bdf8' : '#fb7185',
+                  life: 32,
+                });
+              }
             }
-          } else {
-            if (isCrit) dmg = Math.round(dmg * 1.6);
-            fx.enemyShake = isCrit ? 12 : 6;
-            fx.floaters.push({
-              x: 215 + (Math.random() * 16 - 8),
-              y: 88,
-              vy: -0.55,
-              text: isCrit ? `⚡${dmg}!` : `-${dmg}`,
-              color: isCrit ? '#fde047' : '#ffffff',
-              life: 32,
-            });
-            for (let p = 0; p < 6; p++) {
-              fx.particles.push({
-                x: 224,
-                y: 112,
-                vx: (Math.random() - 0.5) * 2.8,
-                vy: (Math.random() - 0.8) * 2.4,
-                color: overdrive ? '#38bdf8' : '#fb7185',
-                life: 18,
-                size: 2,
-              });
-            }
-          }
 
-          sim.enemyHp = Math.max(0, sim.enemyHp - dmg);
-          if (sim.enemyHp <= 0 && !sim.pendingClearDispatched) {
-            sim.pendingClearDispatched = true;
-            sim.waveClearCooldown = overdrive ? 14 : 26;
-            fx.floaters.push({
-              x: 196,
-              y: 66,
-              vy: -0.5,
-              text: idle.isBossWave ? `👑 BOSS CLEARED!` : `WAVE CLEAR!`,
-              color: '#4ade80',
-              life: 44,
-            });
-            if (onClear) {
-              onClear({ isBossWave: idle.isBossWave, triggerUltimate: shouldFireUlt });
+            // Check Full Squad Wipe -> Trigger Boss Wall Retreat!
+            if (sim.heroes.every((h) => h.hp <= 0) && !sim.pendingClearDispatched) {
+              sim.pendingClearDispatched = true;
+              sim.phase = 'wipe_pause';
+              sim.wipePauseFrames = 55;
+              fx.floaters.push({ x: 108, y: 74, vy: -0.4, text: '💀 BOSS WALL! RETREATING...', color: '#fb7185', life: 52 });
+              if (onClear) {
+                onClear({ isBossWave: idle.isBossWave, triggerUltimate: false, outcome: 'wipe' });
+              }
+              break;
             }
           }
         }
       }
 
-      // Draw 2x2 Front/Back 4-Hero Squad on Left
+      // Draw 2x2 Front/Back 4-Hero Squad on Left with HP, Shield & ATB Bars
       const frontIds = idle.formation.front;
       const backIds = idle.formation.back;
-      const slots: Array<{ heroId: string; bx: number; by: number; idx: number }> = [
-        { heroId: backIds[0] || 'aurelia', bx: 20, by: 96, idx: 2 },
-        { heroId: backIds[1] || 'seraphina', bx: 24, by: 128, idx: 3 },
-        { heroId: frontIds[0] || 'solarius', bx: 68, by: 96, idx: 0 },
-        { heroId: frontIds[1] || 'kaelis', bx: 72, by: 128, idx: 1 },
+      const slots: Array<{ heroId: string; bx: number; by: number }> = [
+        { heroId: backIds[0] || 'aurelia', bx: 18, by: 90 },
+        { heroId: backIds[1] || 'seraphina', bx: 22, by: 136 },
+        { heroId: frontIds[0] || 'solarius', bx: 72, by: 90 },
+        { heroId: frontIds[1] || 'kaelis', bx: 76, by: 136 },
       ];
 
-      // Draw companion pet hovering over Vanguard
       const pet = g.equippedBySlot?.companion;
       if (pet && COMPANION_SPRITES[pet.spriteKey]) {
         const petSp = COMPANION_SPRITES[pet.spriteKey];
-        const py = Math.floor(68 + Math.sin(frameCountNum * 0.09) * 3);
+        const py = Math.floor(62 + Math.sin(frameCountNum * 0.09) * 3);
         drawPixelMatrix(ctx!, petSp.frames[animFrame], petSp.palette, 50, py, 2);
       }
 
       for (const sl of slots) {
         const heroMeta = idle.squadHeroes.find((h) => h.id === sl.heroId);
+        const hSim = sim.heroes.find((h) => h.id === sl.heroId) || sim.heroes[0];
         const sp = HERO_SPRITES[heroMeta?.spriteKey || 'hero_knight'] || HERO_SPRITES.hero_knight;
-        const hx = Math.floor(sl.bx + sim.heroLunges[sl.idx]);
-        const hy = Math.floor(sl.by + (animFrame === 1 ? -1 : 0));
+        const hx = Math.floor(sl.bx + hSim.lunge);
+        const walkBob = sim.phase === 'marching' && animFrame === 1 ? -2 : animFrame === 1 ? -1 : 0;
+        const hy = Math.floor(sl.by + walkBob);
 
         ctx!.fillStyle = 'rgba(0,0,0,0.42)';
         ctx!.fillRect(hx + 2, hy + 28, 24, 4);
 
-        if (overdrive || fever) {
-          ctx!.fillStyle = overdrive ? 'rgba(56, 189, 248, 0.20)' : 'rgba(250, 204, 21, 0.20)';
-          ctx!.fillRect(hx - 2, hy - 2, 32, 32);
-        }
+        if (hSim.hp <= 0) {
+          ctx!.save();
+          ctx!.globalAlpha = 0.35;
+          drawPixelMatrix(ctx!, sp.frames[animFrame], sp.palette, hx, hy + 4, 2.5);
+          ctx!.restore();
+          ctx!.fillStyle = '#dc2626';
+          ctx!.fillRect(hx + 4, hy + 10, 20, 9);
+          ctx!.fillStyle = '#ffffff';
+          ctx!.font = 'bold 7px monospace';
+          ctx!.fillText('KO', hx + 9, hy + 17);
+        } else {
+          if (overdrive || fever) {
+            ctx!.fillStyle = overdrive ? 'rgba(56, 189, 248, 0.20)' : 'rgba(250, 204, 21, 0.20)';
+            ctx!.fillRect(hx - 2, hy - 2, 32, 32);
+          }
+          drawPixelMatrix(ctx!, sp.frames[animFrame], sp.palette, hx, hy, 2.5);
 
-        drawPixelMatrix(ctx!, sp.frames[animFrame], sp.palette, hx, hy, 2.5);
-        ctx!.fillStyle = 'rgba(9, 9, 11, 0.78)';
-        ctx!.fillRect(hx - 2, hy - 10, 34, 8);
-        ctx!.fillStyle = overdrive ? '#7dd3fc' : '#e2e8f0';
-        ctx!.font = 'bold 6px monospace';
-        ctx!.fillText((heroMeta?.name || 'HERO').slice(0, 8).toUpperCase(), hx, hy - 4);
+          if (hSim.hurtFlash > 0 && hSim.hurtFlash % 4 < 2) {
+            ctx!.fillStyle = 'rgba(244, 63, 94, 0.48)';
+            ctx!.fillRect(hx, hy, 28, 28);
+          }
+          if (hSim.shield > 0) {
+            ctx!.strokeStyle = 'rgba(56, 189, 248, 0.78)';
+            ctx!.lineWidth = 1.5;
+            ctx!.strokeRect(hx - 2, hy - 2, 32, 32);
+          }
+
+          // Hero Name Tag
+          ctx!.fillStyle = 'rgba(9, 9, 11, 0.78)';
+          ctx!.fillRect(hx - 2, hy - 10, 34, 8);
+          ctx!.fillStyle = overdrive ? '#7dd3fc' : '#e2e8f0';
+          ctx!.font = 'bold 6px monospace';
+          ctx!.fillText((heroMeta?.name || 'HERO').slice(0, 8).toUpperCase(), hx, hy - 4);
+
+          // Hero HP Bar + Shield Overlay + ATB Bar underneath sprite
+          const hpPctHero = Math.max(0, Math.min(1, hSim.hp / Math.max(1, hSim.maxHp)));
+          const barX = hx;
+          const barY = hy + 30;
+          ctx!.fillStyle = '#09090b';
+          ctx!.fillRect(barX, barY, 28, 6);
+          ctx!.fillStyle = hpPctHero > 0.5 ? '#22c55e' : hpPctHero > 0.25 ? '#f59e0b' : '#ef4444';
+          ctx!.fillRect(barX + 1, barY + 1, Math.floor(26 * hpPctHero), 2.5);
+          if (hSim.shield > 0) {
+            const shRatio = Math.min(1, hSim.shield / Math.max(1, hSim.maxHp * 0.45));
+            ctx!.fillStyle = '#38bdf8';
+            ctx!.fillRect(barX + 1, barY + 1, Math.floor(26 * shRatio), 1.5);
+          }
+          // Cyan ATB Gauge
+          ctx!.fillStyle = '#0ea5e9';
+          ctx!.fillRect(barX + 1, barY + 4, Math.floor(26 * Math.min(1, hSim.atb / 100)), 1.5);
+        }
       }
 
       // Draw Ultimate Laser / Finisher Cross-Slash Beam when active
@@ -977,76 +1215,113 @@ export function PixelCanvas({
         ctx!.lineWidth = 4;
         ctx!.beginPath();
         ctx!.moveTo(96, 118);
-        ctx!.lineTo(234, 118);
-        ctx!.moveTo(202, 90);
-        ctx!.lineTo(256, 144);
-        ctx!.moveTo(256, 90);
-        ctx!.lineTo(202, 144);
+        ctx!.lineTo(246, 118);
+        ctx!.moveTo(202, 86);
+        ctx!.lineTo(264, 148);
+        ctx!.moveTo(264, 86);
+        ctx!.lineTo(202, 148);
         ctx!.stroke();
         ctx!.restore();
       }
 
-      // Draw Current Wave Enemy / Stage Boss on Right
-      const mSprite = MONSTER_SPRITES[idle.currentEnemy.key] || MONSTER_SPRITES.slime;
-      const shakeOff = fx.enemyShake > 0 ? (fx.enemyShake % 4 < 2 ? -3 : 3) : 0;
-      const mx = Math.floor((idle.isBossWave ? 210 : 216) + shakeOff);
-      const my = Math.floor((idle.isBossWave ? 96 : 108) + (animFrame === 1 ? -1 : 0));
-      ctx!.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx!.fillRect(mx + 2, 146, idle.isBossWave ? 42 : 34, 5);
-      drawPixelMatrix(ctx!, mSprite.frames[animFrame], mSprite.palette, mx, my, idle.isBossWave ? 4 : 3);
+      // Draw 2-Enemy Pack (or Stage Boss + Royal Guard) on Right
+      const drawWaveEnemy = (
+        ref: typeof sim.enemy1,
+        spriteKey: string,
+        baseX: number,
+        baseY: number,
+        scale: number
+      ) => {
+        if (ref.hp <= 0) return;
+        const mSprite = MONSTER_SPRITES[spriteKey] || MONSTER_SPRITES.slime;
+        const shakeOff = ref.shake > 0 ? (ref.shake % 4 < 2 ? -3 : 3) : 0;
+        const mx = Math.floor(baseX + marchEnemySlideOffset + ref.lunge + shakeOff);
+        const my = Math.floor(baseY + (animFrame === 1 ? -1 : 0));
 
-      // Enemy Name + HP Bar + Break Shield Pips
-      const hpRatio = Math.max(0, Math.min(1, sim.enemyHp / Math.max(1, sim.enemyMaxHp)));
-      ctx!.fillStyle = '#09090b';
-      ctx!.fillRect(198, my - 11, 56, 6);
-      ctx!.fillStyle = idle.isBossWave ? '#f59e0b' : '#ef4444';
-      ctx!.fillRect(199, my - 10, Math.floor(54 * hpRatio), 4);
+        ctx!.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx!.fillRect(mx + 2, my + 12 * scale - 4, 12 * scale - 4, 4);
+        drawPixelMatrix(ctx!, mSprite.frames[animFrame], mSprite.palette, mx, my, scale);
 
-      if (sim.shields <= 0) {
-        ctx!.fillStyle = '#dc2626';
-        ctx!.fillRect(200, my - 24, 52, 10);
-        ctx!.fillStyle = '#fef08a';
-        ctx!.font = 'bold 7px monospace';
-        ctx!.fillText('BROKEN!', 208, my - 17);
-      } else {
-        for (let s = 0; s < sim.maxShields; s++) {
-          const sx = 204 + s * 13;
-          const sy = my - 24;
-          ctx!.fillStyle = s < sim.shields ? '#38bdf8' : '#1e293b';
-          ctx!.fillRect(sx, sy, 10, 10);
-          ctx!.strokeStyle = '#09090b';
-          ctx!.lineWidth = 1;
-          ctx!.strokeRect(sx, sy, 10, 10);
+        // HP Bar + Enemy Crimson ATB Bar
+        const hpRatio = Math.max(0, Math.min(1, ref.hp / Math.max(1, ref.maxHp)));
+        ctx!.fillStyle = '#09090b';
+        ctx!.fillRect(mx - 4, my - 11, 46, 7);
+        ctx!.fillStyle = idle.isBossWave && scale >= 3.5 ? '#f59e0b' : '#ef4444';
+        ctx!.fillRect(mx - 3, my - 10, Math.floor(44 * hpRatio), 3);
+        ctx!.fillStyle = '#fb7185';
+        ctx!.fillRect(mx - 3, my - 6, Math.floor(44 * Math.min(1, ref.atb / 100)), 1.5);
+
+        // Shields / BROKEN + Intent
+        if (ref.shields <= 0) {
+          ctx!.fillStyle = '#dc2626';
+          ctx!.fillRect(mx - 2, my - 22, 42, 9);
+          ctx!.fillStyle = '#fef08a';
+          ctx!.font = 'bold 6px monospace';
+          ctx!.fillText('BROKEN!', mx + 4, my - 15);
+        } else {
+          for (let s = 0; s < ref.maxShields; s++) {
+            const sx = mx + s * 11;
+            const sy = my - 21;
+            ctx!.fillStyle = s < ref.shields ? '#38bdf8' : '#1e293b';
+            ctx!.fillRect(sx, sy, 8, 8);
+            ctx!.strokeStyle = '#09090b';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(sx, sy, 8, 8);
+          }
         }
+      };
+
+      drawWaveEnemy(
+        sim.enemy1,
+        idle.currentEnemy.key,
+        idle.isBossWave ? 196 : 198,
+        idle.isBossWave ? 92 : 100,
+        idle.isBossWave ? 4 : 3
+      );
+      if (idle.secondaryEnemy) {
+        drawWaveEnemy(sim.enemy2, idle.secondaryEnemy.key, 254, 130, 2.5);
       }
 
-      // Top HUD: Realm Stage-Wave pill + Speed/Overdrive + Squad Ultimate Bar
-      ctx!.fillStyle = 'rgba(9, 9, 11, 0.84)';
-      ctx!.fillRect(6, 6, 152, 17);
+      // Top HUD: Realm Stage-Wave pill + Phase/Enrage + Pace
+      ctx!.fillStyle = 'rgba(9, 9, 11, 0.86)';
+      ctx!.fillRect(6, 6, 146, 17);
       ctx!.fillStyle = '#fafafa';
       ctx!.font = 'bold 8px monospace';
       ctx!.fillText(`STAGE ${idle.stage} • WAVE ${idle.wave}/10${idle.isBossWave ? ' 👑' : ''}`, 11, 17);
 
-      ctx!.fillStyle = overdrive ? 'rgba(14, 165, 233, 0.90)' : 'rgba(15, 23, 42, 0.85)';
-      ctx!.fillRect(164, 6, 150, 17);
-      ctx!.fillStyle = overdrive ? '#fef08a' : '#cbd5e1';
-      ctx!.font = 'bold 8px monospace';
-      ctx!.fillText(
-        overdrive ? `🔥 ${speedMult.toFixed(1)}x STUDY OVERDRIVE` : `⚡ ${speedMult.toFixed(1)}x IDLE AUTO-BATTLE`,
-        169,
-        17
-      );
+      if (idle.isBossWave && sim.phase === 'combat') {
+        const secsLeft = Math.max(0, sim.bossTimerFrames / 60).toFixed(1);
+        ctx!.fillStyle = Number(secsLeft) <= 6 ? 'rgba(220, 38, 38, 0.92)' : 'rgba(180, 83, 9, 0.90)';
+        ctx!.fillRect(156, 6, 82, 17);
+        ctx!.fillStyle = '#fef08a';
+        ctx!.font = 'bold 8px monospace';
+        ctx!.fillText(`⏱ ${secsLeft}s`, 166, 17);
+      } else {
+        ctx!.fillStyle = overdrive ? 'rgba(14, 165, 233, 0.90)' : 'rgba(15, 23, 42, 0.85)';
+        ctx!.fillRect(156, 6, 158, 17);
+        ctx!.fillStyle = overdrive ? '#fef08a' : '#cbd5e1';
+        ctx!.font = 'bold 8px monospace';
+        ctx!.fillText(
+          sim.phase === 'marching'
+            ? `🚶 MARCHING NEXT WAVE...`
+            : overdrive
+              ? `🔥 ${paceFactor.toFixed(1)}x STUDY OVERDRIVE`
+              : `⚔️ ${paceFactor.toFixed(1)}x ATB CLASH`,
+          162,
+          17
+        );
+      }
 
-      // Squad Ultimate Gauge at bottom-left
+      // Squad Ultimate Gauge at bottom-right
       ctx!.fillStyle = 'rgba(9, 9, 11, 0.84)';
-      ctx!.fillRect(8, 186, 136, 14);
+      ctx!.fillRect(174, 186, 138, 14);
       ctx!.fillStyle = '#fbbf24';
       ctx!.font = 'bold 7px monospace';
-      ctx!.fillText('SQUAD ULT', 12, 195);
+      ctx!.fillText('ULT', 180, 195);
       ctx!.fillStyle = '#1e293b';
-      ctx!.fillRect(60, 190, 78, 6);
+      ctx!.fillRect(200, 190, 104, 6);
       ctx!.fillStyle = sim.ultCharge >= 100 ? '#f43f5e' : '#38bdf8';
-      ctx!.fillRect(61, 191, Math.floor(76 * (sim.ultCharge / 100)), 4);
+      ctx!.fillRect(201, 191, Math.floor(102 * (sim.ultCharge / 100)), 4);
     }
 
     function render() {

@@ -1248,6 +1248,7 @@ app.post('/api/game/idle/tick', authMiddleware, withGameHandler((req, user, stat
   wavesCleared: req.body?.wavesCleared !== undefined ? Number(req.body.wavesCleared) : 1,
   timerRunning: Boolean(req.body?.timerRunning),
   triggerUltimate: Boolean(req.body?.triggerUltimate),
+  outcome: req.body?.outcome === 'wipe' ? 'wipe' : 'clear',
 })));
 app.post('/api/game/idle/claim-afk', authMiddleware, withGameHandler((_req, user, stats) => claimIdleAfkChest(db, user, stats)));
 app.post('/api/game/idle/config', authMiddleware, withGameHandler((req, user, stats) => updateIdleConfig(db, user, stats, req.body || {})));

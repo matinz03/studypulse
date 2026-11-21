@@ -40,13 +40,19 @@ export interface QuestViewProps {
   game: GameState;
   shop: ShopState;
   isStudying?: boolean;
-  onIdleTick?: (payload?: { wavesCleared?: number; timerRunning?: boolean; triggerUltimate?: boolean }) => Promise<GameActionResponse>;
+  onIdleTick?: (payload?: {
+    wavesCleared?: number;
+    timerRunning?: boolean;
+    triggerUltimate?: boolean;
+    outcome?: 'clear' | 'wipe';
+  }) => Promise<GameActionResponse>;
   onIdleClaimAfk?: () => Promise<GameActionResponse>;
   onIdleConfig?: (payload: {
     gambits?: Partial<IdleGambitsConfig>;
     automation?: Partial<IdleAutomationConfig>;
     swapHeroRow?: string;
     stage?: number;
+    challengeBoss?: boolean;
   }) => Promise<GameActionResponse>;
   onIdleUpgradeProf?: (professionId: string) => Promise<GameActionResponse>;
   onIdleAscend?: () => Promise<GameActionResponse>;
@@ -165,15 +171,16 @@ export function QuestView({
     [busy]
   );
 
-  // Silent wave clear sync from the 60fps side-scrolling canvas
+  // Silent wave clear or wipe sync from the 60fps side-scrolling canvas
   const handleAutoWaveClear = useCallback(
-    async (opts: { isBossWave: boolean; triggerUltimate: boolean }) => {
+    async (opts: { isBossWave: boolean; triggerUltimate: boolean; outcome?: 'clear' | 'wipe' }) => {
       if (!onIdleTick) return;
       try {
         const res = await onIdleTick({
           wavesCleared: 1,
           timerRunning: isStudying,
           triggerUltimate: opts.triggerUltimate,
+          outcome: opts.outcome,
         });
         if (res.events?.length) {
           setLastEvents(res.events);
@@ -279,28 +286,63 @@ export function QuestView({
         </div>
 
         {/* 4-Metric Idle Telemetry Strip */}
-        <div className="grid grid-cols-4 gap-1.5 text-center">
-          <div className="p-2 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-white">
-              ⚔️ {idle?.squadPower ?? heroStats.atk * 10}
+        {(() => {
+          const squadPow = idle?.squadPower ?? heroStats.atk * 10;
+          const recPow = idle?.recommendedPower ?? 160;
+          const powRatio = recPow > 0 ? squadPow / recPow : 1;
+          const powTone =
+            powRatio >= 1.05 ? 'text-emerald-300' : powRatio >= 0.8 ? 'text-amber-300' : 'text-rose-300';
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center">
+              <div className="p-2 rounded-xl sp-inset">
+                <div className={`font-mono-num text-xs font-extrabold ${powTone}`}>
+                  ⚔️ {squadPow} <span className="text-[10px] text-slate-400 font-normal">/ {recPow}</span>
+                </div>
+                <div className="text-[9px] text-slate-400">
+                  Stage Rec • {idle?.squadDps ?? heroStats.atk * 3} vs {idle?.enemyDps ?? 12} DPS
+                </div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards}</div>
+                <div className="text-[9px] text-slate-400">+{idle?.shardsPerHr ?? 45}/hr</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-amber-300">🪙 {user.coins}</div>
+                <div className="text-[9px] text-slate-400">+{idle?.coinsPerHr ?? 30}/hr</div>
+              </div>
+              <div className="p-2 rounded-xl sp-inset">
+                <div className="font-mono-num text-xs font-extrabold text-rose-300">
+                  🔥 {idle?.celestialEmbers ?? 0}
+                </div>
+                <div className="text-[9px] text-slate-400">Ascend ×{(idle?.ascensionMult ?? 1).toFixed(2)}</div>
+              </div>
             </div>
-            <div className="text-[9px] text-slate-400">{idle?.squadDps ?? heroStats.atk * 3} DPS</div>
-          </div>
-          <div className="p-2 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards}</div>
-            <div className="text-[9px] text-slate-400">+{idle?.shardsPerHr ?? 45}/hr</div>
-          </div>
-          <div className="p-2 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-amber-300">🪙 {user.coins}</div>
-            <div className="text-[9px] text-slate-400">+{idle?.coinsPerHr ?? 30}/hr</div>
-          </div>
-          <div className="p-2 rounded-xl sp-inset">
-            <div className="font-mono-num text-xs font-extrabold text-rose-300">
-              🔥 {idle?.celestialEmbers ?? 0}
+          );
+        })()}
+
+        {/* Boss Wall Alert & Re-Challenge Banner */}
+        {idle && (idle.bossWallStuck || idle.gambits.stageProgression === 'farm_stage') && onIdleConfig && (
+          <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-400/50 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-extrabold text-amber-200">
+                {idle.bossWallStuck
+                  ? `🛡️ Squad Tactical Retreat — Farming Stage ${idle.stage} Waves 1–9`
+                  : `🔁 Farming Mode Active — Looping Stage ${idle.stage} Waves 1–9`}
+              </div>
+              <div className="text-[10px] text-amber-100/80">
+                Stage {idle.stage} Boss Rec Power: {idle.bossRecPower ?? Math.round((idle.recommendedPower ?? 160) * 1.45)} · Upgrade gear, adjust rows, or trigger Study Overdrive before retrying.
+              </div>
             </div>
-            <div className="text-[9px] text-slate-400">Ascend ×{(idle?.ascensionMult ?? 1).toFixed(2)}</div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(() => onIdleConfig({ challengeBoss: true }))}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white border border-amber-300/60 text-[11px] font-extrabold cursor-pointer shrink-0"
+            >
+              👑 Challenge Stage {idle.stage} Boss
+            </button>
           </div>
-        </div>
+        )}
 
         {/* Side-Scrolling 4-Hero Auto-Battler Pixel Canvas */}
         <PixelCanvas
@@ -311,6 +353,39 @@ export function QuestView({
           isStudying={isStudying}
           onAutoWaveClear={handleAutoWaveClear}
         />
+
+        {/* Battle Pace Pill Switcher */}
+        {idle && onIdleConfig && (
+          <div className="p-2 rounded-2xl sp-inset flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 px-1">
+              ⏱️ Battle Pace
+            </span>
+            <div className="grid grid-cols-3 gap-1 flex-1 max-w-xs">
+              {(
+                [
+                  { key: '1x', label: '1× Tactical' },
+                  { key: '2x', label: '2× Brisk' },
+                  { key: 'overdrive', label: '⚡ Max' },
+                ] as const
+              ).map((opt) => {
+                const active = (idle.gambits.battlePace || '1x') === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction(() => onIdleConfig({ gambits: { battlePace: opt.key } }))}
+                    className={`py-1.5 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
+                      active ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Quick Action Controls Strip */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
