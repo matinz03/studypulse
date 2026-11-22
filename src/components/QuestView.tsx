@@ -27,12 +27,12 @@ import {
   IdleAutomationConfig,
   IdleGambitsConfig,
   ItemRarity,
-  LoopHandCard,
+  ShadowActionPayload,
   ShopBuyResponse,
   ShopState,
   User,
 } from '../types';
-import { PixelCanvas } from '../game/PixelCanvas';
+import { ShadowSlave3DCanvas } from '../game/ShadowSlave3DCanvas';
 import { StorePanel } from './StorePanel';
 import { soundEngine } from '../utils/soundEngine';
 
@@ -59,6 +59,7 @@ export interface QuestViewProps {
     pickRelic?: string;
     extractLoop?: boolean;
     toggleAutoArchitect?: boolean;
+    shadowAction?: ShadowActionPayload;
   }) => Promise<GameActionResponse>;
   onIdleUpgradeProf?: (professionId: string) => Promise<GameActionResponse>;
   onIdleAscend?: () => Promise<GameActionResponse>;
@@ -147,16 +148,15 @@ export function QuestView({
   const [sfxMuted, setSfxMuted] = useState(() => soundEngine.isSfxMuted());
   const [showStudyQuiz, setShowStudyQuiz] = useState(false);
   const [quizCardIdx, setQuizCardIdx] = useState(0);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [showRecipes, setShowRecipes] = useState(false);
+  const [view3dMode, setView3dMode] = useState<'dream_realm' | 'soul_sea'>('dream_realm');
+  const [showSoulPanel, setShowSoulPanel] = useState<'runes' | 'memories' | 'cohort'>('memories');
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const quizCards = flashcards.filter((c) => c.options && c.options.length > 0);
   const activeQuizCard = quizCards.length > 0 ? quizCards[quizCardIdx % quizCards.length] : null;
 
   const { profile, heroStats, items, equippedBySlot, recentLogs, idle } = game;
-  const loop = idle?.loop;
-  const handCards: LoopHandCard[] = loop?.hand || [];
-  const selectedCard = handCards.find((c) => c.id === selectedCardId) || null;
+  const ss = game.shadowSlave || idle?.shadowSlave;
   const unequippedItems = items.filter((i) => !i.equipped);
   const greatForgeChance = Math.min(35, Math.round(6 + heroStats.luck * 0.45));
 
@@ -164,6 +164,7 @@ export function QuestView({
     async (fn: () => Promise<GameActionResponse>) => {
       if (busy) return;
       setBusy(true);
+      setActionError(null);
       try {
         const res = await fn();
         if (res.events?.length) {
@@ -175,36 +176,14 @@ export function QuestView({
           soundEngine.playPixelLoot(res.droppedItem.rarity === 'mythic' ? 'legendary' : res.droppedItem.rarity);
         }
         return res;
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'Action failed');
+        return undefined;
       } finally {
         setBusy(false);
       }
     },
     [busy]
-  );
-
-  // Silent wave clear or wipe sync from the 60fps side-scrolling canvas
-  const handleAutoWaveClear = useCallback(
-    async (opts: { isBossWave: boolean; triggerUltimate: boolean; outcome?: 'clear' | 'wipe' }) => {
-      if (!onIdleTick) return;
-      try {
-        const res = await onIdleTick({
-          wavesCleared: 1,
-          timerRunning: isStudying,
-          triggerUltimate: opts.triggerUltimate,
-          outcome: opts.outcome,
-        });
-        if (res.events?.length) {
-          setLastEvents(res.events);
-          setEventSeq((s) => s + 1);
-        }
-        if (res.droppedItem) {
-          setRecentDrop(res.droppedItem);
-        }
-      } catch {
-        // Ignore transient network errors during background idle tick
-      }
-    },
-    [onIdleTick, isStudying]
   );
 
   // Periodic background tick while Focus Timer runs
@@ -219,86 +198,57 @@ export function QuestView({
   const overdriveActive = Boolean(idle?.overdriveActive || isStudying);
   const afkSeconds = idle?.afkChest?.accumulatedSec || 0;
 
-  const handlePlaceLoopTile = useCallback(
-    async (gx: number, gy: number) => {
-      if (!onIdleConfig || !loop) return;
-      const roadSet = new Set(loop.roadPath.map((p) => `${p.x},${p.y}`));
-      const camp = loop.roadPath[0];
-      if (camp && gx === camp.x && gy === camp.y) return;
-      const isRoad = roadSet.has(`${gx},${gy}`);
-      const cardToPlace =
-        selectedCard ||
-        handCards.find((c) => (c.placement === 'road') === isRoad) ||
-        null;
-      if (!cardToPlace) return;
-      setSelectedCardId(null);
-      try {
-        await runAction(() =>
-          onIdleConfig({ placeCard: { cardId: cardToPlace.id, x: gx, y: gy } })
-        );
-      } catch {
-        // Invalid placement errors handled silently without crashing loop
-      }
-    },
-    [onIdleConfig, loop, selectedCard, handCards, runAction]
-  );
-
   return (
     <div className="space-y-3.5 pb-6">
-      {/* Main Loop Architect Cockpit Card */}
+      {/* Main Shadow Slave 3D Nightmare Realm & Soul Sea Cockpit */}
       <div className="glass-card rounded-3xl p-4 space-y-3">
-        {/* Realm Stage, Loop Greed & Audio/Focus Header */}
+        {/* Nightmare Spell Runes & Mode Toggle Header */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
-                🗺️ Aethelgard: Loop Architect
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-200 flex items-center gap-1">
+                <span>{ss?.aspect.icon || '🌑'}</span>
+                <span>Shadow Slave: The Forgotten Shore</span>
               </span>
-              {overdriveActive ? (
+              {overdriveActive && (
                 <span className="px-2 py-0.5 rounded-full bg-sky-500/25 border border-sky-400/60 text-sky-200 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
                   <Flame className="w-3 h-3 text-amber-300" />
-                  {(idle?.speedMultiplier || 4.0).toFixed(1)}× STUDY OVERDRIVE
-                  {idle?.overdriveRemainingSec ? ` (${formatDurationCompact(idle.overdriveRemainingSec)})` : ''}
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold text-slate-300">
-                  ⚡ {(idle?.speedMultiplier || 1.0).toFixed(1)}× Base Pace
+                  MEDITATION FOCUS SYNC
                 </span>
               )}
             </div>
-            <div className="text-xs font-extrabold text-white mt-0.5">
-              {idle?.realm?.name || 'Verdant Sky-Bastion'} · Stage {idle?.stage || 1} · Loop #{loop?.loopCount || 1} (Greed ×
-              {(loop?.greedMultiplier || 1).toFixed(2)}) · Boss Threat {loop?.threatPct ?? 0}%
-              {loop?.bossActive ? ' 👑 BOSS READY' : ''}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {idle && idle.maxStage > 1 && onIdleConfig && (
-              <div className="flex items-center gap-1 sp-inset rounded-xl p-1">
-                <button
-                  type="button"
-                  disabled={busy || idle.stage <= 1}
-                  onClick={() => runAction(() => onIdleConfig({ stage: idle.stage - 1 }))}
-                  aria-label="Previous Stage"
-                  className="p-1 rounded-lg sp-badge disabled:opacity-40 cursor-pointer"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <span className="text-[10px] font-mono-num font-bold px-1.5 text-white">
-                  S{idle.stage}/{idle.maxStage}
-                </span>
-                <button
-                  type="button"
-                  disabled={busy || idle.stage >= idle.maxStage}
-                  onClick={() => runAction(() => onIdleConfig({ stage: idle.stage + 1 }))}
-                  aria-label="Next Stage"
-                  className="p-1 rounded-lg sp-badge disabled:opacity-40 cursor-pointer"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+            {ss && (
+              <div className="text-xs font-extrabold text-white mt-0.5 flex flex-wrap items-center gap-1.5">
+                <span style={{ color: ss.aspect.primaryColor }}>[{ss.aspect.name}]</span>
+                <span className="text-slate-400">•</span>
+                <span>{ss.rank} {ss.coreClass.name} ({ss.coreCount} Core{ss.coreCount > 1 ? 's' : ''})</span>
+                <span className="text-slate-400">•</span>
+                <span className="text-amber-200">[{ss.trueName}]</span>
               </div>
             )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="p-0.5 rounded-xl sp-inset flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setView3dMode('dream_realm')}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition ${
+                  view3dMode === 'dream_realm' ? 'sp-btn-primary text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                🌍 3D Dream Realm
+              </button>
+              <button
+                type="button"
+                onClick={() => setView3dMode('soul_sea')}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition ${
+                  view3dMode === 'soul_sea' ? 'sp-btn-primary text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                🌊 Dive into Soul Sea
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => {
@@ -316,327 +266,396 @@ export function QuestView({
               onClick={onGoToFocus}
               className="px-2.5 py-1 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
             >
-              ⚡ Study for 4× Speed
+              ⚡ Study for Essence
             </button>
           </div>
         </div>
 
-        {/* 4-Metric Idle Telemetry Strip */}
-        {(() => {
-          const squadPow = idle?.squadPower ?? heroStats.atk * 10;
-          const recPow = idle?.recommendedPower ?? 160;
-          const powRatio = recPow > 0 ? squadPow / recPow : 1;
-          const powTone =
-            powRatio >= 1.05 ? 'text-emerald-300' : powRatio >= 0.8 ? 'text-amber-300' : 'text-rose-300';
-          return (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center">
-              <div className="p-2 rounded-xl sp-inset">
-                <div className={`font-mono-num text-xs font-extrabold ${powTone}`}>
-                  ⚔️ {squadPow} <span className="text-[10px] text-slate-400 font-normal">/ {recPow}</span>
-                </div>
-                <div className="text-[9px] text-slate-400">
-                  Stage Rec • {idle?.squadDps ?? heroStats.atk * 3} vs {idle?.enemyDps ?? 12} DPS
-                </div>
+        {/* 4-Metric Soul Saturation Telemetry Strip */}
+        {ss && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center">
+            <div className="p-2 rounded-xl sp-inset">
+              <div className="font-mono-num text-xs font-extrabold text-white">
+                {ss.soulFragments} <span className="text-[10px] text-slate-400 font-normal">/ 1,000</span>
               </div>
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards}</div>
-                <div className="text-[9px] text-slate-400">+{idle?.shardsPerHr ?? 45}/hr</div>
+              <div className="text-[9px] text-slate-400">Soul Core Saturation</div>
+            </div>
+            <div className="p-2 rounded-xl sp-inset">
+              <div className="font-mono-num text-xs font-extrabold text-sky-300">
+                ⚡ {ss.soulEssence}/{ss.maxSoulEssence}
               </div>
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-amber-300">🪙 {user.coins}</div>
-                <div className="text-[9px] text-slate-400">+{idle?.coinsPerHr ?? 30}/hr</div>
+              <div className="text-[9px] text-slate-400">❤️ {ss.heroHp}/{ss.heroMaxHp} HP</div>
+            </div>
+            <div className="p-2 rounded-xl sp-inset">
+              <div className="font-mono-num text-xs font-extrabold text-amber-300">✦ {profile.shards}</div>
+              <div className="text-[9px] text-slate-400">🪙 {user.coins} Coins</div>
+            </div>
+            <div className="p-2 rounded-xl sp-inset">
+              <div
+                className={`font-mono-num text-xs font-extrabold ${
+                  ss.sunPhase === 'night'
+                    ? 'text-rose-400'
+                    : ss.sunPhase === 'dusk'
+                      ? 'text-amber-300'
+                      : 'text-emerald-300'
+                }`}
+              >
+                {ss.sunPhase === 'night' ? '🌑 NIGHT TIDE' : ss.sunPhase === 'dusk' ? '🌅 DUSK' : '☀️ DAYLIGHT'}
               </div>
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-rose-300">
-                  🔥 {idle?.celestialEmbers ?? 0}
-                </div>
-                <div className="text-[9px] text-slate-400">Ascend ×{(idle?.ascensionMult ?? 1).toFixed(2)}</div>
+              <div className="text-[9px] text-slate-400">
+                Black Sea ({ss.sunProgress}%) • {ss.slainShades.count} Shades
               </div>
             </div>
-          );
-        })()}
+          </div>
+        )}
 
-        {/* Campfire 1-of-3 Run Relic Draft Banner */}
-        {loop && loop.pendingRelicChoices.length > 0 && onIdleConfig && (
-          <div className="p-3 rounded-2xl bg-sky-500/12 border border-sky-400/45 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-extrabold text-sky-200">
-                🕯️ Campfire Relic Draft — Choose 1 Permanent Run Power
-              </span>
-              <span className="text-[10px] text-slate-300 font-bold">
-                Active: {loop.activeRelics.length} Relic{loop.activeRelics.length === 1 ? '' : 's'}
-              </span>
+        {/* Progressive Arc 1 Acts Navigation Bar */}
+        {ss && onIdleConfig && (
+          <div className="flex flex-wrap items-center justify-between gap-1.5 p-2 rounded-2xl sp-inset">
+            <div className="text-[10px] font-extrabold text-white px-1 truncate">
+              {ss.currentAct.title}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {loop.pendingRelicChoices.map((rel) => (
+            <div className="flex items-center gap-1 flex-wrap">
+              {ss.allActs.map((a) => (
                 <button
-                  key={rel.id}
+                  key={a.act}
                   type="button"
-                  disabled={busy}
-                  onClick={() => runAction(() => onIdleConfig({ pickRelic: rel.id }))}
-                  className="p-2.5 rounded-xl sp-inset border border-sky-400/40 hover:border-amber-300/70 text-left space-y-1 cursor-pointer transition"
+                  disabled={busy || !a.unlocked}
+                  onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'select_act', act: a.act } }))}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition disabled:opacity-40 ${
+                    ss.arcAct === a.act ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
+                  }`}
                 >
-                  <div className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
-                    <span>{rel.icon}</span>
-                    <span className="truncate">{rel.name}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-300 leading-snug">{rel.desc}</div>
+                  {a.unlocked ? `Act ${a.act}` : `🔒 Act ${a.act}`}
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Boss Wall Alert & Re-Challenge Banner */}
-        {idle && (idle.bossWallStuck || idle.gambits.stageProgression === 'farm_stage') && onIdleConfig && (
-          <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-400/50 flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11px] font-extrabold text-amber-200">
-                {idle.bossWallStuck
-                  ? `🛡️ Emergency Extraction Retreat — Farming Stage ${idle.stage}`
-                  : `🔁 Farming Mode Active — Stage ${idle.stage}`}
-              </div>
-              <div className="text-[10px] text-amber-100/80">
-                Stage {idle.stage} Boss Rec Power: {idle.bossRecPower ?? Math.round((idle.recommendedPower ?? 160) * 1.45)} · Stack Loop Synergies or Study Overdrive before retrying.
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onIdleConfig({ challengeBoss: true }))}
-              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-white border border-amber-300/60 text-[11px] font-extrabold cursor-pointer shrink-0"
-            >
-              👑 Challenge Stage {idle.stage} Boss
+        {/* Nightmare Spell Whisper & Error Feedback */}
+        {actionError && (
+          <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-400/60 text-[11px] font-bold text-rose-200 flex items-center justify-between gap-2">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)} className="px-1.5 py-0.5 rounded sp-badge text-[9px] cursor-pointer">
+              Dismiss
             </button>
           </div>
         )}
-
-        {/* Active Loop Trait Synergies & Campfire Relics Bar */}
-        {loop && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {loop.activeTraits.map((tr) => {
-              const lit = tr.tier > 0;
-              const nextBp = tr.breakpoints.find((b) => b > tr.count) ?? tr.breakpoints[tr.breakpoints.length - 1];
-              return (
-                <span
-                  key={tr.id}
-                  title={`${tr.name}: ${tr.activeDesc}`}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
-                    lit
-                      ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
-                      : tr.count > 0
-                        ? 'sp-badge border-white/20 text-slate-200'
-                        : 'sp-inset border-white/10 text-slate-500'
-                  }`}
-                >
-                  {tr.icon} {tr.name.split(' ')[0]} {tr.count}/{nextBp}
-                </span>
-              );
-            })}
-            {loop.activeRelics.map((r) => (
-              <span
-                key={r.id}
-                title={r.desc}
-                className="px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-400/45 text-sky-200 text-[10px] font-bold"
-              >
-                {r.icon} {r.name}
-              </span>
-            ))}
+        {ss?.lastWhisper && (
+          <div className="px-3 py-1.5 rounded-xl bg-black/45 border border-white/10 text-[11px] italic text-slate-200">
+            {ss.lastWhisper}
           </div>
         )}
 
-        {/* Interactive 7x5 Tactical Loop-Builder Pixel Canvas */}
-        <PixelCanvas
-          game={game}
-          lastEvents={lastEvents}
-          eventSeq={eventSeq}
-          focusFever={heroStats.studyBonuses.focusFever}
-          isStudying={isStudying}
-          selectedCard={selectedCard}
-          onAutoWaveClear={handleAutoWaveClear}
-          onPlaceLoopTile={handlePlaceLoopTile}
-        />
+        {/* Interactive Non-Pixel Three.js 3D WebGL Engine */}
+        {ss && (
+          <ShadowSlave3DCanvas
+            shadowSlave={ss}
+            viewMode={view3dMode}
+            eventSeq={eventSeq}
+            onSelectNode={(nodeId) => {
+              if (onIdleConfig) {
+                runAction(() => onIdleConfig({ shadowAction: { type: 'move_node', nodeId } }));
+              }
+            }}
+          />
+        )}
 
-        {/* Battle Pace Pill Switcher & Auto-Architect Toggle */}
-        {idle && onIdleConfig && (
-          <div className="p-2 rounded-2xl sp-inset flex flex-wrap items-center justify-between gap-2 text-[11px]">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 px-1">
-                ⏱️ Pace
+        {/* Real-Time Shadow Ribbon Wrapping & Tactical 3D Combat Controls */}
+        {ss && onIdleConfig && (
+          <div className="p-3 rounded-2xl sp-inset space-y-2.5">
+            {/* Active Creature HUD + Intent */}
+            {ss.activeCombat && (
+              <div className="p-2.5 rounded-xl bg-black/45 border border-white/10 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <div className="text-xs font-extrabold text-white">
+                    {ss.activeCombat.isBoss ? '👑 ' : '⚔️ '}
+                    {ss.activeCombat.name}
+                    <span className="ml-1.5 text-[10px] font-bold text-slate-400">
+                      ({ss.activeCombat.rank} {ss.activeCombat.enemyClass})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {ss.activeCombat.staggered ? (
+                      <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-extrabold animate-pulse">
+                        💥 STAGGERED (2.1× DMG!)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-rose-500/25 border border-rose-400/50 text-rose-200 text-[10px] font-extrabold">
+                        Intent: {ss.activeCombat.intent} ({ss.activeCombat.atk} ATK)
+                      </span>
+                    )}
+                    <span className="font-mono-num text-[11px] font-extrabold text-white">
+                      {ss.activeCombat.hp}/{ss.activeCombat.maxHp}
+                    </span>
+                  </div>
+                </div>
+                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all bg-gradient-to-r from-rose-500 to-amber-400"
+                    style={{ width: `${Math.max(0, Math.min(100, (ss.activeCombat.hp / Math.max(1, ss.activeCombat.maxHp)) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Shadow Wrapping Selector */}
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
+                🌑 Shadow Wrap Control:
               </span>
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-1.5 flex-1 max-w-md">
                 {(
                   [
-                    { key: '1x', label: '1× Tactical' },
-                    { key: '2x', label: '2× Brisk' },
-                    { key: 'overdrive', label: '⚡ Max' },
+                    { target: 'weapon', label: '🗡️ Wrap Weapon' },
+                    { target: 'body', label: '🛡️ Wrap Body' },
+                    { target: 'echo', label: '🗿 Wrap Echo' },
                   ] as const
-                ).map((opt) => {
-                  const active = (idle.gambits.battlePace || '1x') === opt.key;
-                  return (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => runAction(() => onIdleConfig({ gambits: { battlePace: opt.key } }))}
-                      className={`py-1 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
-                        active ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
+                ).map((w) => (
+                  <button
+                    key={w.target}
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      runAction(() => onIdleConfig({ shadowAction: { type: 'wrap_shadow', target: w.target } }))
+                    }
+                    className={`py-1.5 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
+                      ss.shadowWrap === w.target ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {w.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {loop && (
+            {/* 4 Tactical Combat & Survival Buttons */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'slash' } }))}
+                className="py-2 px-2.5 rounded-xl bg-rose-600/85 hover:bg-rose-500 text-white text-[11px] font-extrabold cursor-pointer"
+              >
+                ⚔️ Soul Slash (6⚡)
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'deflect' } }))}
+                className="py-2 px-2.5 rounded-xl bg-sky-600/85 hover:bg-sky-500 text-white text-[11px] font-extrabold cursor-pointer"
+              >
+                🛡️ Deflect & Stagger (+12⚡)
+              </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() =>
-                  runAction(() => onIdleConfig({ toggleAutoArchitect: !loop.autoArchitect }))
+                  runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'aspect_art' } }))
                 }
-                className={`px-2.5 py-1 rounded-xl border text-[10px] font-extrabold cursor-pointer transition ${
-                  loop.autoArchitect
-                    ? 'sp-tab-active border-sky-400/60 text-sky-200'
-                    : 'sp-badge text-slate-300 hover:text-white'
-                }`}
+                className="py-2 px-2.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer truncate"
+                title={ss.aspect.abilityDesc}
               >
-                🤖 Auto-Architect: {loop.autoArchitect ? 'ON' : 'OFF'}
+                {ss.aspect.icon} Aspect Art (18⚡)
               </button>
-            )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'camp_statue' } }))}
+                className="py-2 px-2.5 rounded-xl bg-emerald-600/85 hover:bg-emerald-500 text-white text-[11px] font-extrabold cursor-pointer"
+              >
+                🏕️ Camp High Statue
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Tactical Tile Card Hand + Adjacency Evolution Recipes */}
-        {loop && onIdleConfig && (
-          <div className="p-3 rounded-2xl sp-inset space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[11px] font-extrabold text-white">
-                🃏 Tactical Tile Hand ({handCards.length}/7)
-                <span className="text-[10px] font-normal text-slate-400 ml-1.5">
-                  {selectedCard
-                    ? `Selected ${selectedCard.icon} ${selectedCard.name} — tap any highlighted ${selectedCard.placement.toUpperCase()} cell above!`
-                    : 'Select a card & tap the 7×5 grid, or click Place / Merge'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
+        {/* 3D Waypoint Nodes List for Current Act */}
+        {ss && onIdleConfig && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            {ss.currentAct.nodes.map((node) => {
+              const active = node.id === ss.currentNode.id;
+              const cleared = ss.clearedNodeIds.includes(node.id);
+              const floodedRisk = ss.sunProgress >= 75 && node.altitude === 'low';
+              return (
                 <button
+                  key={node.id}
                   type="button"
                   disabled={busy}
-                  onClick={() => setShowRecipes((v) => !v)}
-                  className="px-2 py-1 rounded-lg sp-badge text-[10px] font-extrabold text-amber-300 cursor-pointer"
+                  onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'move_node', nodeId: node.id } }))}
+                  className={`p-2 rounded-xl border text-left space-y-0.5 cursor-pointer transition ${
+                    active
+                      ? 'sp-tab-active border-sky-400'
+                      : floodedRisk
+                        ? 'bg-rose-950/40 border-rose-500/45 text-rose-200'
+                        : 'sp-inset border-white/15 hover:border-white/40'
+                  }`}
                 >
-                  🧪 5 Evolutions
+                  <div className="flex items-center justify-between gap-1 text-[9px] font-extrabold uppercase">
+                    <span className={node.altitude === 'high' ? 'text-sky-300' : 'text-amber-300'}>
+                      {node.altitude === 'high' ? '⛰️ High' : '🪸 Low'}
+                    </span>
+                    <span>{node.isBoss ? '👑 BOSS' : cleared ? '✓' : `+${node.fragments}✦`}</span>
+                  </div>
+                  <div className="text-[10px] font-extrabold text-white truncate">{node.name}</div>
                 </button>
-                <button
-                  type="button"
-                  disabled={busy || handCards.length === 0}
-                  onClick={() => runAction(() => onIdleConfig({ mergeHand: true }))}
-                  className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold disabled:opacity-40 cursor-pointer"
-                >
-                  ✨ Merge Duplicates
-                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Soul Sea Runes, Spellweave Memories Loom, Echoes & Altar of Weaver Drawer */}
+        {ss && onIdleConfig && (
+          <div className="p-3 rounded-2xl sp-inset space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1">
+                {(
+                  [
+                    { key: 'memories', label: `🧵 Memories & Echoes (${ss.memories.length})` },
+                    { key: 'runes', label: `🧬 Runes & 120+ Attributes` },
+                    { key: 'cohort', label: `🛡️ Cohort & Altar of Weaver` },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setShowSoulPanel(t.key)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                      showSoulPanel === t.key ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
+              <span className="text-[10px] text-amber-200 font-bold">
+                Appraisal: {ss.appraisal}
+              </span>
             </div>
 
-            {showRecipes && (
-              <div className="p-2.5 rounded-xl bg-slate-900/80 border border-amber-400/35 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[10px] text-slate-200">
-                <div>🌸 Meadow + Non-Meadow → <strong className="text-emerald-300">🌺 Blooming Sanctuary</strong></div>
-                <div>🏚️ Village + 🧛 Vampire Manor → <strong className="text-amber-300">🏰 Count&apos;s Estate</strong></div>
-                <div>⛰️ Mountain + 2 Mountains → <strong className="text-sky-300">🏔️ Celestial Summit</strong></div>
-                <div>🗼 Storm + 🔮 Chrono/Storm → <strong className="text-cyan-300">⚡ Tesla Spire</strong></div>
-                <div className="sm:col-span-2">⚗️ Alchemist Vault + 3 Neighbor Tiles → <strong className="text-rose-300">💎 Mythic Treasury (+1 Gear Roll!)</strong></div>
-              </div>
-            )}
-
-            {handCards.length === 0 ? (
-              <div className="text-[11px] text-slate-400 py-2 text-center">
-                Hand empty — let your hero battle along the Loop or answer a Study Quiz to draw +2 ★2 Cards!
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {handCards.map((c) => {
-                  const isSel = selectedCard?.id === c.id;
-                  const starsStr = '★'.repeat(c.stars || 1);
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => setSelectedCardId(isSel ? null : c.id)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') setSelectedCardId(isSel ? null : c.id);
-                      }}
-                      className={`p-2 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-1.5 ${
-                        isSel
-                          ? 'bg-emerald-500/20 border-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.28)]'
-                          : 'bg-slate-900/70 border-white/15 hover:border-sky-400/60'
-                      }`}
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-base">{c.icon}</span>
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                              c.placement === 'road'
-                                ? 'bg-amber-500/20 text-amber-300'
-                                : 'bg-emerald-500/20 text-emerald-300'
-                            }`}
-                          >
-                            {c.placement === 'road' ? 'ROAD' : 'LAND'}
-                          </span>
-                        </div>
+            {showSoulPanel === 'memories' && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {ss.memories.map((mem) => (
+                    <div key={mem.id} className="p-2.5 rounded-xl bg-black/40 border border-amber-400/30 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
                         <div className="text-[11px] font-extrabold text-white truncate">
-                          <span className="text-amber-300 mr-1">{starsStr}</span>
-                          {c.name}
+                          {mem.icon} {mem.name} <span className="text-amber-300">Weave Lv.{mem.weaveLevel}</span>
                         </div>
-                        <div className="text-[9px] text-slate-300 line-clamp-2 leading-tight">{c.desc}</div>
+                        <button
+                          type="button"
+                          disabled={busy || profile.shards < mem.weaveCost}
+                          onClick={() =>
+                            runAction(() => onIdleConfig({ shadowAction: { type: 'weave_memory', memoryId: mem.id } }))
+                          }
+                          className="px-2 py-1 rounded-lg sp-btn-primary text-[9px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
+                        >
+                          🧵 Weave ({mem.weaveCost}✦)
+                        </button>
+                      </div>
+                      <div className="text-[10px] text-slate-300 leading-snug">{mem.enchantment}</div>
+                      <div className="text-[9px] font-mono-num text-sky-300">
+                        ⚔️ +{mem.effectiveAtk} ATK • 🛡️ +{mem.effectiveDef} DEF • Durability {mem.durability}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Echoes / Stone Saint Awakening */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {ss.echoes.map((echo) => (
+                    <div key={echo.id} className="p-2.5 rounded-xl bg-slate-900/75 border border-purple-400/30 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-extrabold text-white truncate">
+                          {echo.icon} {echo.name} {echo.unlocked ? `(Lv.${echo.level})` : '🔒 Act II Boss Blueprint'}
+                        </div>
+                        <div className="text-[9px] text-slate-300 truncate">{echo.desc}</div>
                       </div>
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCardId(null);
-                          runAction(() => onIdleConfig({ placeCard: { cardId: c.id } }));
-                        }}
-                        className="w-full py-1 px-1.5 rounded-lg sp-badge hover:text-white text-[9px] font-extrabold text-sky-300 cursor-pointer"
+                        disabled={busy || profile.shards < echo.upgradeCost}
+                        onClick={() =>
+                          runAction(() => onIdleConfig({ shadowAction: { type: 'awaken_echo', echoId: echo.id } }))
+                        }
+                        className="px-2.5 py-1 rounded-lg sp-badge text-[9px] font-extrabold text-purple-200 disabled:opacity-40 cursor-pointer shrink-0"
                       >
-                        ⚡ Place / Merge
+                        🗿 Infuse ({echo.upgradeCost}✦)
                       </button>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showSoulPanel === 'runes' && (
+              <div className="space-y-2 text-[11px]">
+                <div className="p-2.5 rounded-xl bg-black/40 border border-white/10">
+                  <div className="font-extrabold text-white">
+                    {ss.aspect.icon} Aspect: [{ss.aspect.name}] ({ss.aspect.rank}) — {ss.aspect.title}
+                  </div>
+                  <div className="text-[10px] text-slate-300 mt-0.5">{ss.aspect.abilityDesc}</div>
+                  <div className="text-[10px] text-sky-300 font-bold mt-0.5">Passive: {ss.aspect.passiveBonus}</div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                  {ss.attributes.map((a) => (
+                    <div key={a.id} className="p-2 rounded-xl bg-black/35 border border-white/10 space-y-0.5">
+                      <div className="font-extrabold text-amber-200 text-[10px]">[{a.name}]</div>
+                      <div className="text-[9px] text-slate-400">{a.category} • ×{a.studyFragmentMult} Frags</div>
+                      <div className="text-[10px] text-slate-300 leading-tight">{a.desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-2.5 rounded-xl bg-rose-500/12 border border-rose-400/40">
+                  <div className="font-extrabold text-rose-200 text-[10px]">Flaw: [{ss.flaw.name}] — {ss.flaw.desc}</div>
+                  <div className="text-[10px] text-rose-100/80 mt-0.5">Combat: {ss.flaw.combatRule} • Study: {ss.flaw.studyRule}</div>
+                </div>
+              </div>
+            )}
+
+            {showSoulPanel === 'cohort' && (
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                  {ss.cohort.map((c) => (
+                    <div
+                      key={c.id}
+                      className={`p-2 rounded-xl border text-center space-y-0.5 ${
+                        c.unlocked ? 'sp-tab-active border-amber-400/40' : 'bg-black/30 border-white/10 opacity-50'
+                      }`}
+                    >
+                      <div className="text-base">{c.icon}</div>
+                      <div className="text-[10px] font-extrabold text-white">{c.name}</div>
+                      <div className="text-[9px] text-amber-200 truncate">[{c.trueName}]</div>
+                      <div className="text-[8px] text-slate-400">{c.unlocked ? c.role : 'Unlocks Act II–III'}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* High-Cost Altar of Weaver Fate Re-Weave */}
+                <div className="p-3 rounded-xl bg-purple-950/35 border border-purple-400/45 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-extrabold text-purple-200">
+                      🕸️ Altar of Weaver — Tear & Re-Weave Fate
+                    </div>
+                    <div className="text-[10px] text-slate-300">
+                      Altering Fate costs {ss.reweaveCost.shards}✦ Soul Shards & {ss.reweaveCost.coins}🪙 Coins (~15–20h of deep study).
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || profile.shards < ss.reweaveCost.shards || user.coins < ss.reweaveCost.coins}
+                    onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'reweave_fate' } }))}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-rose-600 text-white text-[10px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
+                  >
+                    🕸️ Re-Weave Fate ({ss.reweaveCost.shards}✦ · {ss.reweaveCost.coins}🪙)
+                  </button>
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Push-Your-Luck Expedition Loot Sack & Extraction Bar */}
-        {loop && onIdleConfig && (
-          <div className="p-2.5 rounded-2xl bg-emerald-500/12 border border-emerald-400/40 flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
-                🎒 Unbanked Expedition Loot Sack (Greed ×{loop.greedMultiplier.toFixed(2)})
-              </div>
-              <div className="text-xs font-mono-num font-extrabold text-white mt-0.5">
-                +{loop.lootSack.shards}✦ Shards · +{loop.lootSack.coins}🪙 · +{loop.lootSack.xp} XP · {loop.lootSack.gearRolls} Gear Roll{loop.lootSack.gearRolls === 1 ? '' : 's'}
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onIdleConfig({ extractLoop: true }))}
-              className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-[11px] cursor-pointer shrink-0"
-            >
-              🏕️ Extract at Campfire (Keep 100%)
-            </button>
-          </div>
-        )}
-
-        {/* Quick Action Controls Strip */}
+        {/* Quick Action Controls Strip (AFK Chest, Focus Study Quiz, Finishers) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
           {onIdleClaimAfk && (
             <button
@@ -659,7 +678,7 @@ export function QuestView({
               className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-600/90 via-amber-500/90 to-rose-600/90 text-white border border-amber-300/60 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span>🌟 Loop Finisher / Advance</span>
+              <span>🌟 Spell Overdrive Surge</span>
             </button>
           )}
           {onStudyCast && activeQuizCard && (
@@ -669,7 +688,7 @@ export function QuestView({
               onClick={() => setShowStudyQuiz((v) => !v)}
               className="py-2.5 px-3 rounded-xl sp-tab-active border border-sky-400/50 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span>🎓 Tactical Quiz (+2 Cards & 4×)</span>
+              <span>🎓 Nightmare Quiz (+Essence & Frags)</span>
             </button>
           )}
         </div>
@@ -679,7 +698,7 @@ export function QuestView({
           <div className="p-3 rounded-2xl sp-inset border border-sky-400/40 space-y-2">
             <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-sky-300">
               <span>
-                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +30m 4.0× Overdrive, +2 ★2 Cards & Gear!
+                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +28 Soul Essence, +2 Core Fragments & Loot!
               </span>
               <button
                 type="button"

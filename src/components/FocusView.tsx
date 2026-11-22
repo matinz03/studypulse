@@ -27,12 +27,13 @@ import {
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
 import { UniversityVaultPanel } from './UniversityVaultPanel';
-import { Room, StudyTask, Subject, SubjectStat, TimerMode, UniversityData } from '../types';
+import { Room, ShadowSlaveState, StudyTask, Subject, SubjectStat, TimerMode, UniversityData } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { SAVED_MIX_PRESETS, SoundPreset, TrackKey } from '../utils/soundEngine';
 
 interface FocusViewProps {
   themeId?: ThemeId;
+  shadowSlave?: ShadowSlaveState;
   mode: TimerMode;
   onChangeMode: (m: TimerMode) => void;
   customMins: number;
@@ -146,6 +147,7 @@ export function formatClock(totalSeconds: number) {
 
 export function FocusView({
   themeId = 'shadcn-dark',
+  shadowSlave,
   mode,
   onChangeMode,
   customMins,
@@ -630,97 +632,219 @@ export function FocusView({
           </div>
         </div>
 
-        {/* Precision Chronometer SVG Timer Ring */}
-        <div className="flex flex-col items-center">
-          <div className="relative w-[248px] h-[248px] flex items-center justify-center">
-            <svg width="248" height="248" viewBox="0 0 248 248" className="transform">
-              <defs>
-                <linearGradient id={`ringGrad-${themeId}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor={themeMeta.colors.accent} />
-                  <stop offset="55%" stopColor={themeMeta.colors.accent2} />
-                  <stop offset="100%" stopColor={themeMeta.colors.accent} />
-                </linearGradient>
-                <filter id="glowRing" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </defs>
+        {/* Aspect-Themed Chronometer SVG Timer Ring */}
+        {(() => {
+          const asp = shadowSlave?.aspect;
+          const ringAccent = asp?.primaryColor || themeMeta.colors.accent;
+          const ringAccent2 = asp?.secondaryColor || themeMeta.colors.accent2;
+          const ringStyle = asp?.ringStyle || 'default';
+          const gradId = `ringGrad-${themeId}-${asp?.id || 'base'}`;
 
-              <circle cx="124" cy="124" r="118" stroke={themeMeta.colors.track} strokeWidth="1" fill="none" />
-              <circle cx="124" cy="124" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
+          return (
+            <div className="flex flex-col items-center space-y-2">
+              <div className="relative w-[248px] h-[248px] flex items-center justify-center">
+                <svg width="248" height="248" viewBox="0 0 248 248" className="transform">
+                  <defs>
+                    <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor={ringAccent} />
+                      <stop offset="55%" stopColor={ringAccent2} />
+                      <stop offset="100%" stopColor={ringAccent} />
+                    </linearGradient>
+                    <filter id="glowRing" x="-25%" y="-25%" width="150%" height="150%">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
 
-              {Array.from({ length: 60 }).map((_, idx) => {
-                const major = idx % 5 === 0;
-                const deg = idx * 6;
-                return (
-                  <line
-                    key={idx}
-                    x1="124"
-                    y1={major ? 14 : 17}
-                    x2="124"
-                    y2={21}
-                    stroke={major ? themeMeta.colors.accent2 : themeMeta.colors.track}
-                    strokeOpacity={major ? 0.55 : 0.8}
-                    strokeWidth={major ? 1.5 : 1}
-                    transform={`rotate(${deg} 124 124)`}
+                  {/* Outer Aspect Ring Motif */}
+                  <circle
+                    cx="124"
+                    cy="124"
+                    r="119"
+                    stroke={ringAccent}
+                    strokeOpacity={isRunning ? 0.55 : 0.25}
+                    strokeWidth={ringStyle === 'black_sun' || ringStyle === 'fate_strings' ? '1.5' : '1'}
+                    strokeDasharray={ringStyle === 'fate_strings' ? '6 4' : ringStyle === 'mirror_shards' ? '3 6' : undefined}
+                    fill="none"
                   />
-                );
-              })}
+                  <circle cx="124" cy="124" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
 
-              <circle
-                cx="124"
-                cy="124"
-                r={radius}
-                stroke={`url(#ringGrad-${themeId})`}
-                strokeWidth="9"
-                strokeLinecap="round"
-                fill="none"
-                filter="url(#glowRing)"
-                strokeDasharray={circumference}
-                strokeDashoffset={dashOffset}
-                transform="rotate(-90 124 124)"
-                style={{ transition: 'stroke-dashoffset 0.35s linear' }}
-              />
+                  {/* Aspect Signature Inner Geometry */}
+                  {ringStyle === 'black_sun' && (
+                    <circle
+                      cx="124"
+                      cy="124"
+                      r="94"
+                      stroke={ringAccent}
+                      strokeOpacity="0.45"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 5"
+                      fill="none"
+                    />
+                  )}
+                  {(ringStyle === 'fate_strings' || ringStyle === 'mirror_shards') && (
+                    <polygon
+                      points="124,18 230,124 124,230 18,124"
+                      stroke={ringAccent}
+                      strokeOpacity="0.24"
+                      strokeWidth="1"
+                      fill="none"
+                    />
+                  )}
 
-              {progress > 0.005 && (
-                <circle
-                  cx={dotX}
-                  cy={dotY}
-                  r="6"
-                  fill={themeMeta.light ? '#ffffff' : '#09090b'}
-                  stroke={themeMeta.colors.accent}
-                  strokeWidth="3"
-                  filter="url(#glowRing)"
-                />
-              )}
-            </svg>
+                  {Array.from({ length: 60 }).map((_, idx) => {
+                    const major = idx % 5 === 0;
+                    const deg = idx * 6;
+                    return (
+                      <line
+                        key={idx}
+                        x1="124"
+                        y1={major ? 14 : 17}
+                        x2="124"
+                        y2={21}
+                        stroke={major ? ringAccent : themeMeta.colors.track}
+                        strokeOpacity={major ? 0.65 : 0.75}
+                        strokeWidth={major ? 1.5 : 1}
+                        transform={`rotate(${deg} 124 124)`}
+                      />
+                    );
+                  })}
 
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-[174px] h-[174px] sp-dial-core flex flex-col items-center justify-center p-2">
-                <FocusSpirit
-                  elapsedSec={elapsedSec}
-                  isRunning={isRunning}
-                  accentColor={resolvedSubAccent}
-                  spiritSkin={spiritSkin}
-                  themeId={themeId}
-                />
-                <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tighter text-white mt-1">
-                  {formatClock(displayedSeconds)}
-                </div>
-                <div className="text-[11px] font-semibold text-slate-400 mt-1 flex items-center gap-1.5 max-w-[136px] truncate">
-                  <span
-                    className="w-1.5 h-1.5 rounded-full inline-block shrink-0"
-                    style={{ backgroundColor: resolvedSubAccent }}
+                  <circle
+                    cx="124"
+                    cy="124"
+                    r={radius}
+                    stroke={`url(#${gradId})`}
+                    strokeWidth="9"
+                    strokeLinecap="round"
+                    fill="none"
+                    filter="url(#glowRing)"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={dashOffset}
+                    transform="rotate(-90 124 124)"
+                    style={{ transition: 'stroke-dashoffset 0.35s linear' }}
                   />
-                  <span className="truncate">{activeSubject?.name || 'Focus'}</span>
+
+                  {progress > 0.005 && (
+                    <circle
+                      cx={dotX}
+                      cy={dotY}
+                      r="6"
+                      fill={themeMeta.light ? '#ffffff' : '#09090b'}
+                      stroke={ringAccent}
+                      strokeWidth="3"
+                      filter="url(#glowRing)"
+                    />
+                  )}
+                </svg>
+
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div
+                    className="w-[174px] h-[174px] sp-dial-core flex flex-col items-center justify-center p-2"
+                    style={
+                      asp
+                        ? {
+                            boxShadow: `inset 0 0 28px ${ringAccent}28, 0 0 18px ${ringAccent}22`,
+                            borderColor: `${ringAccent}44`,
+                          }
+                        : undefined
+                    }
+                  >
+                    <FocusSpirit
+                      elapsedSec={elapsedSec}
+                      isRunning={isRunning}
+                      accentColor={asp ? ringAccent : resolvedSubAccent}
+                      spiritSkin={spiritSkin}
+                      themeId={themeId}
+                    />
+                    <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tighter text-white mt-1">
+                      {formatClock(displayedSeconds)}
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-300 mt-1 flex items-center gap-1.5 max-w-[144px] truncate">
+                      <span>{asp?.icon || '⚡'}</span>
+                      <span className="truncate">{activeSubject?.name || 'Focus'}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {/* Awakened Soul Runes Strip inside Focus Tab */}
+              {shadowSlave && (
+                <div className="w-full p-2.5 rounded-2xl sp-inset border border-white/10 space-y-1.5 text-[10px]">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <span className="font-extrabold text-white flex items-center gap-1">
+                      <span>{shadowSlave.aspect.icon}</span>
+                      <span style={{ color: shadowSlave.aspect.primaryColor }}>[{shadowSlave.aspect.name}]</span>
+                      <span className="text-slate-400 font-semibold">
+                        • {shadowSlave.rank} {shadowSlave.coreClass.name}
+                      </span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full sp-badge font-mono-num font-bold text-amber-200">
+                      [{shadowSlave.trueName}]
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 items-center">
+                    <div>
+                      <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
+                        <span>Core Fragments</span>
+                        <span className="font-mono-num text-white font-bold">
+                          {shadowSlave.soulFragments}/1,000
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, (shadowSlave.soulFragments / 1000) * 100)}%`,
+                            backgroundColor: shadowSlave.aspect.primaryColor,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
+                        <span>Soul Essence</span>
+                        <span className="font-mono-num text-sky-300 font-bold">
+                          ⚡ {shadowSlave.soulEssence}/{shadowSlave.maxSoulEssence}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-sky-400 transition-all"
+                          style={{
+                            width: `${Math.min(100, (shadowSlave.soulEssence / Math.max(1, shadowSlave.maxSoulEssence)) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                    {shadowSlave.attributes.map((attr) => (
+                      <span
+                        key={attr.id}
+                        title={`${attr.desc} (×${attr.studyFragmentMult} Study Frags)`}
+                        className="px-1.5 py-0.5 rounded bg-white/5 border border-white/15 text-slate-200 font-bold"
+                      >
+                        [{attr.name}]
+                      </span>
+                    ))}
+                    <span
+                      title={`${shadowSlave.flaw.desc} — ${shadowSlave.flaw.studyRule}`}
+                      className="px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-400/40 text-rose-200 font-bold"
+                    >
+                      Flaw: [{shadowSlave.flaw.name}]
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Integrated Focus Intention Input + Primary Action Controls */}
         <div className="space-y-2.5 pt-1">

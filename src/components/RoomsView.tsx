@@ -162,8 +162,8 @@ export function RoomsView({
       {/* Room Selector Rail Header & Desktop Controls */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
         <div>
-          <h2 className="text-base font-extrabold text-white tracking-tight">Live Study Rooms</h2>
-          <p className="text-xs text-slate-400">Sit at a desk & focus together in real time</p>
+          <h2 className="text-base font-extrabold text-white tracking-tight">Dream Realm Citadels</h2>
+          <p className="text-xs text-slate-400">Anchor a Gateway & defend the Sanctuary together in real time</p>
         </div>
         <div className="flex items-center gap-1.5">
           {!showAllGrid && (

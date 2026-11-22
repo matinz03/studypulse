@@ -28,6 +28,19 @@ import {
   trustRankLabel,
 } from './storyData.js';
 import {
+  REWEAVE_FATE_COST,
+  SS_ARC1_ACTS,
+  SS_ASPECTS,
+  SS_ATTRIBUTES,
+  SS_COHORT,
+  SS_CORE_CLASSES,
+  SS_ECHOES,
+  SS_FLAWS,
+  SS_MEMORIES,
+  SS_RANKS,
+  SS_TRUE_NAMES,
+} from './shadowSlaveData.js';
+import {
   generateDungeonFloor,
   isWalkableTile,
   updateDungeonFov,
@@ -1152,6 +1165,244 @@ export function ensureIdleState(flags, profile, now = Date.now()) {
   };
 }
 
+// ==========================================
+// SHADOW SLAVE: AWAKENING, SOUL SEA & FORGOTTEN SHORE ENGINE
+// ==========================================
+
+function pickWeightedAspect(seedNum) {
+  const total = SS_ASPECTS.reduce((acc, a) => acc + (a.weight || 10), 0);
+  const rand = ((Math.abs(Math.sin(seedNum * 12.9898) * 43758.5453) % 1) + Math.random()) * 0.5;
+  let roll = rand * total;
+  for (const asp of SS_ASPECTS) {
+    roll -= asp.weight || 10;
+    if (roll <= 0) return asp;
+  }
+  return SS_ASPECTS[0];
+}
+
+function pickUniqueItems(pool, count) {
+  const copy = [...pool];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, count);
+}
+
+function createCombatFromNode(node, actNum = 1) {
+  if (!node) return null;
+  return {
+    nodeId: node.id,
+    enemyKey: node.enemyKey || 'slime',
+    name: node.enemyName || 'Carapace Scavenger',
+    rank: node.enemyRank || 'Dormant',
+    enemyClass: node.enemyClass || 'Beast',
+    hp: node.hp || 85,
+    maxHp: node.hp || 85,
+    atk: node.atk || 12,
+    intent: node.intent || 'CLAW_SWIPE',
+    staggered: false,
+    staggerTurns: 0,
+    isBoss: Boolean(node.isBoss),
+    act: actNum,
+    fragments: node.fragments || 1,
+    shards: node.shards || 8,
+  };
+}
+
+function rollFreshShadowIdentity(userId, salt = 0) {
+  const asp = pickWeightedAspect((userId || 1) + salt);
+  const attrs = pickUniqueItems(SS_ATTRIBUTES, 3).map((a) => a.id);
+  const flaw = SS_FLAWS[Math.floor(Math.random() * SS_FLAWS.length)];
+  const trueName = SS_TRUE_NAMES[Math.floor(Math.random() * SS_TRUE_NAMES.length)];
+  return {
+    aspectId: asp.id,
+    attributeIds: attrs,
+    flawId: flaw.id,
+    trueName,
+    appraisal: asp.rank === 'Divine' || asp.rank === 'Sacred' ? 'Glorious' : 'Excellent',
+  };
+}
+
+export function ensureShadowSlaveState(flags, profile) {
+  const existing = flags.shadowSlave && typeof flags.shadowSlave === 'object' ? flags.shadowSlave : null;
+  const freshId = existing ? null : rollFreshShadowIdentity(profile.user_id || 1);
+
+  const aspectId =
+    existing && SS_ASPECTS.some((a) => a.id === existing.aspectId)
+      ? existing.aspectId
+      : freshId.aspectId;
+  const attrIds =
+    existing && Array.isArray(existing.attributeIds) && existing.attributeIds.length >= 2
+      ? existing.attributeIds.filter((id) => SS_ATTRIBUTES.some((a) => a.id === id)).slice(0, 3)
+      : freshId.attributeIds;
+  while (attrIds.length < 3) {
+    const candidate = SS_ATTRIBUTES[Math.floor(Math.random() * SS_ATTRIBUTES.length)].id;
+    if (!attrIds.includes(candidate)) attrIds.push(candidate);
+  }
+  const flawId =
+    existing && SS_FLAWS.some((f) => f.id === existing.flawId) ? existing.flawId : freshId.flawId;
+
+  const arcAct = Math.max(1, Math.min(4, Number(existing?.arcAct || 1)));
+  const maxArcAct = Math.max(arcAct, Math.min(4, Number(existing?.maxArcAct || 1)));
+  const actDef = SS_ARC1_ACTS.find((a) => a.act === arcAct) || SS_ARC1_ACTS[0];
+  const nodeExists = actDef.nodes.some((n) => n.id === existing?.currentNodeId);
+  const currentNodeId = nodeExists ? existing.currentNodeId : actDef.nodes[0].id;
+  const curNode = actDef.nodes.find((n) => n.id === currentNodeId) || actDef.nodes[0];
+
+  const attrObjs = attrIds.map((id) => SS_ATTRIBUTES.find((a) => a.id === id)).filter(Boolean);
+  const attrHp = attrObjs.reduce((s, a) => s + (a.hpBonus || 0), 0);
+  const attrEssence = attrObjs.reduce((s, a) => s + (a.essenceBonus || 0), 0);
+  const rankIdx = Math.max(0, SS_RANKS.indexOf(existing?.rank || 'Dormant'));
+  const coreCount = Math.max(1, Math.min(7, Number(existing?.coreCount || 1)));
+  const heroMaxHp = Math.round((120 + attrHp + rankIdx * 55 + (coreCount - 1) * 45) * 1);
+  const maxSoulEssence = Math.round(100 + attrEssence + (coreCount - 1) * 35);
+
+  const memories =
+    Array.isArray(existing?.memories) && existing.memories.length > 0
+      ? existing.memories
+      : [{ id: 'silver_bell', weaveLevel: 1, durability: 100, equipped: true }];
+
+  const echoes =
+    Array.isArray(existing?.echoes) && existing.echoes.length > 0
+      ? existing.echoes
+      : [{ id: 'stone_saint', unlocked: false, awakened: false, level: 1, fragmentsFed: 0 }];
+
+  const activeCombat =
+    existing?.activeCombat && existing.activeCombat.hp > 0
+      ? existing.activeCombat
+      : createCombatFromNode(curNode, arcAct);
+
+  return {
+    aspectId,
+    attributeIds: attrIds,
+    flawId,
+    trueName: existing?.trueName || freshId.trueName,
+    appraisal: existing?.appraisal || freshId.appraisal,
+    rank: SS_RANKS[rankIdx] || 'Dormant',
+    coreCount,
+    soulFragments: Math.max(0, Number(existing?.soulFragments || 0)),
+    soulEssence: Math.max(0, Math.min(maxSoulEssence, Number(existing?.soulEssence ?? Math.min(maxSoulEssence, 75)))),
+    maxSoulEssence,
+    heroHp: Math.max(1, Math.min(heroMaxHp, Number(existing?.heroHp ?? heroMaxHp))),
+    heroMaxHp,
+    arcAct,
+    maxArcAct,
+    currentNodeId,
+    clearedNodeIds: Array.isArray(existing?.clearedNodeIds) ? existing.clearedNodeIds : [],
+    sunProgress: Math.max(0, Math.min(100, Number(existing?.sunProgress ?? 18))),
+    shadowWrap: ['weapon', 'body', 'echo'].includes(existing?.shadowWrap) ? existing.shadowWrap : 'weapon',
+    activeCombat,
+    memories,
+    echoes,
+    slainShades: {
+      count: Math.max(1, Number(existing?.slainShades?.count || 1)),
+      recent: Array.isArray(existing?.slainShades?.recent)
+        ? existing.slainShades.recent.slice(0, 12)
+        : ['Larva-Touched Caravan Slave'],
+    },
+    spellweaveStrings: Math.max(1, Number(existing?.spellweaveStrings || 1)),
+    lastWhisper: existing?.lastWhisper || '[Your Nightmare has begun. Survive the Black Mountain to awaken your Soul Core.]',
+  };
+}
+
+function buildShadowSlaveClientState(ss) {
+  const aspect = SS_ASPECTS.find((a) => a.id === ss.aspectId) || SS_ASPECTS[0];
+  const attributes = ss.attributeIds
+    .map((id) => SS_ATTRIBUTES.find((a) => a.id === id))
+    .filter(Boolean);
+  const flaw = SS_FLAWS.find((f) => f.id === ss.flawId) || SS_FLAWS[0];
+  const coreClass = SS_CORE_CLASSES.find((c) => c.coreCount === ss.coreCount) || SS_CORE_CLASSES[0];
+  const currentAct = SS_ARC1_ACTS.find((a) => a.act === ss.arcAct) || SS_ARC1_ACTS[0];
+  const currentNode = currentAct.nodes.find((n) => n.id === ss.currentNodeId) || currentAct.nodes[0];
+  const sunPhase = ss.sunProgress >= 75 ? 'night' : ss.sunProgress >= 50 ? 'dusk' : 'day';
+
+  const enrichedMemories = ss.memories
+    .map((m) => {
+      const def = SS_MEMORIES.find((d) => d.id === m.id);
+      if (!def) return null;
+      const scale = 1 + ((m.weaveLevel || 1) - 1) * 0.25;
+      return {
+        ...def,
+        weaveLevel: m.weaveLevel || 1,
+        durability: m.durability ?? 100,
+        equipped: Boolean(m.equipped),
+        effectiveAtk: Math.round(def.atk * scale),
+        effectiveDef: Math.round(def.def * scale),
+        weaveCost: 20 * (m.weaveLevel || 1),
+      };
+    })
+    .filter(Boolean);
+
+  const enrichedEchoes = ss.echoes
+    .map((e) => {
+      const def = SS_ECHOES.find((d) => d.id === e.id);
+      if (!def) return null;
+      const scale = 1 + ((e.level || 1) - 1) * 0.22 + (e.awakened ? 0.35 : 0);
+      return {
+        ...def,
+        unlocked: Boolean(e.unlocked),
+        awakened: Boolean(e.awakened),
+        level: e.level || 1,
+        effectiveAtk: Math.round(def.atk * scale),
+        effectiveDef: Math.round(def.def * scale),
+        upgradeCost: 30 * (e.level || 1),
+      };
+    })
+    .filter(Boolean);
+
+  const cohort = SS_COHORT.map((c, idx) => ({
+    ...c,
+    unlocked:
+      c.id === 'sunny' ||
+      (ss.arcAct >= 2 && (c.id === 'nephis' || c.id === 'cassie')) ||
+      (ss.arcAct >= 3 && idx <= 4),
+  }));
+
+  const studyFragMult = attributes.reduce((m, a) => Math.max(m, a.studyFragmentMult || 1), 1);
+
+  return {
+    aspect,
+    attributes,
+    flaw,
+    trueName: ss.trueName,
+    appraisal: ss.appraisal,
+    rank: ss.rank,
+    coreCount: ss.coreCount,
+    coreClass,
+    soulFragments: ss.soulFragments,
+    fragmentsPerCore: 1000,
+    soulEssence: ss.soulEssence,
+    maxSoulEssence: ss.maxSoulEssence,
+    heroHp: ss.heroHp,
+    heroMaxHp: ss.heroMaxHp,
+    arcAct: ss.arcAct,
+    maxArcAct: ss.maxArcAct,
+    currentAct,
+    allActs: SS_ARC1_ACTS.map((a) => ({
+      act: a.act,
+      key: a.key,
+      title: a.title,
+      subtitle: a.subtitle,
+      unlocked: a.act <= ss.maxArcAct,
+    })),
+    currentNode,
+    clearedNodeIds: ss.clearedNodeIds,
+    sunProgress: ss.sunProgress,
+    sunPhase,
+    shadowWrap: ss.shadowWrap,
+    activeCombat: ss.activeCombat,
+    memories: enrichedMemories,
+    echoes: enrichedEchoes,
+    cohort,
+    slainShades: ss.slainShades,
+    spellweaveStrings: ss.spellweaveStrings,
+    lastWhisper: ss.lastWhisper,
+    studyFragMult,
+    reweaveCost: REWEAVE_FATE_COST,
+  };
+}
+
 export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
   const warlordRank = idle.ascensionRelics.relic_warlord || 0;
   const chronosRank = idle.ascensionRelics.relic_chronos || 0;
@@ -1264,7 +1515,7 @@ function accrueIdleProgress(db, profile, flags, heroStats, now = Date.now()) {
   return idle;
 }
 
-function buildIdleClientState(idle, heroStats, now = Date.now()) {
+function buildIdleClientState(idle, heroStats, now = Date.now(), shadowSlaveState = null) {
   const metrics = computeIdleMetrics(idle, heroStats, now);
   const realm = getIdleRealmForStage(idle.stage);
   const enemyTemplate = IDLE_STAGE_ENEMIES[(idle.stage + idle.wave - 2) % IDLE_STAGE_ENEMIES.length] || IDLE_STAGE_ENEMIES[0];
@@ -1420,6 +1671,7 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
       lootSack: loopState.lootSack || { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 },
       synergiesTriggered: Number(loopState.synergiesTriggered || 0),
     },
+    shadowSlave: shadowSlaveState,
     ...publicMetrics,
   };
 }
@@ -1446,8 +1698,19 @@ export function buildGameState(db, user, userStats) {
   const recentLogs = parseJsonSafe(profile.last_log_json, []);
   const flags = parseJsonSafe(profile.story_flags_json, {});
   const now = Date.now();
+  const hadShadow = Boolean(flags.shadowSlave);
+  const ssRaw = ensureShadowSlaveState(flags, profile);
+  if (!hadShadow) {
+    flags.shadowSlave = ssRaw;
+    db.prepare('UPDATE game_profiles SET story_flags_json = ?, updated_at = ? WHERE user_id = ?').run(
+      JSON.stringify(flags),
+      now,
+      user.id
+    );
+  }
+  const shadowSlave = buildShadowSlaveClientState(ssRaw);
   const idleRaw = accrueIdleProgress(db, profile, flags, heroStats, now);
-  const idle = buildIdleClientState(idleRaw, heroStats, now);
+  const idle = buildIdleClientState(idleRaw, heroStats, now, shadowSlave);
   const affinity = parseJsonSafe(profile.npc_affinity_json, { rowan: 0, bram: 0, lyra: 0, pip: 0 });
   const quests = parseJsonSafe(profile.active_quests_json, []);
   const dungeon = profile.mode === 'dungeon' ? parseJsonSafe(profile.dungeon_state_json, null) : null;
@@ -1624,6 +1887,7 @@ export function buildGameState(db, user, userStats) {
     encounter: activeEncounter,
     recentLogs: Array.isArray(recentLogs) ? recentLogs : [],
     idle,
+    shadowSlave,
   };
 }
 
@@ -1640,6 +1904,23 @@ export function grantStudyRewardsToGame(db, user, userStats, durationSec, purity
 
   const flags = parseJsonSafe(profile.story_flags_json, {});
   const idle = ensureIdleState(flags, profile, now);
+  const ss = ensureShadowSlaveState(flags, profile);
+  const ssAttrs = ss.attributeIds.map((id) => SS_ATTRIBUTES.find((a) => a.id === id)).filter(Boolean);
+  const fragMult = ssAttrs.reduce((m, a) => Math.max(m, a.studyFragmentMult || 1), 1);
+
+  const essenceGain = Math.max(12, Math.round(mins * 1.4 + (strictMode && purityPct >= 95 ? 12 : 0)));
+  const fragsGain = Math.max(1, Math.round((mins / 2.2) * fragMult));
+  ss.soulEssence = Math.min(ss.maxSoulEssence, ss.soulEssence + essenceGain);
+  ss.soulFragments += fragsGain;
+  if (ss.soulFragments >= 1000 && ss.coreCount < 7) {
+    ss.soulFragments -= 1000;
+    ss.coreCount += 1;
+    ss.lastWhisper = `[Your Soul Core has saturated and multiplied! You are now Class ${SS_CORE_CLASSES[ss.coreCount - 1]?.name || 'Monster'}.]`;
+  } else {
+    ss.lastWhisper = `[Soul Meditation (${mins}m): +${fragsGain} Soul Fragments absorbed (${ss.soulFragments}/1,000), +${essenceGain} Soul Essence restored.]`;
+  }
+  flags.shadowSlave = ss;
+
   const overdriveBonusMins = Math.max(15, mins + (idle.ascensionRelics.relic_chronos || 0) * 15);
   idle.overdriveUntilMs = Math.max(now, idle.overdriveUntilMs || 0) + overdriveBonusMins * 60_000;
   idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + Math.max(1, Math.floor(mins / 10));
@@ -3290,11 +3571,24 @@ export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, g
     };
   }
 
-  // When outside legacy encounters (Idle RPG mode), answering a University question activates 30m 4.0x Overdrive & clears bonus waves!
+  // When outside legacy encounters (Idle RPG mode), answering a University question activates 30m 4.0x Overdrive & restores Soul Essence/Fragments!
   const latestProfile = ensureGameProfile(db, user.id);
   const flags = parseJsonSafe(latestProfile.story_flags_json, {});
   const now = Date.now();
   const idle = ensureIdleState(flags, latestProfile, now);
+  const ss = ensureShadowSlaveState(flags, latestProfile);
+  const essenceQuizGain = isCorrect ? 28 : 8;
+  const fragsQuizGain = isCorrect ? 2 : 0;
+  ss.soulEssence = Math.min(ss.maxSoulEssence, ss.soulEssence + essenceQuizGain);
+  ss.soulFragments += fragsQuizGain;
+  if (ss.soulFragments >= 1000 && ss.coreCount < 7) {
+    ss.soulFragments -= 1000;
+    ss.coreCount += 1;
+  }
+  ss.lastWhisper = isCorrect
+    ? `[Nightmare Spell]: Study insight absorbed (+${fragsQuizGain} Soul Fragments, +${essenceQuizGain} Soul Essence).`
+    : `[Nightmare Spell]: Slight ripple (+${essenceQuizGain} Essence).`;
+  flags.shadowSlave = ss;
   let droppedItem = null;
   let msg = '';
   let bonusWaves = isCorrect ? 2 : 1;
@@ -3909,9 +4203,299 @@ export function updateIdleConfig(db, user, userStats, payload = {}) {
   const flags = parseJsonSafe(profile.story_flags_json, {});
   const now = Date.now();
   const idle = ensureIdleState(flags, profile, now);
+  const ss = ensureShadowSlaveState(flags, profile);
   let msg = '';
   const customEvents = [];
   let droppedItem = null;
+
+  if (payload.shadowAction && typeof payload.shadowAction === 'object') {
+    const actPayload = payload.shadowAction;
+    const actionType = String(actPayload.type || '');
+    const actDef = SS_ARC1_ACTS.find((a) => a.act === ss.arcAct) || SS_ARC1_ACTS[0];
+    const aspect = SS_ASPECTS.find((a) => a.id === ss.aspectId) || SS_ASPECTS[0];
+    const attrObjs = ss.attributeIds.map((id) => SS_ATTRIBUTES.find((a) => a.id === id)).filter(Boolean);
+    const attrAtk = attrObjs.reduce((s, a) => s + (a.atkBonus || 0), 0);
+    const attrDef = attrObjs.reduce((s, a) => s + (a.defBonus || 0), 0);
+    const attrLuck = attrObjs.reduce((s, a) => s + (a.luckBonus || 0), 0);
+    const fragMult = attrObjs.reduce((m, a) => Math.max(m, a.studyFragmentMult || 1), 1);
+    const memAtk = ss.memories.reduce((s, m) => {
+      const def = SS_MEMORIES.find((d) => d.id === m.id);
+      return s + (def ? Math.round(def.atk * (1 + ((m.weaveLevel || 1) - 1) * 0.25)) : 0);
+    }, 0);
+    const memDef = ss.memories.reduce((s, m) => {
+      const def = SS_MEMORIES.find((d) => d.id === m.id);
+      return s + (def ? Math.round(def.def * (1 + ((m.weaveLevel || 1) - 1) * 0.25)) : 0);
+    }, 0);
+    const rankBonus = Math.max(0, SS_RANKS.indexOf(ss.rank)) * 12;
+
+    if (actionType === 'wrap_shadow') {
+      const t = ['weapon', 'body', 'echo'].includes(actPayload.target) ? actPayload.target : 'weapon';
+      ss.shadowWrap = t;
+      msg =
+        t === 'weapon'
+          ? '🗡️ Wrapped Shadow around Weapon (+85% Armor Penetration & Slash DMG).'
+          : t === 'body'
+            ? '🛡️ Wrapped Shadow around Body (+70% Guard & Deflect Stagger Window).'
+            : '🗿 Wrapped Shadow around Stone Saint / Echo (+60% Echo Strike DMG).';
+      ss.lastWhisper = `[Shadow Control]: ${msg}`;
+      customEvents.push({ kind: 'guard', target: 'hero', text: `🌑 WRAP ${t.toUpperCase()}` });
+    } else if (actionType === 'select_act') {
+      const targetAct = Number(actPayload.act || 1);
+      if (targetAct < 1 || targetAct > ss.maxArcAct) {
+        throw new Error(`Conquer the Boss of Act ${ss.maxArcAct} before entering Act ${targetAct}!`);
+      }
+      const nextActDef = SS_ARC1_ACTS.find((a) => a.act === targetAct) || SS_ARC1_ACTS[0];
+      ss.arcAct = targetAct;
+      ss.currentNodeId = nextActDef.nodes[0].id;
+      ss.sunProgress = 15;
+      ss.activeCombat = createCombatFromNode(nextActDef.nodes[0], targetAct);
+      msg = `🗺️ Entered ${nextActDef.title}`;
+      ss.lastWhisper = `[Nightmare Spell]: ${nextActDef.title} — ${nextActDef.subtitle}`;
+    } else if (actionType === 'move_node') {
+      const targetNode = actDef.nodes.find((n) => n.id === String(actPayload.nodeId || ''));
+      if (!targetNode) throw new Error('Target 3D Nightmare node not found in current Act.');
+      if (targetNode.id === ss.currentNodeId && ss.activeCombat && ss.activeCombat.hp > 0) {
+        msg = `⚔️ Engaging ${ss.activeCombat.name} at ${targetNode.name}.`;
+      } else {
+        const moveCost = targetNode.id === ss.currentNodeId ? 4 : 10;
+        if (ss.soulEssence < moveCost) {
+          throw new Error(
+            `Need ${moveCost} Soul Essence! Meditate in Focus tab, Deflect in combat, or Camp on a High Statue.`
+          );
+        }
+        ss.soulEssence -= moveCost;
+        ss.sunProgress = Math.min(100, ss.sunProgress + 16);
+
+        if (ss.sunProgress >= 75 && targetNode.altitude === 'low') {
+          const safeNode = actDef.nodes.find((n) => n.altitude === 'high') || actDef.nodes[0];
+          const shardPenalty = Math.min(profile.shards, Math.max(0, Math.round(profile.shards * 0.25)));
+          ss.heroHp = Math.max(18, Math.round(ss.heroHp * 0.65));
+          if (ss.memories[0]) ss.memories[0].durability = Math.max(25, (ss.memories[0].durability ?? 100) - 15);
+          ss.currentNodeId = safeNode.id;
+          ss.sunProgress = 20;
+          ss.activeCombat = createCombatFromNode(safeNode, ss.arcAct);
+          if (shardPenalty > 0) {
+            db.prepare('UPDATE game_profiles SET shards = MAX(0, shards - ?) WHERE user_id = ?').run(shardPenalty, user.id);
+          }
+          msg = `🌊 SWALLOWED BY THE BLACK SEA! Abyssal tendrils forced an emergency Memory retreat to ${safeNode.name} (-${shardPenalty}✦).`;
+          ss.lastWhisper = `[The Dark Sea]: Never linger in the low coral after Dusk!`;
+          customEvents.push({ kind: 'enemy_hit', target: 'hero', text: '🌊 BLACK SEA TIDE!' });
+        } else {
+          ss.currentNodeId = targetNode.id;
+          ss.activeCombat = createCombatFromNode(targetNode, ss.arcAct);
+          msg = `🧭 Moved to ${targetNode.name} (${targetNode.altitude === 'high' ? 'High Safe Stone' : 'Low Coral'}) — Encountered ${targetNode.enemyName}!`;
+          ss.lastWhisper = `[${targetNode.name}]: ${targetNode.desc}`;
+          customEvents.push({ kind: 'step', target: 'hero', text: `${targetNode.name}` });
+        }
+      }
+    } else if (actionType === 'combat_move') {
+      const move = ['slash', 'deflect', 'aspect_art'].includes(actPayload.move) ? actPayload.move : 'slash';
+      const curNode = actDef.nodes.find((n) => n.id === ss.currentNodeId) || actDef.nodes[0];
+      if (!ss.activeCombat || ss.activeCombat.hp <= 0) {
+        ss.activeCombat = createCombatFromNode(curNode, ss.arcAct);
+      }
+      const combat = ss.activeCombat;
+      const moveCost = move === 'aspect_art' ? 18 : move === 'deflect' ? 5 : 6;
+      if (ss.soulEssence < moveCost) {
+        throw new Error(`Need ${moveCost} Soul Essence for ${move}! Use Deflect (+12 Essence) or Focus Meditation.`);
+      }
+      ss.soulEssence -= moveCost;
+
+      const totalAtk = Math.round(14 + (heroStats.atk || 12) * 0.7 + attrAtk + memAtk + rankBonus + (ss.coreCount - 1) * 14);
+      const totalDef = Math.round(4 + (heroStats.def || 4) * 0.5 + attrDef + memDef + (ss.coreCount - 1) * 8);
+      const activeEcho = ss.echoes.find((e) => e.unlocked);
+      const echoBonusDmg = activeEcho
+        ? Math.round(
+            ((SS_ECHOES.find((d) => d.id === activeEcho.id)?.atk || 12) * (1 + ((activeEcho.level || 1) - 1) * 0.22)) *
+              (ss.shadowWrap === 'echo' ? 1.6 : 0.65)
+          )
+        : 0;
+
+      if (move === 'deflect') {
+        const cleanStagger = ss.shadowWrap === 'body' || combat.intent === 'HEAVY_CRUSH' || Math.random() < 0.72;
+        ss.soulEssence = Math.min(ss.maxSoulEssence, ss.soulEssence + 17); // Net +12
+        const riposte = Math.round(totalAtk * 0.55);
+        combat.hp = Math.max(0, combat.hp - riposte);
+        if (cleanStagger) {
+          combat.staggered = true;
+          combat.staggerTurns = 2;
+          customEvents.push({ kind: 'parry', target: 'enemy', text: `🛡️ STAGGER! +12⚡` });
+          msg = `🛡️ Shadow Deflect cracked ${combat.name}'s carapace! Exposed Weak Spot (+12 Essence, -${riposte} Riposte).`;
+        } else {
+          customEvents.push({ kind: 'guard', target: 'hero', text: '🛡️ GUARD +12⚡' });
+          msg = `🛡️ Parried ${combat.name}'s strike and recovered +12 Soul Essence!`;
+        }
+      } else if (move === 'aspect_art') {
+        const stagMult = combat.staggered ? 2.1 : 1.0;
+        const wrapMult = ss.shadowWrap === 'weapon' ? 1.45 : 1.15;
+        const dmg = Math.max(20, Math.round(totalAtk * 2.15 * stagMult * wrapMult) + echoBonusDmg);
+        combat.hp = Math.max(0, combat.hp - dmg);
+        combat.staggered = true;
+        combat.staggerTurns = 1;
+        const healAmt = Math.round(ss.heroMaxHp * (aspect.id === 'lightbringer' ? 0.22 : 0.12));
+        ss.heroHp = Math.min(ss.heroMaxHp, ss.heroHp + healAmt);
+        customEvents.push({ kind: 'crit', target: 'enemy', text: `${aspect.icon} -${dmg}!` });
+        msg = `${aspect.icon} Unleashed [${aspect.abilityName}] on ${combat.name} for ${dmg} DMG (+${healAmt} HP)!`;
+      } else {
+        const stagMult = combat.staggered ? 2.15 : 1.0;
+        const wrapMult = ss.shadowWrap === 'weapon' ? 1.85 : 1.0;
+        const dmg = Math.max(10, Math.round(totalAtk * stagMult * wrapMult) + echoBonusDmg);
+        combat.hp = Math.max(0, combat.hp - dmg);
+        if (combat.staggerTurns > 0) {
+          combat.staggerTurns -= 1;
+          if (combat.staggerTurns <= 0) combat.staggered = false;
+        }
+        customEvents.push({ kind: combat.staggered ? 'crit' : 'hit', target: 'enemy', text: `-${dmg}` });
+        msg = `⚔️ Soul Slash struck ${combat.name} for ${dmg} DMG${echoBonusDmg > 0 ? ` (+${echoBonusDmg} Echo)` : ''}!`;
+      }
+
+      if (combat.hp <= 0) {
+        const fragsEarned = Math.max(1, Math.round((combat.fragments || 1) * fragMult));
+        const shardsEarned = Math.round((combat.shards || 8) + attrLuck * 0.2);
+        const xpEarned = 18 + ss.arcAct * 12 + (combat.isBoss ? 40 : 0);
+
+        ss.soulFragments += fragsEarned;
+        if (ss.soulFragments >= 1000 && ss.coreCount < 7) {
+          ss.soulFragments -= 1000;
+          ss.coreCount += 1;
+          ss.lastWhisper = `[Your Soul Core has saturated and split! You are now Class ${SS_CORE_CLASSES[ss.coreCount - 1]?.name || 'Monster'}.]`;
+        }
+        ss.slainShades.count += 1;
+        ss.slainShades.recent = [combat.name, ...(ss.slainShades.recent || [])].slice(0, 12);
+        if (!ss.clearedNodeIds.includes(curNode.id)) ss.clearedNodeIds.push(curNode.id);
+
+        // Slow-burn rare Memory / Echo drops (plus guaranteed Act Boss drops)
+        let spellDropText = '';
+        const memChance = combat.isBoss ? 1.0 : Math.min(0.28, 0.09 + attrLuck * 0.005);
+        if (Math.random() < memChance) {
+          const unowned = SS_MEMORIES.filter((m) => !ss.memories.some((um) => um.id === m.id));
+          if (unowned.length > 0) {
+            const pick = unowned[0];
+            ss.memories.push({ id: pick.id, weaveLevel: 1, durability: 100, equipped: true });
+            spellDropText += ` • [YOU HAVE RECEIVED A MEMORY: ${pick.icon} ${pick.name}!]`;
+          }
+        }
+        if (ss.arcAct === 2 && combat.isBoss) {
+          const saint = ss.echoes.find((e) => e.id === 'stone_saint');
+          if (saint && !saint.unlocked) {
+            saint.unlocked = true;
+            spellDropText += ' • [YOU HAVE RECEIVED AN ECHO: 🗿 Stone Saint!]';
+          }
+        } else if (combat.isBoss && ss.arcAct === 4) {
+          if (!ss.echoes.some((e) => e.id === 'nightmare_steed')) {
+            ss.echoes.push({ id: 'nightmare_steed', unlocked: true, awakened: false, level: 1 });
+            spellDropText += ' • [YOU HAVE RECEIVED AN ECHO: 🐎 Nightmare!]';
+          }
+        } else if (Math.random() < 0.03 + attrLuck * 0.002) {
+          if (!ss.echoes.some((e) => e.id === 'carapace_scavenger')) {
+            ss.echoes.push({ id: 'carapace_scavenger', unlocked: true, awakened: false, level: 1 });
+            spellDropText += ' • [YOU HAVE RECEIVED AN ECHO: 🦀 Carapace Scavenger!]';
+          }
+        }
+
+        // Act Boss unlock
+        if (combat.isBoss) {
+          if (ss.arcAct >= ss.maxArcAct && ss.maxArcAct < 4) {
+            ss.maxArcAct = ss.arcAct + 1;
+            spellDropText += ` • 🔓 UNLOCKED ACT ${ss.maxArcAct}!`;
+          }
+          if (ss.arcAct === 1 && ss.appraisal !== 'Glorious') ss.appraisal = 'Glorious';
+          if (ss.arcAct === 4 && ss.rank === 'Dormant') ss.rank = 'Awakened';
+        }
+
+        db.prepare(`
+          UPDATE game_profiles
+          SET shards = shards + ?, hero_xp = hero_xp + ?, monsters_slain = monsters_slain + 1, bosses_slain = bosses_slain + ?
+          WHERE user_id = ?
+        `).run(shardsEarned, xpEarned, combat.isBoss ? 1 : 0, user.id);
+
+        ss.lastWhisper = `[You have slain ${combat.rank} ${combat.enemyClass}: ${combat.name}. +${fragsEarned} Soul Fragments (${ss.soulFragments}/1,000), +${shardsEarned}✦.${spellDropText}]`;
+        msg = ss.lastWhisper;
+        ss.activeCombat = createCombatFromNode(curNode, ss.arcAct);
+      } else {
+        // Enemy counterattack
+        const bodyMit = ss.shadowWrap === 'body' ? 0.35 : 0.85;
+        const stagMit = combat.staggered ? 0.25 : 1.0;
+        const incoming = Math.max(3, Math.round((combat.atk * bodyMit - totalDef * 0.35) * stagMit));
+        ss.heroHp = Math.max(0, ss.heroHp - incoming);
+        combat.intent = Math.random() < 0.45 ? 'HEAVY_CRUSH' : 'CLAW_SWIPE';
+        if (ss.heroHp <= 0) {
+          const safeNode = actDef.nodes.find((n) => n.altitude === 'high') || actDef.nodes[0];
+          ss.heroHp = Math.round(ss.heroMaxHp * 0.4);
+          ss.currentNodeId = safeNode.id;
+          ss.sunProgress = 18;
+          ss.activeCombat = createCombatFromNode(safeNode, ss.arcAct);
+          msg = `💀 Overwhelmed by ${combat.name}! Emergency retreat to ${safeNode.name} at Dawn.`;
+          ss.lastWhisper = `[Emergency Tether]: Rest at High Ground or Strengthen Memories before challenging stronger Nightmare Creatures.`;
+          customEvents.push({ kind: 'enemy_hit', target: 'hero', text: '💀 RETREATED TO STATUE!' });
+        } else {
+          ss.lastWhisper = `${msg} (${combat.name} countered for -${incoming} HP).`;
+        }
+      }
+    } else if (actionType === 'camp_statue') {
+      const highNode =
+        actDef.nodes.find((n) => n.id === ss.currentNodeId && n.altitude === 'high') ||
+        actDef.nodes.find((n) => n.altitude === 'high') ||
+        actDef.nodes[0];
+      if (ss.sunProgress >= 75 && actDef.nodes.find((n) => n.id === ss.currentNodeId)?.altitude === 'low') {
+        throw new Error('Too late! The Black Sea is already flooding low ground — escape to a High Statue node!');
+      }
+      ss.currentNodeId = highNode.id;
+      ss.sunProgress = 10;
+      ss.heroHp = ss.heroMaxHp;
+      ss.soulEssence = Math.min(ss.maxSoulEssence, ss.soulEssence + 45);
+      ss.activeCombat = createCombatFromNode(highNode, ss.arcAct);
+      msg = `🏕️ Camped atop ${highNode.name} until Dawn! Restored full HP (${ss.heroHp}) & +45 Soul Essence.`;
+      ss.lastWhisper = `[Dawn Breaks]: The Black Sea recedes across the Crimson Coral.`;
+      customEvents.push({ kind: 'heal', target: 'hero', text: '☀️ DAWN +45⚡' });
+    } else if (actionType === 'weave_memory') {
+      const mem = ss.memories.find((m) => m.id === String(actPayload.memoryId || ''));
+      if (!mem) throw new Error('Memory not found in Soul Sea.');
+      const def = SS_MEMORIES.find((d) => d.id === mem.id);
+      const cost = 20 * (mem.weaveLevel || 1);
+      if (profile.shards < cost) {
+        throw new Error(`Need ${cost}✦ Soul Shards to weave another Golden Essence String into ${def?.name || mem.id}.`);
+      }
+      db.prepare('UPDATE game_profiles SET shards = shards - ? WHERE user_id = ?').run(cost, user.id);
+      mem.weaveLevel = (mem.weaveLevel || 1) + 1;
+      mem.durability = 100;
+      ss.spellweaveStrings += 1;
+      msg = `🧵 Wove Golden Essence String #${mem.weaveLevel} into [${def?.icon || '🔮'} ${def?.name || mem.id}] (-${cost}✦)!`;
+      ss.lastWhisper = `[Weaver's Loom]: ${def?.name} weave reinforced to Tier ${mem.weaveLevel}.`;
+      customEvents.push({ kind: 'finisher', target: 'hero', text: `🧵 WEAVE TIER ${mem.weaveLevel}!` });
+    } else if (actionType === 'awaken_echo') {
+      const echo = ss.echoes.find((e) => e.id === String(actPayload.echoId || 'stone_saint'));
+      if (!echo) throw new Error('Echo blueprint not found.');
+      const def = SS_ECHOES.find((d) => d.id === echo.id);
+      const cost = 30 * (echo.level || 1);
+      if (profile.shards < cost) throw new Error(`Need ${cost}✦ Soul Shards to awaken/upgrade ${def?.name}.`);
+      db.prepare('UPDATE game_profiles SET shards = shards - ? WHERE user_id = ?').run(cost, user.id);
+      echo.unlocked = true;
+      echo.awakened = true;
+      echo.level = (echo.level || 1) + 1;
+      msg = `🗿 Infused Shadow Essence into [${def?.icon} ${def?.name}] -> Lv.${echo.level} Shadow Companion!`;
+      ss.lastWhisper = `[Shadow Transformation]: ${def?.name} rises silently within your Soul Sea.`;
+      customEvents.push({ kind: 'loot', target: 'hero', text: `🗿 SHADOW LV.${echo.level}!` });
+    } else if (actionType === 'reweave_fate') {
+      if (profile.shards < REWEAVE_FATE_COST.shards || user.coins < REWEAVE_FATE_COST.coins) {
+        throw new Error(
+          `Altar of Weaver demands ${REWEAVE_FATE_COST.shards}✦ Soul Shards & ${REWEAVE_FATE_COST.coins}🪙 Coins (~15–20h study) to tear and re-knit Fate!`
+        );
+      }
+      db.prepare('UPDATE users SET coins = coins - ? WHERE id = ?').run(REWEAVE_FATE_COST.coins, user.id);
+      db.prepare('UPDATE game_profiles SET shards = shards - ? WHERE user_id = ?').run(REWEAVE_FATE_COST.shards, user.id);
+      const rolled = rollFreshShadowIdentity(user.id, now % 99991);
+      ss.aspectId = rolled.aspectId;
+      ss.attributeIds = rolled.attributeIds;
+      ss.flawId = rolled.flawId;
+      ss.trueName = rolled.trueName;
+      ss.appraisal = rolled.appraisal;
+      const newAsp = SS_ASPECTS.find((a) => a.id === ss.aspectId);
+      msg = `🕸️ [ALTAR OF WEAVER]: Fate severed & re-knitted! Awakened Aspect [${newAsp?.name}] & True Name [${ss.trueName}]!`;
+      ss.lastWhisper = msg;
+      customEvents.push({ kind: 'finisher', target: 'hero', text: `🕸️ RE-WOVEN FATE!` });
+    }
+  }
 
   if (payload.placeCard && typeof payload.placeCard === 'object') {
     const { cardId, cardKey, x, y } = payload.placeCard;
@@ -4148,6 +4732,7 @@ export function updateIdleConfig(db, user, userStats, payload = {}) {
   }
 
   flags.idle = idle;
+  flags.shadowSlave = ss;
   const nextLogs = msg ? appendLogs(profile, [msg]) : profile.last_log_json;
   db.prepare(`
     UPDATE game_profiles SET floor = ?, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?

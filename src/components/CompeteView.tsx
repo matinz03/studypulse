@@ -127,7 +127,7 @@ export function CompeteView({
               </span>
               <div className="min-w-0">
                 <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
-                  <span>{league.tierName} League</span>
+                  <span>{league.tierName} Sleeper Division</span>
                   <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-mono-num">
                     #{league.rankInLeague}
                   </span>

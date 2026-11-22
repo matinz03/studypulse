@@ -712,6 +712,170 @@ export interface IdleGameState {
   coinsPerHr: number;
   xpPerHr: number;
   loop?: IdleLoopState;
+  shadowSlave?: ShadowSlaveState;
+}
+
+export interface ShadowSlaveAspect {
+  id: string;
+  name: string;
+  rank: string;
+  title: string;
+  icon: string;
+  primaryColor: string;
+  secondaryColor: string;
+  ringStyle: string;
+  abilityName: string;
+  abilityDesc: string;
+  passiveBonus: string;
+  lore: string;
+}
+
+export interface ShadowSlaveAttribute {
+  id: string;
+  name: string;
+  category: string;
+  desc: string;
+  atkBonus: number;
+  defBonus: number;
+  hpBonus: number;
+  essenceBonus: number;
+  luckBonus: number;
+  studyFragmentMult: number;
+}
+
+export interface ShadowSlaveFlaw {
+  id: string;
+  name: string;
+  desc: string;
+  combatRule: string;
+  studyRule: string;
+}
+
+export interface ShadowSlaveNode {
+  id: string;
+  name: string;
+  altitude: 'low' | 'high';
+  pos: [number, number, number];
+  desc: string;
+  enemyKey: string;
+  enemyName: string;
+  enemyRank: string;
+  enemyClass: string;
+  hp: number;
+  atk: number;
+  intent: string;
+  fragments: number;
+  shards: number;
+  isBoss: boolean;
+}
+
+export interface ShadowSlaveAct {
+  act: number;
+  key: string;
+  title: string;
+  subtitle: string;
+  skyColor: string;
+  fogColor: string;
+  accentColor: string;
+  nodes: ShadowSlaveNode[];
+}
+
+export interface ShadowSlaveCombat {
+  nodeId: string;
+  enemyKey: string;
+  name: string;
+  rank: string;
+  enemyClass: string;
+  hp: number;
+  maxHp: number;
+  atk: number;
+  intent: string;
+  staggered: boolean;
+  staggerTurns: number;
+  isBoss: boolean;
+  act: number;
+  fragments: number;
+  shards: number;
+}
+
+export interface ShadowSlaveMemory {
+  id: string;
+  name: string;
+  type: string;
+  tier: string;
+  icon: string;
+  atk: number;
+  def: number;
+  essenceBonus: number;
+  enchantment: string;
+  weaveLevel: number;
+  durability: number;
+  equipped: boolean;
+  effectiveAtk: number;
+  effectiveDef: number;
+  weaveCost: number;
+}
+
+export interface ShadowSlaveEcho {
+  id: string;
+  name: string;
+  rank: string;
+  class: string;
+  icon: string;
+  atk: number;
+  def: number;
+  desc: string;
+  unlocked: boolean;
+  awakened: boolean;
+  level: number;
+  effectiveAtk: number;
+  effectiveDef: number;
+  upgradeCost: number;
+}
+
+export type ShadowActionPayload =
+  | { type: 'wrap_shadow'; target: 'weapon' | 'body' | 'echo' }
+  | { type: 'select_act'; act: number }
+  | { type: 'move_node'; nodeId: string }
+  | { type: 'combat_move'; move: 'slash' | 'deflect' | 'aspect_art' }
+  | { type: 'camp_statue' }
+  | { type: 'weave_memory'; memoryId: string }
+  | { type: 'awaken_echo'; echoId: string }
+  | { type: 'reweave_fate' };
+
+export interface ShadowSlaveState {
+  aspect: ShadowSlaveAspect;
+  attributes: ShadowSlaveAttribute[];
+  flaw: ShadowSlaveFlaw;
+  trueName: string;
+  appraisal: string;
+  rank: string;
+  coreCount: number;
+  coreClass: { coreCount: number; name: string; label: string; fragmentsPerCore: number };
+  soulFragments: number;
+  fragmentsPerCore: number;
+  soulEssence: number;
+  maxSoulEssence: number;
+  heroHp: number;
+  heroMaxHp: number;
+  arcAct: number;
+  maxArcAct: number;
+  currentAct: ShadowSlaveAct;
+  allActs: { act: number; key: string; title: string; subtitle: string; unlocked: boolean }[];
+  currentNode: ShadowSlaveNode;
+  clearedNodeIds: string[];
+  sunProgress: number;
+  sunPhase: 'day' | 'dusk' | 'night';
+  shadowWrap: 'weapon' | 'body' | 'echo';
+  activeCombat: ShadowSlaveCombat | null;
+  memories: ShadowSlaveMemory[];
+  echoes: ShadowSlaveEcho[];
+  cohort: { id: string; name: string; trueName: string; icon: string; role: string; unlocked: boolean }[];
+  slainShades: { count: number; recent: string[] };
+  spellweaveStrings: number;
+  lastWhisper: string;
+  studyFragMult: number;
+  reweaveCost: { shards: number; coins: number };
 }
 
 export interface GameState {
@@ -724,6 +888,7 @@ export interface GameState {
     allies: PartyAllyInfo[];
   };
   idle?: IdleGameState;
+  shadowSlave?: ShadowSlaveState;
   biome: {
     key: string;
     name: string;

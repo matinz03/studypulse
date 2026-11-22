@@ -34,6 +34,7 @@ import {
   IdleAutomationConfig,
   IdleGambitsConfig,
   SessionGameRewards,
+  ShadowActionPayload,
   ShopBuyResponse,
   StudyTask,
   Subject,
@@ -1101,6 +1102,7 @@ export function App() {
     pickRelic?: string;
     extractLoop?: boolean;
     toggleAutoArchitect?: boolean;
+    shadowAction?: ShadowActionPayload;
   }) => callGameApi('/api/game/idle/config', payload);
   const handleIdleUpgradeProf = (professionId: string) =>
     callGameApi('/api/game/idle/upgrade-profession', { professionId });
@@ -1586,6 +1588,7 @@ export function App() {
                 {tab === 'focus' && (
                   <FocusView
                     themeId={themeId}
+                    shadowSlave={data.game.shadowSlave}
                     mode={mode}
                     onChangeMode={handleChangeMode}
                     customMins={customMins}
@@ -1840,30 +1843,38 @@ export function App() {
           <div className="glass-card rounded-3xl p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Swords className="w-3.5 h-3.5" /> Pixel Spire Hero
+                <span>{data.game.shadowSlave?.aspect.icon || '🌑'}</span>
+                <span>{data.game.shadowSlave ? `[${data.game.shadowSlave.aspect.name}]` : 'Nightmare Vessel'}</span>
               </span>
               <span className="font-mono-num text-[11px] font-bold text-slate-300">
-                {data.game.mode === 'dungeon' ? `Delving F${data.game.dungeon?.floor || data.game.profile.floor}` : `Oakhaven • Ch.${data.game.story.chapter}`}
+                {data.game.shadowSlave
+                  ? `${data.game.shadowSlave.rank} ${data.game.shadowSlave.coreClass.name}`
+                  : `Act ${data.game.story.chapter}`}
               </span>
             </div>
+            {data.game.shadowSlave && (
+              <div className="text-[10px] font-bold text-amber-200 mb-2 truncate">
+                [{data.game.shadowSlave.trueName}] • {data.game.shadowSlave.currentAct.title}
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-1.5 text-center mb-2.5">
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-mono-num text-xs font-extrabold text-white">
-                  👁️ {data.game.heroStats.intuition}
+                  ✦ {data.game.profile.shards}
                 </div>
-                <div className="text-[9px] text-slate-400">Intuition</div>
+                <div className="text-[9px] text-slate-400">Shards</div>
               </div>
               <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-white">
-                  ⚡ {data.game.profile.energy}
+                <div className="font-mono-num text-xs font-extrabold text-sky-300">
+                  ⚡ {data.game.shadowSlave?.soulEssence ?? 75}
                 </div>
-                <div className="text-[9px] text-slate-400">Energy</div>
+                <div className="text-[9px] text-slate-400">Essence</div>
               </div>
               <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-white">
-                  🍀 {data.game.heroStats.luck}
+                <div className="font-mono-num text-xs font-extrabold text-purple-300">
+                  💎 {data.game.shadowSlave?.soulFragments ?? 0}
                 </div>
-                <div className="text-[9px] text-slate-400">Luck</div>
+                <div className="text-[9px] text-slate-400">Fragments</div>
               </div>
             </div>
             <button
@@ -1871,7 +1882,7 @@ export function App() {
               onClick={() => setTab('quest')}
               className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
             >
-              Enter Pixel Dungeon ⚔️
+              Enter 3D Nightmare Realm ⚔️
             </button>
           </div>
 

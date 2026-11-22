@@ -9,6 +9,7 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@types/three": "^0.187.0",
     "better-sqlite3": "^13.2.0",
     "canvas-confetti": "^1.9.3",
     "express": "^4.21.2",
@@ -16,6 +17,7 @@
     "lucide-react": "^0.475.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "three": "^0.187.0",
     "web-push": "^4.0.0",
     "ws": "^8.18.1"
   },

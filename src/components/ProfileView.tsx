@@ -254,6 +254,36 @@ export function ProfileView({
           </div>
         </div>
 
+        {game.shadowSlave && (
+          <div className="p-3 rounded-2xl sp-inset border border-white/10 space-y-2 text-[11px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-extrabold text-white flex items-center gap-1.5">
+                <span>{game.shadowSlave.aspect.icon}</span>
+                <span>Nightmare Spell Runes:</span>
+                <span style={{ color: game.shadowSlave.aspect.primaryColor }}>
+                  [{game.shadowSlave.aspect.name}]
+                </span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold text-amber-200">
+                [{game.shadowSlave.trueName}] • {game.shadowSlave.rank} {game.shadowSlave.coreClass.name}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[10px]">
+              {game.shadowSlave.attributes.map((a) => (
+                <span key={a.id} className="px-2 py-0.5 rounded bg-white/5 border border-white/15 font-bold text-slate-200">
+                  [{a.name}]
+                </span>
+              ))}
+              <span className="px-2 py-0.5 rounded bg-rose-500/15 border border-rose-400/40 font-bold text-rose-200">
+                Flaw: [{game.shadowSlave.flaw.name}]
+              </span>
+              <span className="px-2 py-0.5 rounded sp-badge text-slate-300">
+                Shades: {game.shadowSlave.slainShades.count} • Memories: {game.shadowSlave.memories.length}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Inline Edit Drawer */}
         {editing && (
           <form onSubmit={saveProfile} className="pt-3 border-t border-white/10 space-y-2.5">
