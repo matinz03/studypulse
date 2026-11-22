@@ -467,25 +467,23 @@ export function RoomsView({
             {currentRoom.raid && (
               <div className="rounded-2xl p-3 sp-inset border border-rose-500/35 space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
-                      🌑 Active Nightmare Gate Siege
-                    </div>
-                    <div className="text-xs font-extrabold text-white truncate">
-                      {currentRoom.raid.bossIcon} {currentRoom.raid.bossName}
-                    </div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300 truncate">
+                    🌑 Active Nightmare Gate Siege
                   </div>
                   {onRaidStrike && (
                     <button
                       type="button"
                       disabled={strikingRaid || heroEnergy < 1 || currentRoom.raid.bossHp <= 0}
                       onClick={triggerRaidStrike}
-                      className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[10px] font-extrabold shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                      className="px-2.5 py-1 rounded-xl sp-btn-primary text-[10px] font-extrabold shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-45 whitespace-nowrap"
                     >
                       <Swords className="w-3 h-3" />
-                      <span>{currentRoom.raid.bossHp <= 0 ? 'Gate Sealed!' : 'Gate Strike (1⚡)'}</span>
+                      <span>{currentRoom.raid.bossHp <= 0 ? 'Sealed!' : 'Strike (1⚡)'}</span>
                     </button>
                   )}
+                </div>
+                <div className="text-xs font-extrabold text-white truncate">
+                  {currentRoom.raid.bossIcon} {currentRoom.raid.bossName}
                 </div>
                 <div className="h-2 rounded-full bg-black/40 overflow-hidden border border-white/10">
                   <div

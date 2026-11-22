@@ -401,9 +401,9 @@ export function QuestView({
               <div className="grid grid-cols-3 gap-1.5 flex-1 max-w-md">
                 {(
                   [
-                    { target: 'weapon', label: '🗡️ Wrap Weapon' },
-                    { target: 'body', label: '🛡️ Wrap Body' },
-                    { target: 'echo', label: '🗿 Wrap Echo' },
+                    { target: 'weapon', label: '🗡️ Weapon' },
+                    { target: 'body', label: '🛡️ Body' },
+                    { target: 'echo', label: '🗿 Echo' },
                   ] as const
                 ).map((w) => (
                   <button
@@ -413,8 +413,8 @@ export function QuestView({
                     onClick={() =>
                       runAction(() => onIdleConfig({ shadowAction: { type: 'wrap_shadow', target: w.target } }))
                     }
-                    className={`py-1.5 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
-                      ss.shadowWrap === w.target ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
+                    className={`py-1.5 px-2 rounded-xl text-[10px] font-extrabold whitespace-nowrap cursor-pointer transition ${
+                      ss.shadowWrap === w.target ? 'sp-btn-primary' : 'sp-badge text-slate-300 hover:text-white'
                     }`}
                   >
                     {w.label}
@@ -429,17 +429,17 @@ export function QuestView({
                 type="button"
                 disabled={busy}
                 onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'slash' } }))}
-                className="py-2 px-2.5 rounded-xl bg-rose-600/85 hover:bg-rose-500 text-white text-[11px] font-extrabold cursor-pointer"
+                className="py-2 px-2.5 rounded-xl bg-rose-600/85 hover:bg-rose-500 text-white text-[11px] font-extrabold whitespace-nowrap cursor-pointer"
               >
-                ⚔️ Soul Slash (6⚡)
+                ⚔️ Slash (6⚡)
               </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'deflect' } }))}
-                className="py-2 px-2.5 rounded-xl bg-sky-600/85 hover:bg-sky-500 text-white text-[11px] font-extrabold cursor-pointer"
+                className="py-2 px-2.5 rounded-xl bg-sky-600/85 hover:bg-sky-500 text-white text-[11px] font-extrabold whitespace-nowrap cursor-pointer"
               >
-                🛡️ Deflect & Stagger (+12⚡)
+                🛡️ Deflect (+12⚡)
               </button>
               <button
                 type="button"
@@ -447,18 +447,18 @@ export function QuestView({
                 onClick={() =>
                   runAction(() => onIdleConfig({ shadowAction: { type: 'combat_move', move: 'aspect_art' } }))
                 }
-                className="py-2 px-2.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer truncate"
+                className="py-2 px-2.5 rounded-xl sp-btn-primary text-[11px] font-extrabold whitespace-nowrap cursor-pointer"
                 title={ss.aspect.abilityDesc}
               >
-                {ss.aspect.icon} Aspect Art (18⚡)
+                {ss.aspect.icon} Art (18⚡)
               </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'camp_statue' } }))}
-                className="py-2 px-2.5 rounded-xl bg-emerald-600/85 hover:bg-emerald-500 text-white text-[11px] font-extrabold cursor-pointer"
+                className="py-2 px-2.5 rounded-xl bg-emerald-600/85 hover:bg-emerald-500 text-white text-[11px] font-extrabold whitespace-nowrap cursor-pointer"
               >
-                🏕️ Camp High Statue
+                🏕️ Camp Rest
               </button>
             </div>
           </div>
