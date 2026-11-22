@@ -703,21 +703,35 @@
   position: relative;
   border-radius: var(--sp-radius-card) !important;
   background: var(--sp-card-bg);
-  backdrop-filter: blur(var(--sp-blur)) saturate(160%);
-  -webkit-backdrop-filter: blur(var(--sp-blur)) saturate(160%);
+  backdrop-filter: blur(var(--sp-blur)) saturate(165%);
+  -webkit-backdrop-filter: blur(var(--sp-blur)) saturate(165%);
   border: 1px solid var(--sp-card-border);
   color: var(--sp-fg);
   box-shadow: var(--sp-shadow-card);
+  transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
 }
 
 .liquid-card::before,
 .glass-card::before {
   content: "";
   position: absolute;
-  inset: 0 12px auto 12px;
+  inset: 0 14px auto 14px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
   pointer-events: none;
+}
+
+.runic-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--sp-radius-card) !important;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.05) 0%, rgba(10, 10, 14, 0.85) 100%);
+  border: 1px solid rgba(251, 191, 36, 0.24);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.72), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+
+.spell-shimmer {
+  background: linear-gradient(110deg, rgba(251, 191, 36, 0.14) 0%, rgba(168, 85, 247, 0.18) 50%, rgba(56, 189, 248, 0.14) 100%);
 }
 
 /* Floating Architectural Header & Bottom Dock */

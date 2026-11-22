@@ -168,7 +168,7 @@ export function ShadowSlave3DCanvas({
     // Sleeper Hero Avatar + Weapon + Orbiting Shadow Ribbon
     const heroGroup = new THREE.Group();
     const heroBodyMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.4, metalness: 0.6 });
-    const heroCloakMat = new THREE.MeshStandardMaterial({ color: '#312e81', emissive: '#6d28d9', emissiveIntensity: 0.4 });
+    const heroCloakMat = new THREE.MeshStandardMaterial({ color: '#312e81', emissive: '#6d28d9', emissiveIntensity: 0.45 });
     const heroTorso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 0.85, 8), heroBodyMat);
     heroTorso.position.y = 0.48;
     const heroHead = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 1), new THREE.MeshStandardMaterial({ color: '#e2e8f0' }));
@@ -184,9 +184,43 @@ export function ShadowSlave3DCanvas({
     });
     const shadowRibbon = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.045, 8, 28), shadowRibbonMat);
     shadowRibbon.position.y = 0.65;
-    heroGroup.add(heroTorso, heroHead, heroBlade, shadowRibbon, new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.7, 6), heroCloakMat));
+    const runicAuraMat = new THREE.MeshBasicMaterial({
+      color: '#fde047',
+      transparent: true,
+      opacity: 0.65,
+    });
+    const runicAuraRing = new THREE.Mesh(new THREE.RingGeometry(0.54, 0.62, 32), runicAuraMat);
+    runicAuraRing.rotation.x = -Math.PI / 2;
+    runicAuraRing.position.y = 0.06;
+    heroGroup.add(
+      heroTorso,
+      heroHead,
+      heroBlade,
+      shadowRibbon,
+      new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.7, 6), heroCloakMat),
+      runicAuraRing
+    );
     heroGroup.children[4].position.set(-0.08, 0.42, -0.05);
     dreamGroup.add(heroGroup);
+
+    // Atmospheric Ash / Ember Particle Field across both Dream Realm & Soul Sea
+    const particleCount = 160;
+    const particlePositions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount; i++) {
+      particlePositions[i * 3] = (Math.random() - 0.5) * 18;
+      particlePositions[i * 3 + 1] = 0.3 + Math.random() * 6.5;
+      particlePositions[i * 3 + 2] = (Math.random() - 0.5) * 18;
+    }
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    const particleMat = new THREE.PointsMaterial({
+      color: '#fde047',
+      size: 0.09,
+      transparent: true,
+      opacity: 0.72,
+    });
+    const ashParticles = new THREE.Points(particleGeo, particleMat);
+    scene.add(ashParticles);
 
     // Stone Saint Echo Companion (visible when unlocked or on Wrap Echo)
     const saintGroup = new THREE.Group();
@@ -519,6 +553,11 @@ export function ShadowSlave3DCanvas({
         heroGroup.rotation.y = Math.PI * 0.28;
         heroCloakMat.emissive.set(ss.aspect.primaryColor || '#8b5cf6');
         shadowRibbonMat.emissive.set(ss.aspect.primaryColor || '#8b5cf6');
+        runicAuraMat.color.set(ss.aspect.primaryColor || '#fde047');
+        runicAuraRing.scale.setScalar(1 + Math.sin(t * 2.8) * 0.08);
+        particleMat.color.set(ss.sunPhase === 'night' ? '#818cf8' : ss.aspect.primaryColor || '#fde047');
+        ashParticles.rotation.y = t * 0.04;
+        ashParticles.position.y = Math.sin(t * 0.8) * 0.14;
 
         // Animate Shadow Wrap Ribbon onto Weapon / Body / Stone Saint
         const saintUnlocked = ss.echoes.some((e) => e.unlocked);
@@ -603,18 +642,24 @@ export function ShadowSlave3DCanvas({
   }
 
   return (
-    <div className="relative w-full aspect-[16/10] rounded-2xl overflow-hidden border border-white/15 bg-black">
+    <div className="relative w-full aspect-[16/10] rounded-2xl overflow-hidden border border-amber-400/25 bg-black shadow-[0_12px_40px_rgba(0,0,0,0.75)]">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" aria-label="ThreeJS Nightmare Realm Viewport" />
 
+      {/* Subtle Vignette Frame */}
+      <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_50px_rgba(0,0,0,0.72)]" />
+
       {/* Top Left Overlay Pill */}
-      <div className="pointer-events-none absolute top-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-black/70 border border-white/15 text-[10px] font-extrabold text-white backdrop-blur-sm">
-        {viewMode === 'soul_sea'
-          ? `🌊 Soul Sea • ${shadowSlave.coreCount} Core${shadowSlave.coreCount > 1 ? 's' : ''} (${shadowSlave.coreClass.name}) • ${shadowSlave.slainShades.count} Silent Shades`
-          : `${shadowSlave.currentNode.name} (${shadowSlave.currentNode.altitude === 'high' ? 'High Statue ⛰️' : 'Low Coral 🪸'})`}
+      <div className="pointer-events-none absolute top-2.5 left-2.5 px-2.5 py-1 rounded-xl bg-black/75 border border-white/15 text-[10px] font-extrabold text-white backdrop-blur-md shadow-lg flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: shadowSlave.aspect.primaryColor }} />
+        <span>
+          {viewMode === 'soul_sea'
+            ? `Soul Sea • ${shadowSlave.coreCount} Core${shadowSlave.coreCount > 1 ? 's' : ''} (${shadowSlave.coreClass.name}) • ${shadowSlave.slainShades.count} Silent Shades`
+            : `${shadowSlave.currentNode.name} (${shadowSlave.currentNode.altitude === 'high' ? 'High Statue ⛰️' : 'Low Coral 🪸'})`}
+        </span>
       </div>
 
       {/* Top Right Sea / Sun Phase Indicator */}
-      <div className="pointer-events-none absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-black/70 border border-white/15 text-[10px] font-extrabold backdrop-blur-sm">
+      <div className="pointer-events-none absolute top-2.5 right-2.5 px-2.5 py-1 rounded-xl bg-black/75 border border-white/15 text-[10px] font-extrabold backdrop-blur-md shadow-lg">
         {viewMode === 'soul_sea' ? (
           <span className="text-amber-300">🧵 {shadowSlave.spellweaveStrings} Golden Strings</span>
         ) : shadowSlave.sunPhase === 'night' ? (
@@ -627,10 +672,14 @@ export function ShadowSlave3DCanvas({
       </div>
 
       {/* Bottom Hint */}
-      <div className="pointer-events-none absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[9px] font-bold text-slate-300/85">
-        <span className="px-2 py-0.5 rounded bg-black/60">Drag to Orbit 3D • Scroll Zoom</span>
+      <div className="pointer-events-none absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[9px] font-bold text-slate-300/90">
+        <span className="px-2 py-0.5 rounded-lg bg-black/70 border border-white/10 backdrop-blur-sm">
+          3D WebGL • Drag Orbit / Scroll Zoom
+        </span>
         {viewMode === 'dream_realm' && (
-          <span className="px-2 py-0.5 rounded bg-black/60">Click Glowing 3D Crystal Nodes to Travel</span>
+          <span className="px-2 py-0.5 rounded-lg bg-black/70 border border-white/10 backdrop-blur-sm">
+            Click Glowing 3D Crystal Nodes to Advance
+          </span>
         )}
       </div>
     </div>

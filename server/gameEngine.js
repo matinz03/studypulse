@@ -60,17 +60,17 @@ export const RARITIES = {
 export const HERO_CLASSES = {
   hero_scholar: {
     key: 'hero_scholar',
-    name: 'Arcane Scholar',
+    name: 'Dream Chronicler',
     atk: 12,
     def: 4,
     hp: 100,
     luck: 6,
     crit: 8,
-    perk: '+10% Hero XP',
+    perk: '+10% Soul XP Resonance',
   },
   hero_knight: {
     key: 'hero_knight',
-    name: 'Pixel Paladin',
+    name: 'Bright Castle Vanguard',
     atk: 11,
     def: 8,
     hp: 130,
@@ -80,23 +80,23 @@ export const HERO_CLASSES = {
   },
   hero_rogue: {
     key: 'hero_rogue',
-    name: 'Shadow Rogue',
+    name: 'Shadow Runner',
     atk: 14,
     def: 4,
     hp: 95,
     luck: 18,
     crit: 16,
-    perk: '+12 Luck & +8% Crit',
+    perk: '+12 Fate Affinity & +8% Crit',
   },
   hero_mage: {
     key: 'hero_mage',
-    name: 'Chrono Mage',
+    name: 'Spellweave Adept',
     atk: 18,
     def: 3,
     hp: 92,
     luck: 10,
     crit: 12,
-    perk: '+15% Boss & Focus Break DMG',
+    perk: '+15% Tyrant & Stagger DMG',
   },
 };
 
@@ -104,7 +104,7 @@ export const HERO_SPECIALIZATIONS = {
   hero_scholar: [
     {
       key: 'chronomancer',
-      name: 'Chronomancer',
+      name: 'Rune Seer',
       classKey: 'hero_scholar',
       bonusAtk: 4,
       bonusDef: 1,
@@ -112,11 +112,11 @@ export const HERO_SPECIALIZATIONS = {
       bonusLuck: 6,
       bonusCrit: 4,
       bonusIntuition: 6,
-      perk: '+6 Intuition, +6 Luck, +4 ATK & Time-Dilation Cast',
+      perk: '+6 Intuition, +6 Fate, +4 ATK & Runic Insight',
     },
     {
       key: 'archivist',
-      name: 'Grand Archivist',
+      name: 'Citadel Archivist',
       classKey: 'hero_scholar',
       bonusAtk: 6,
       bonusDef: 3,
@@ -130,7 +130,7 @@ export const HERO_SPECIALIZATIONS = {
   hero_knight: [
     {
       key: 'templar',
-      name: 'Oakhaven Templar',
+      name: 'Bastion Defender',
       classKey: 'hero_knight',
       bonusAtk: 5,
       bonusDef: 6,
@@ -142,7 +142,7 @@ export const HERO_SPECIALIZATIONS = {
     },
     {
       key: 'vanguard',
-      name: 'Iron Vanguard',
+      name: 'Dawnbreaker Striker',
       classKey: 'hero_knight',
       bonusAtk: 9,
       bonusDef: 4,
@@ -156,7 +156,7 @@ export const HERO_SPECIALIZATIONS = {
   hero_rogue: [
     {
       key: 'vaultbreaker',
-      name: 'Vaultbreaker',
+      name: 'Fated Scavenger',
       classKey: 'hero_rogue',
       bonusAtk: 5,
       bonusDef: 2,
@@ -164,11 +164,11 @@ export const HERO_SPECIALIZATIONS = {
       bonusLuck: 14,
       bonusCrit: 8,
       bonusIntuition: 8,
-      perk: '+14 Luck, +8% Crit & +8 Intuition Seeker',
+      perk: '+14 Fate, +8% Crit & +8 Intuition Seeker',
     },
     {
       key: 'nightblade',
-      name: 'Nightblade',
+      name: 'Shadow Assassin',
       classKey: 'hero_rogue',
       bonusAtk: 10,
       bonusDef: 1,
@@ -176,13 +176,13 @@ export const HERO_SPECIALIZATIONS = {
       bonusLuck: 6,
       bonusCrit: 14,
       bonusIntuition: 4,
-      perk: '+14% Crit & +10 ATK Precision Ambush',
+      perk: '+14% Crit & +10 ATK Shadow Step Ambush',
     },
   ],
   hero_mage: [
     {
       key: 'pyromancer',
-      name: 'Pyromancer',
+      name: 'Immutable Flame',
       classKey: 'hero_mage',
       bonusAtk: 12,
       bonusDef: 1,
@@ -194,7 +194,7 @@ export const HERO_SPECIALIZATIONS = {
     },
     {
       key: 'spellweaver',
-      name: 'Spellweaver',
+      name: 'Lineage Weaver',
       classKey: 'hero_mage',
       bonusAtk: 8,
       bonusDef: 3,
@@ -202,16 +202,16 @@ export const HERO_SPECIALIZATIONS = {
       bonusLuck: 8,
       bonusCrit: 6,
       bonusIntuition: 10,
-      perk: '+10 Intuition, +8 Luck & Arcane Matrix',
+      perk: '+10 Intuition, +8 Fate & Golden String Matrix',
     },
   ],
 };
 
 export const BIOMES = [
-  { key: 'moss_library', name: 'Mossy Library Ruins', minFloor: 1 },
-  { key: 'clockwork_obs', name: 'Clockwork Observatory', minFloor: 4 },
-  { key: 'crystal_archive', name: 'Crystal Archive Cavern', minFloor: 7 },
-  { key: 'astral_sanctum', name: 'Obsidian Astral Sanctum', minFloor: 10 },
+  { key: 'moss_library', name: 'Black Mountain Trial', minFloor: 1 },
+  { key: 'clockwork_obs', name: 'The Crimson Labyrinth', minFloor: 4 },
+  { key: 'crystal_archive', name: 'Dark City Cathedral', minFloor: 7 },
+  { key: 'astral_sanctum', name: 'The Crimson Spire', minFloor: 10 },
 ];
 
 export function getBiomeForFloor(floor) {
@@ -224,36 +224,36 @@ export function getBiomeForFloor(floor) {
 
 const GEAR_TEMPLATES = {
   weapon: [
-    { name: 'Focus Wand', icon: '🪄', spriteKey: 'wand', atkBias: 1.0, critBias: 1.0 },
-    { name: 'Inkwell Blade', icon: '🗡️', spriteKey: 'blade', atkBias: 1.15, critBias: 0.8 },
-    { name: 'Theorem Staff', icon: '🔮', spriteKey: 'staff', atkBias: 1.25, critBias: 0.6 },
-    { name: 'Quill Rapier', icon: '⚔️', spriteKey: 'blade', atkBias: 1.05, critBias: 1.25 },
+    { name: 'Carapace Edge', icon: '🗡️', spriteKey: 'blade', atkBias: 1.0, critBias: 1.0 },
+    { name: 'Crimson Odachi Shard', icon: '⚔️', spriteKey: 'blade', atkBias: 1.15, critBias: 0.9 },
+    { name: 'True Darkness Glaive', icon: '🔱', spriteKey: 'staff', atkBias: 1.25, critBias: 0.7 },
+    { name: 'Dawnbreaker Rapier', icon: '⚔️', spriteKey: 'blade', atkBias: 1.05, critBias: 1.25 },
   ],
   armor: [
-    { name: 'Scholar Robe', icon: '🧥', spriteKey: 'robe', defBias: 0.85, hpBias: 1.15 },
-    { name: 'Citation Mail', icon: '🛡️', spriteKey: 'plate', defBias: 1.25, hpBias: 0.9 },
-    { name: 'Aegis Cloak', icon: '🥋', spriteKey: 'robe', defBias: 1.0, hpBias: 1.1 },
+    { name: "Puppeteer's Shroud", icon: '🧥', spriteKey: 'robe', defBias: 0.95, hpBias: 1.15 },
+    { name: 'Carapace Legion Mail', icon: '🛡️', spriteKey: 'plate', defBias: 1.25, hpBias: 0.95 },
+    { name: 'Undying Chain Mantle', icon: '🥋', spriteKey: 'robe', defBias: 1.05, hpBias: 1.1 },
   ],
   charm: [
-    { name: 'Lucky Clover', icon: '🍀', spriteKey: 'clover', luckBias: 1.25, critBias: 0.8 },
-    { name: 'Prism Star', icon: '🌟', spriteKey: 'star', luckBias: 1.05, critBias: 1.1 },
-    { name: 'Serendipity Signet', icon: '💍', spriteKey: 'crown', luckBias: 1.2, critBias: 1.0 },
+    { name: 'Four-Strand Fate Knot', icon: '🧵', spriteKey: 'clover', luckBias: 1.25, critBias: 0.85 },
+    { name: 'Silver Bell of Remembrance', icon: '🔔', spriteKey: 'star', luckBias: 1.05, critBias: 1.1 },
+    { name: 'Shard of the Fallen Sun', icon: '🌑', spriteKey: 'crown', luckBias: 1.2, critBias: 1.0 },
   ],
   companion: [
-    { name: 'Athena Owl', icon: '🦉', spriteKey: 'pet_owl', atkBias: 0.8, luckBias: 1.25 },
-    { name: 'Inkwell Cat', icon: '🐈', spriteKey: 'pet_cat', luckBias: 1.15, critBias: 1.2 },
-    { name: 'Ember Drake', icon: '🐉', spriteKey: 'pet_dragon', atkBias: 1.25, luckBias: 0.8 },
-    { name: 'Lumen Wisp', icon: '✨', spriteKey: 'pet_sprite', luckBias: 1.1, defBias: 1.0 },
+    { name: 'Scavenger Echo', icon: '🦀', spriteKey: 'pet_owl', atkBias: 0.9, luckBias: 1.2 },
+    { name: 'Shadow Hound Shard', icon: '🐺', spriteKey: 'pet_cat', luckBias: 1.15, critBias: 1.2 },
+    { name: 'Fallen Wyrmling Echo', icon: '🐉', spriteKey: 'pet_dragon', atkBias: 1.25, luckBias: 0.85 },
+    { name: 'Sanctuary Light Wisp', icon: '✨', spriteKey: 'pet_sprite', luckBias: 1.1, defBias: 1.05 },
   ],
 };
 
 const AFFIXES = [
-  { name: 'Lucky', luck: 5 },
-  { name: 'Keen', crit: 4, atk: 2 },
-  { name: 'Fortified', def: 3, hp: 14 },
+  { name: 'Fated', luck: 5 },
+  { name: 'Awakened', crit: 4, atk: 2 },
+  { name: 'Onyx', def: 3, hp: 14 },
   { name: 'Runic', atk: 3, crit: 2 },
-  { name: 'Gilded', luck: 4, hp: 10 },
-  { name: 'Astral', atk: 3, luck: 3, crit: 2 },
+  { name: 'Ascended', luck: 4, hp: 10 },
+  { name: 'Transcendent', atk: 3, luck: 3, crit: 2 },
 ];
 
 export function scholarLevelFromXp(xp) {
@@ -381,13 +381,13 @@ export function ensureGameProfile(db, userId) {
       userId,
       now,
       JSON.stringify({ rowan: 0, bram: 0, lyra: 0, pip: 0 }),
-      JSON.stringify(['Arrived in Oakhaven Village. Speak with Elder Rowan to begin Chapter 1!']),
+      JSON.stringify(['[Nightmare Spell]: You shiver on the Black Mountain. Your First Nightmare has begun.']),
       now
     );
     db.prepare(`
       INSERT INTO game_items (user_id, slot, name, icon, sprite_key, rarity, affix, level, upgrade_level, atk, def, hp, luck, crit, equipped, created_at)
-      VALUES (?, 'weapon', 'Wooden Focus Wand', '🪄', 'wand', 'common', '', 1, 0, 4, 0, 0, 0, 2, 1, ?),
-             (?, 'charm', 'Paper Lucky Star', '🍀', 'star', 'common', '', 1, 0, 0, 0, 0, 4, 0, 1, ?)
+      VALUES (?, 'weapon', 'Dormant Whisper Blade', '🗡️', 'blade', 'common', '', 1, 0, 4, 0, 0, 0, 2, 1, ?),
+             (?, 'charm', 'Silver Bell Memory', '🔔', 'star', 'common', '', 1, 0, 0, 0, 0, 4, 0, 1, ?)
     `).run(userId, now, userId, now);
     row = db.prepare('SELECT * FROM game_profiles WHERE user_id = ?').get(userId);
   }
@@ -1941,12 +1941,12 @@ export function grantStudyRewardsToGame(db, user, userStats, durationSec, purity
     const minRarity = durationSec >= 2700 ? 'rare' : durationSec >= 1200 ? 'uncommon' : 'common';
     droppedItem = generateLootItem(db, user.id, idle.stage, heroStats.luck, { minRarity });
     const logs = appendLogs(updatedProf, [
-      `📚 Focus Drop (${mins}m): +${shardsGained}✦, +${overdriveBonusMins}m 4× OVERDRIVE & found [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`,
+      `🌑 [Nightmare Spell Appraisal · ${mins}m]: +${fragsGain} Soul Frags, +${shardsGained}✦ Shards & wove [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`,
     ]);
     db.prepare('UPDATE game_profiles SET last_log_json = ? WHERE user_id = ?').run(logs, user.id);
   } else {
     const logs = appendLogs(updatedProf, [
-      `📚 Study Overdrive (${mins}m): +${shardsGained}✦ Shards & +${overdriveBonusMins}m 4.0× Idle Squad Speed!`,
+      `🌑 [Nightmare Spell Appraisal · ${mins}m]: +${fragsGain} Soul Frags, +${essenceGain} Essence & +${shardsGained}✦ Shards absorbed.`,
     ]);
     db.prepare('UPDATE game_profiles SET last_log_json = ? WHERE user_id = ?').run(logs, user.id);
   }
@@ -4098,14 +4098,14 @@ export function processIdleWaveTick(
           : `+${sackShards}✦ +${drawCount}🃏`,
     },
   ];
-  let logText = `🗺️ Loop #${loop.loopCount} Tile ${loop.tileIndex}/11 (Stage ${curStage}): +${sackShards}✦ into Sack, Drew ${drawCount} Card${drawCount > 1 ? 's' : ''}`;
+  let logText = `🌑 [Forgotten Shore Skirmish · Act ${curStage}]: +${sackShards}✦ Shards, +${drawCount} Memory Thread${drawCount > 1 ? 's' : ''}`;
   if (droppedItem) {
     if (droppedItem.autoEquipped) {
-      logText += ` & ⚡ Auto-Equipped [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`;
+      logText += ` & [Spell Wove] ${droppedItem.name} (${droppedItem.rarity.toUpperCase()})!`;
     } else if (droppedItem.autoSalvagedShards > 0) {
-      logText += ` (+${droppedItem.autoSalvagedShards}✦ Auto-Salvaged weaker drop)`;
+      logText += ` (+${droppedItem.autoSalvagedShards}✦ Soul Essence extracted)`;
     } else {
-      logText += ` & Looted ${droppedItem.name}!`;
+      logText += ` & Claimed ${droppedItem.name}!`;
     }
   }
   const nextLogs = wasBoss || triggerUltimate || droppedItem || wrappedCampfire ? appendLogs(profile, [logText]) : profile.last_log_json;
@@ -4175,7 +4175,7 @@ export function claimIdleAfkChest(db, user, userStats) {
   idle.lastTickAtMs = now;
   flags.idle = idle;
 
-  const msg = `🎁 Claimed AFK Loot Chest (+${shardsGain}✦, +${coinsGain}🪙, +${xpGain} Hero XP & ${lootRolls} Gear Roll${lootRolls > 1 ? 's' : ''})!`;
+  const msg = `🏰 Claimed Citadel Tribute (+${shardsGain}✦ Soul Shards, +${coinsGain}🪙 Coins, +${xpGain} Soul XP & ${lootRolls} Memor${lootRolls > 1 ? 'ies' : 'y'})!`;
   const nextLogs = appendLogs(profile, [msg]);
 
   db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(coinsGain, user.id);
@@ -4794,7 +4794,7 @@ export function performIdleAscension(db, user, userStats) {
   idle.wave = 1;
   flags.idle = idle;
 
-  const msg = `🔥 CELESTIAL ASCENSION #${idle.ascensions}! Earned +${embersEarned} 🔥 Celestial Embers (+35% Permanent Squad Power per Ascension)!`;
+  const msg = `🩸 SOUL LINEAGE AWAKENING #${idle.ascensions}! Harvested +${embersEarned} 🩸 Weaver Sparks (+35% Permanent Nightmare Power per Awakening)!`;
   const nextLogs = appendLogs(profile, [msg]);
 
   db.prepare(`
@@ -4827,7 +4827,7 @@ export function upgradeAscensionRelic(db, user, userStats, { relicId }) {
   idle.ascensionRelics[relicDef.id] = curRank + 1;
   flags.idle = idle;
 
-  const msg = `👑 Upgraded ${relicDef.name} to Rank ${curRank + 1}!`;
+  const msg = `🧬 Wove ${relicDef.name} to Rank ${curRank + 1}!`;
   const nextLogs = appendLogs(profile, [msg]);
   db.prepare(`
     UPDATE game_profiles SET story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?
@@ -4881,7 +4881,7 @@ export function claimIdleMythicMilestone(db, user, userStats, { milestoneId }) {
     droppedItem.equipped = true;
   }
 
-  const msg = `👑 MYTHIC RELIC FORGED & EQUIPPED: [${mDef.mythicReward.name}]!`;
+  const msg = `🕸️ [DIVINE MEMORY WOVEN & BOUND]: [${mDef.mythicReward.name}]!`;
   const nextLogs = appendLogs(profile, [msg]);
   db.prepare(`
     UPDATE game_profiles SET shards = shards + 50, story_flags_json = ?, last_log_json = ?, updated_at = ? WHERE user_id = ?

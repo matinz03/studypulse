@@ -639,7 +639,7 @@ export const SS_TRUE_NAMES = [
   'Heir of Seven Suns',
   'Knight of Empty Thrones',
   'Glass-Eyed Oracle',
-  'Last Torch of Oakhaven',
+  'Last Torch of Bastion',
   'Bane of Carapaces',
   'Sunken Cathedral Bells',
   'Salt-Blooded Mariner',

@@ -176,10 +176,10 @@ const livePresence = new Map();
 const wsSockets = new Set();
 
 const RAID_BOSSES = [
-  { bossName: 'Arch-Lich of Procrastination', bossIcon: '💀', bossMaxHp: 2500 },
-  { bossName: 'Dread Dragon of Multitasking', bossIcon: '🐉', bossMaxHp: 3000 },
-  { bossName: 'Null-Pointer Leviathan', bossIcon: '👾', bossMaxHp: 2800 },
-  { bossName: 'Chronos Deadline Titan', bossIcon: '⏳', bossMaxHp: 3200 },
+  { bossName: 'Carapace Centurion Pack (Awakened Demon)', bossIcon: '🦀', bossMaxHp: 2500 },
+  { bossName: 'Soul Devourer of Ashen Barrow (Awakened Terror)', bossIcon: '🌳', bossMaxHp: 3000 },
+  { bossName: 'Black Knight of the Sunken Cathedral (Fallen Devil)', bossIcon: '⚔️', bossMaxHp: 2800 },
+  { bossName: 'Crimson Spire Messenger (Fallen Tyrant)', bossIcon: '🩸', bossMaxHp: 3200 },
 ];
 
 function getIsoWeekKey(ts = Date.now()) {

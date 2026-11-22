@@ -111,7 +111,7 @@ export function StorePanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
           <ShoppingBag className="w-3.5 h-3.5" />
-          Focus Coin Shop
+          Citadel Coin Exchange
         </h3>
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="sp-badge px-2 py-0.5 rounded-full text-[10px] font-bold">

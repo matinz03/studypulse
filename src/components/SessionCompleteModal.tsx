@@ -188,10 +188,10 @@ export function SessionCompleteModal({
             </div>
           </div>
 
-          <div className="mt-2.5 px-2.5 py-1.5 rounded-xl sp-badge text-[10px] font-bold flex items-center justify-between gap-2">
-            <span>🎮 Pixel Spire Bonus</span>
+          <div className="mt-2.5 px-2.5 py-1.5 rounded-xl sp-badge text-[10px] font-bold flex items-center justify-between gap-2 border border-amber-400/30">
+            <span className="text-amber-200">🌑 Nightmare Spell Appraisal</span>
             <span className="font-mono-num">
-              +{estEnergy} ⚡ • +{estShards} ✦ • {durationSec >= 1200 ? '🎁 Loot Drop' : '🎲 Luck Roll'}
+              +{Math.max(1, Math.round(durationSec / 130))} Soul Frags • +{estEnergy} ⚡ • +{estShards} ✦ • {durationSec >= 1200 ? '🗝️ Memory Weave' : '🎲 Fate Roll'}
             </span>
           </div>
 

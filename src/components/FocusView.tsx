@@ -773,16 +773,19 @@ export function FocusView({
 
               {/* Awakened Soul Runes Strip inside Focus Tab */}
               {shadowSlave && (
-                <div className="w-full p-2.5 rounded-2xl sp-inset border border-white/10 space-y-1.5 text-[10px]">
+                <div
+                  className="w-full p-3 rounded-2xl sp-inset runic-card space-y-2 text-[10px]"
+                  style={{ borderColor: `${shadowSlave.aspect.primaryColor}45` }}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    <span className="font-extrabold text-white flex items-center gap-1">
+                    <span className="font-extrabold text-white flex items-center gap-1.5">
                       <span>{shadowSlave.aspect.icon}</span>
                       <span style={{ color: shadowSlave.aspect.primaryColor }}>[{shadowSlave.aspect.name}]</span>
                       <span className="text-slate-400 font-semibold">
                         • {shadowSlave.rank} {shadowSlave.coreClass.name}
                       </span>
                     </span>
-                    <span className="px-2 py-0.5 rounded-full sp-badge font-mono-num font-bold text-amber-200">
+                    <span className="px-2 py-0.5 rounded-full spell-shimmer border border-amber-400/35 font-mono-num font-bold text-amber-200">
                       [{shadowSlave.trueName}]
                     </span>
                   </div>

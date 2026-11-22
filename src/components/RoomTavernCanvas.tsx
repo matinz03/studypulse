@@ -44,6 +44,11 @@ export function RoomTavernCanvas({ occupants, currentUserId, themeId }: RoomTave
     ctx.fillStyle = meta.preview.border;
     ctx.fillRect(0, floorY, w, 2);
 
+    // Citadel Sanctuary header caption
+    ctx.fillStyle = isLight ? 'rgba(15,23,42,0.55)' : 'rgba(226,232,240,0.58)';
+    ctx.font = '700 9px monospace';
+    ctx.fillText('CITADEL SANCTUARY • LIVE COHORT', 10, 14);
+
     // Hearth campfire in center-left
     const camp = PROP_SPRITES.campfire;
     const campFrame = camp.frames[tick % 2];
@@ -75,7 +80,7 @@ export function RoomTavernCanvas({ occupants, currentUserId, themeId }: RoomTave
         ctx.fillStyle = meta.preview.border;
         ctx.font = '600 9px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Open Desk', deskX + 21, floorY - 22);
+        ctx.fillText('Sanctuary', deskX + 21, floorY - 22);
         continue;
       }
 

@@ -322,9 +322,9 @@ export function CompeteView({
               </div>
               <div>
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-white">
-                  1v1 Weekly Duel
+                  ⚔️ 1v1 Cohort Trial
                 </h3>
-                <p className="text-[11px] text-slate-400">Head-to-head focus battle</p>
+                <p className="text-[11px] text-slate-400">Head-to-head Sleeper focus rivalry</p>
               </div>
             </div>
 
@@ -410,7 +410,7 @@ export function CompeteView({
               </span>
               <div className="min-w-0">
                 <div className="text-xs font-extrabold text-white truncate">
-                  7-Day Focus Pact vs {activeDuel.opponentAvatar} {activeDuel.opponentName}
+                  🩸 7-Day Soul Oath vs {activeDuel.opponentAvatar} {activeDuel.opponentName}
                 </div>
                 <div className="text-[10px] text-slate-400">
                   Target: {activeDuel.targetMins}m · Reward: +{activeDuel.wagerCoins * 2} 🪙 + 50 XP
@@ -492,8 +492,8 @@ export function CompeteView({
       {/* Discover & Connect with Study Friends */}
       <div className="glass-card rounded-3xl p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-white">Study Squad & Peers</h3>
-          <span className="text-xs text-slate-400">{friends.length} friends</span>
+          <h3 className="text-sm font-extrabold text-white">🛡️ Awakened Cohort & Peers</h3>
+          <span className="text-xs text-slate-400">{friends.length} allies</span>
         </div>
 
         <div className="relative">

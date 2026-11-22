@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Sparkles,
   Swords,
-  ChevronLeft,
-  ChevronRight,
   Volume2,
   VolumeX,
   Hammer,
@@ -13,16 +10,15 @@ import {
   ShoppingBag,
   Flame,
   Gift,
-  Crown,
   Building2,
-  Sliders,
+  Waves,
+  Dna,
 } from 'lucide-react';
 import {
   FlashcardItem,
   GameActionResponse,
   GameItem,
   GameState,
-  GameTurnEvent,
   GearSlot,
   IdleAutomationConfig,
   IdleGambitsConfig,
@@ -77,7 +73,7 @@ export interface QuestViewProps {
   onGoToFocus: () => void;
 }
 
-type IdleSubTab = 'squad' | 'guild' | 'ascension' | 'armory' | 'store';
+type ShadowSubTab = 'expedition' | 'soul_sea' | 'runes' | 'citadel' | 'exchange';
 
 const RARITY_CLASS: Record<ItemRarity, string> = {
   common: 'rarity-common',
@@ -89,10 +85,10 @@ const RARITY_CLASS: Record<ItemRarity, string> = {
 };
 
 const SLOT_LABELS: { slot: GearSlot; label: string; emptyIcon: string }[] = [
-  { slot: 'weapon', label: 'Weapon', emptyIcon: '🗡️' },
-  { slot: 'armor', label: 'Armor', emptyIcon: '🛡️' },
-  { slot: 'charm', label: 'Charm', emptyIcon: '🍀' },
-  { slot: 'companion', label: 'Pet', emptyIcon: '🦅' },
+  { slot: 'weapon', label: 'Weapon Memory', emptyIcon: '🗡️' },
+  { slot: 'armor', label: 'Armor Memory', emptyIcon: '🛡️' },
+  { slot: 'charm', label: 'Relic Charm', emptyIcon: '🧵' },
+  { slot: 'companion', label: 'Bound Echo', emptyIcon: '🗿' },
 ];
 
 function formatItemStats(item: GameItem) {
@@ -100,7 +96,7 @@ function formatItemStats(item: GameItem) {
     item.atk ? `+${item.atk} ATK` : '',
     item.def ? `+${item.def} DEF` : '',
     item.hp ? `+${item.hp} HP` : '',
-    item.luck ? `+${item.luck} LUCK` : '',
+    item.luck ? `+${item.luck} FATE` : '',
     item.crit ? `+${item.crit}% CRIT` : '',
   ]
     .filter(Boolean)
@@ -140,16 +136,14 @@ export function QuestView({
   onRerollDailyShop,
   onGoToFocus,
 }: QuestViewProps) {
-  const [subTab, setSubTab] = useState<IdleSubTab>('squad');
+  const [subTab, setSubTab] = useState<ShadowSubTab>('expedition');
   const [busy, setBusy] = useState(false);
-  const [lastEvents, setLastEvents] = useState<GameTurnEvent[]>([]);
   const [eventSeq, setEventSeq] = useState(0);
   const [recentDrop, setRecentDrop] = useState<GameItem | null>(null);
   const [sfxMuted, setSfxMuted] = useState(() => soundEngine.isSfxMuted());
   const [showStudyQuiz, setShowStudyQuiz] = useState(false);
   const [quizCardIdx, setQuizCardIdx] = useState(0);
   const [view3dMode, setView3dMode] = useState<'dream_realm' | 'soul_sea'>('dream_realm');
-  const [showSoulPanel, setShowSoulPanel] = useState<'runes' | 'memories' | 'cohort'>('memories');
   const [actionError, setActionError] = useState<string | null>(null);
 
   const quizCards = flashcards.filter((c) => c.options && c.options.length > 0);
@@ -168,7 +162,6 @@ export function QuestView({
       try {
         const res = await fn();
         if (res.events?.length) {
-          setLastEvents(res.events);
           setEventSeq((s) => s + 1);
         }
         if (res.droppedItem) {
@@ -505,158 +498,8 @@ export function QuestView({
           </div>
         )}
 
-        {/* Soul Sea Runes, Spellweave Memories Loom, Echoes & Altar of Weaver Drawer */}
-        {ss && onIdleConfig && (
-          <div className="p-3 rounded-2xl sp-inset space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1">
-                {(
-                  [
-                    { key: 'memories', label: `🧵 Memories & Echoes (${ss.memories.length})` },
-                    { key: 'runes', label: `🧬 Runes & 120+ Attributes` },
-                    { key: 'cohort', label: `🛡️ Cohort & Altar of Weaver` },
-                  ] as const
-                ).map((t) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setShowSoulPanel(t.key)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      showSoulPanel === t.key ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[10px] text-amber-200 font-bold">
-                Appraisal: {ss.appraisal}
-              </span>
-            </div>
-
-            {showSoulPanel === 'memories' && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {ss.memories.map((mem) => (
-                    <div key={mem.id} className="p-2.5 rounded-xl bg-black/40 border border-amber-400/30 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[11px] font-extrabold text-white truncate">
-                          {mem.icon} {mem.name} <span className="text-amber-300">Weave Lv.{mem.weaveLevel}</span>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={busy || profile.shards < mem.weaveCost}
-                          onClick={() =>
-                            runAction(() => onIdleConfig({ shadowAction: { type: 'weave_memory', memoryId: mem.id } }))
-                          }
-                          className="px-2 py-1 rounded-lg sp-btn-primary text-[9px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
-                        >
-                          🧵 Weave ({mem.weaveCost}✦)
-                        </button>
-                      </div>
-                      <div className="text-[10px] text-slate-300 leading-snug">{mem.enchantment}</div>
-                      <div className="text-[9px] font-mono-num text-sky-300">
-                        ⚔️ +{mem.effectiveAtk} ATK • 🛡️ +{mem.effectiveDef} DEF • Durability {mem.durability}%
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Echoes / Stone Saint Awakening */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  {ss.echoes.map((echo) => (
-                    <div key={echo.id} className="p-2.5 rounded-xl bg-slate-900/75 border border-purple-400/30 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-extrabold text-white truncate">
-                          {echo.icon} {echo.name} {echo.unlocked ? `(Lv.${echo.level})` : '🔒 Act II Boss Blueprint'}
-                        </div>
-                        <div className="text-[9px] text-slate-300 truncate">{echo.desc}</div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={busy || profile.shards < echo.upgradeCost}
-                        onClick={() =>
-                          runAction(() => onIdleConfig({ shadowAction: { type: 'awaken_echo', echoId: echo.id } }))
-                        }
-                        className="px-2.5 py-1 rounded-lg sp-badge text-[9px] font-extrabold text-purple-200 disabled:opacity-40 cursor-pointer shrink-0"
-                      >
-                        🗿 Infuse ({echo.upgradeCost}✦)
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {showSoulPanel === 'runes' && (
-              <div className="space-y-2 text-[11px]">
-                <div className="p-2.5 rounded-xl bg-black/40 border border-white/10">
-                  <div className="font-extrabold text-white">
-                    {ss.aspect.icon} Aspect: [{ss.aspect.name}] ({ss.aspect.rank}) — {ss.aspect.title}
-                  </div>
-                  <div className="text-[10px] text-slate-300 mt-0.5">{ss.aspect.abilityDesc}</div>
-                  <div className="text-[10px] text-sky-300 font-bold mt-0.5">Passive: {ss.aspect.passiveBonus}</div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                  {ss.attributes.map((a) => (
-                    <div key={a.id} className="p-2 rounded-xl bg-black/35 border border-white/10 space-y-0.5">
-                      <div className="font-extrabold text-amber-200 text-[10px]">[{a.name}]</div>
-                      <div className="text-[9px] text-slate-400">{a.category} • ×{a.studyFragmentMult} Frags</div>
-                      <div className="text-[10px] text-slate-300 leading-tight">{a.desc}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="p-2.5 rounded-xl bg-rose-500/12 border border-rose-400/40">
-                  <div className="font-extrabold text-rose-200 text-[10px]">Flaw: [{ss.flaw.name}] — {ss.flaw.desc}</div>
-                  <div className="text-[10px] text-rose-100/80 mt-0.5">Combat: {ss.flaw.combatRule} • Study: {ss.flaw.studyRule}</div>
-                </div>
-              </div>
-            )}
-
-            {showSoulPanel === 'cohort' && (
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-                  {ss.cohort.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`p-2 rounded-xl border text-center space-y-0.5 ${
-                        c.unlocked ? 'sp-tab-active border-amber-400/40' : 'bg-black/30 border-white/10 opacity-50'
-                      }`}
-                    >
-                      <div className="text-base">{c.icon}</div>
-                      <div className="text-[10px] font-extrabold text-white">{c.name}</div>
-                      <div className="text-[9px] text-amber-200 truncate">[{c.trueName}]</div>
-                      <div className="text-[8px] text-slate-400">{c.unlocked ? c.role : 'Unlocks Act II–III'}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* High-Cost Altar of Weaver Fate Re-Weave */}
-                <div className="p-3 rounded-xl bg-purple-950/35 border border-purple-400/45 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] font-extrabold text-purple-200">
-                      🕸️ Altar of Weaver — Tear & Re-Weave Fate
-                    </div>
-                    <div className="text-[10px] text-slate-300">
-                      Altering Fate costs {ss.reweaveCost.shards}✦ Soul Shards & {ss.reweaveCost.coins}🪙 Coins (~15–20h of deep study).
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy || profile.shards < ss.reweaveCost.shards || user.coins < ss.reweaveCost.coins}
-                    onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'reweave_fate' } }))}
-                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-rose-600 text-white text-[10px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
-                  >
-                    🕸️ Re-Weave Fate ({ss.reweaveCost.shards}✦ · {ss.reweaveCost.coins}🪙)
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Quick Action Controls Strip (AFK Chest, Focus Study Quiz, Finishers) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+        {/* Cockpit Quick Action Strip: Citadel Tribute + Nightmare Study Quiz */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
           {onIdleClaimAfk && (
             <button
               type="button"
@@ -666,19 +509,8 @@ export function QuestView({
             >
               <Gift className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">
-                Claim AFK Chest ({idle?.afkChest?.shards || 0}✦ · {formatDurationCompact(afkSeconds)})
+                Claim Citadel Tribute ({idle?.afkChest?.shards || 0}✦ · {formatDurationCompact(afkSeconds)})
               </span>
-            </button>
-          )}
-          {onIdleTick && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => runAction(() => onIdleTick({ wavesCleared: 1, timerRunning: isStudying, triggerUltimate: true }))}
-              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-600/90 via-amber-500/90 to-rose-600/90 text-white border border-amber-300/60 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span>🌟 Spell Overdrive Surge</span>
             </button>
           )}
           {onStudyCast && activeQuizCard && (
@@ -698,7 +530,7 @@ export function QuestView({
           <div className="p-3 rounded-2xl sp-inset border border-sky-400/40 space-y-2">
             <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-sky-300">
               <span>
-                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +28 Soul Essence, +2 Core Fragments & Loot!
+                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +28 Soul Essence, +2 Core Fragments & Memory Drop!
               </span>
               <button
                 type="button"
@@ -729,49 +561,7 @@ export function QuestView({
           </div>
         )}
 
-        {/* Zero-Micromanagement Automation Bar */}
-        {idle && onIdleConfig && (
-          <div className="p-2.5 rounded-2xl sp-inset flex flex-wrap items-center justify-between gap-2 text-[11px]">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                runAction(() =>
-                  onIdleConfig({ automation: { autoEquipBest: !idle.automation.autoEquipBest } })
-                )
-              }
-              className={`px-2.5 py-1.5 rounded-xl border font-extrabold cursor-pointer transition ${
-                idle.automation.autoEquipBest
-                  ? 'sp-tab-active border-emerald-400/60 text-emerald-200'
-                  : 'sp-badge text-slate-400'
-              }`}
-            >
-              🤖 Auto-Equip Best: {idle.automation.autoEquipBest ? 'ON' : 'OFF'}
-            </button>
-
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] font-bold text-slate-400 mr-1">♻️ Auto-Salvage:</span>
-              {(['off', 'common', 'uncommon', 'rare'] as const).map((cap) => {
-                const active = idle.automation.autoSalvageMaxRarity === cap;
-                return (
-                  <button
-                    key={cap}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => runAction(() => onIdleConfig({ automation: { autoSalvageMaxRarity: cap } }))}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase cursor-pointer ${
-                      active ? 'sp-tab-active border border-amber-400/50 text-white' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    {cap}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Latest Loot Drop Card */}
+        {/* Latest Memory Drop Card */}
         <AnimatePresence>
           {recentDrop && (
             <motion.div
@@ -784,7 +574,7 @@ export function QuestView({
                 <span className="text-xl">{recentDrop.icon}</span>
                 <div className="min-w-0">
                   <div className="text-[10px] font-extrabold uppercase">
-                    Loot Drop • {recentDrop.rarity} {recentDrop.autoEquipped ? '• ⚡ Auto-Equipped!' : ''}
+                    Memory Woven • {recentDrop.rarity} {recentDrop.autoEquipped ? '• ⚡ Bound!' : ''}
                   </div>
                   <div className="text-xs font-extrabold text-white truncate">{recentDrop.name}</div>
                   <div className="text-[10px] font-mono-num text-slate-200">{formatItemStats(recentDrop)}</div>
@@ -800,7 +590,7 @@ export function QuestView({
                     }}
                     className="px-2.5 py-1.5 rounded-lg sp-btn-primary text-[10px] font-extrabold cursor-pointer"
                   >
-                    Equip
+                    Bind
                   </button>
                 )}
                 <button
@@ -815,9 +605,9 @@ export function QuestView({
           )}
         </AnimatePresence>
 
-        {/* Compact Adventure Log */}
+        {/* Compact Nightmare Spell Chronicle Whispers */}
         {recentLogs.length > 0 && (
-          <div className="p-2.5 rounded-2xl sp-inset space-y-1 text-[11px] text-slate-300">
+          <div className="p-2.5 rounded-2xl sp-inset space-y-1 text-[11px] text-slate-300 border border-white/10">
             {recentLogs.slice(0, 3).map((line, idx) => (
               <div key={idx} className={idx === 0 ? 'font-bold text-white' : 'text-slate-400'}>
                 {line}
@@ -827,15 +617,15 @@ export function QuestView({
         )}
       </div>
 
-      {/* 5 Idle RPG Management Tabs */}
-      <div className="p-1 rounded-2xl sp-inset grid grid-cols-5 gap-1">
+      {/* 5 Cohesive Shadow Slave Domain Tabs */}
+      <div className="p-1 rounded-2xl sp-inset grid grid-cols-5 gap-1 border border-white/10">
         {(
           [
-            { key: 'squad', label: 'Squad & AI', icon: Swords },
-            { key: 'guild', label: 'Guild & AFK', icon: Building2 },
-            { key: 'ascension', label: 'Ascend', icon: Crown },
-            { key: 'armory', label: 'Armory', icon: Backpack },
-            { key: 'store', label: 'Store', icon: ShoppingBag },
+            { key: 'expedition', label: 'Expedition', icon: Swords },
+            { key: 'soul_sea', label: 'Soul Sea', icon: Waves },
+            { key: 'runes', label: 'Runes', icon: Dna },
+            { key: 'citadel', label: 'Citadel', icon: Building2 },
+            { key: 'exchange', label: 'Exchange', icon: ShoppingBag },
           ] as const
         ).map((t) => {
           const Icon = t.icon;
@@ -844,7 +634,11 @@ export function QuestView({
             <button
               key={t.key}
               type="button"
-              onClick={() => setSubTab(t.key)}
+              onClick={() => {
+                setSubTab(t.key);
+                if (t.key === 'soul_sea') setView3dMode('soul_sea');
+                else if (t.key === 'expedition') setView3dMode('dream_realm');
+              }}
               className={`py-2 px-1 rounded-xl text-[10px] sm:text-[11px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition ${
                 active ? 'sp-tab-active' : 'text-slate-400 hover:text-white'
               }`}
@@ -856,189 +650,362 @@ export function QuestView({
         })}
       </div>
 
-      {/* Tab 1: 4-Hero Squad Formation & AI Gambits */}
-      {subTab === 'squad' && idle && (
+      {/* Tab 1: Nightmare Expedition — Arc I Chronicles, Tide Guide & Cohort */}
+      {subTab === 'expedition' && ss && (
         <div className="space-y-3">
+          {/* Arc I Act Progression & Tactical Tide Guide */}
           <div className="glass-card rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                  ⚔️ 4-Hero Vanguard Squad Formation
+                  ⚔️ Arc I: The Forgotten Shore & Crimson Spire
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Front Row absorbs hits & shatters shields; Back Row gains +10% Crit Power. Tap Swap Row to reposition any hero.
+                  Conquer each Act&apos;s Boss Statue to advance into deeper regions of the Dream Realm.
                 </p>
               </div>
               <span className="px-2.5 py-1 rounded-full sp-badge text-[10px] font-mono-num font-bold shrink-0">
-                Hero Lv.{heroStats.heroLevel}
+                Act {ss.arcAct}/{ss.allActs.length} · Appraisal: {ss.appraisal}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {ss.allActs.map((act) => {
+                const isCurrent = act.act === ss.arcAct;
+                return (
+                  <button
+                    key={act.act}
+                    type="button"
+                    disabled={busy || !act.unlocked || !onIdleConfig}
+                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ shadowAction: { type: 'select_act', act: act.act } }))}
+                    className={`text-left p-3 rounded-2xl border transition cursor-pointer disabled:opacity-45 ${
+                      isCurrent ? 'sp-tab-active border-amber-400/55' : 'sp-inset border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-white truncate">{act.title}</span>
+                      <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full sp-badge shrink-0">
+                        {act.unlocked ? (isCurrent ? 'Active' : 'Unlocked') : '🔒 Locked'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-snug">{act.subtitle}</p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Rising Black Sea Tactical Cycle Guide */}
+            <div className="p-3 rounded-2xl sp-inset border border-white/10 space-y-1.5">
+              <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300">
+                🌑 Rising Black Sea Survival Doctrine
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px]">
+                <div className="p-2 rounded-xl bg-black/35 border border-sky-400/25">
+                  <div className="font-extrabold text-sky-300">☀️ Daylight (0–49%)</div>
+                  <div className="text-slate-300 mt-0.5">Low coral plains exposed. Safest window to farm Soul Fragments & hunt lesser abominations.</div>
+                </div>
+                <div className="p-2 rounded-xl bg-black/35 border border-amber-400/25">
+                  <div className="font-extrabold text-amber-300">🌅 Dusk Tide (50–74%)</div>
+                  <div className="text-slate-300 mt-0.5">Dark waters surge upward. Ascend to a High Statue node or finish your current encounter.</div>
+                </div>
+                <div className="p-2 rounded-xl bg-black/35 border border-rose-500/35">
+                  <div className="font-extrabold text-rose-300">🌑 Flooded Night (75–100%)</div>
+                  <div className="text-slate-300 mt-0.5">All Low Coral tiles submerge! Rest at High Statues (⛰️) to avoid abyssal attrition.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Forgotten Shore Cohort Allies */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
+                🛡️ Forgotten Shore Cohort Allies
+              </h3>
+              <span className="text-[10px] text-slate-400">
+                {ss.cohort.filter((c) => c.unlocked).length}/{ss.cohort.length} Joined
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {ss.cohort.map((c) => (
+                <div
+                  key={c.id}
+                  className={`p-3 rounded-2xl border space-y-1 ${
+                    c.unlocked ? 'sp-tab-active border-amber-400/40' : 'sp-inset border-white/10 opacity-55'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-white flex items-center gap-1.5 truncate">
+                      <span className="text-base">{c.icon}</span>
+                      <span>{c.name}</span>
+                    </span>
+                    <span className="text-[9px] font-bold text-amber-200 px-1.5 py-0.5 rounded sp-badge truncate">
+                      [{c.trueName}]
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-sky-300 font-bold">
+                    {c.unlocked ? c.role : `Unlocks in Act ${Math.min(3, Math.max(2, ss.arcAct + 1))}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Soul Sea, Golden Spellweave Loom & Echoes */}
+      {subTab === 'soul_sea' && ss && (
+        <div className="space-y-3">
+          {/* Soul Core Saturation & Camera Action */}
+          <div className="glass-card rounded-3xl p-4 space-y-3 border border-indigo-400/35">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-200 flex items-center gap-1.5">
+                  <Waves className="w-4 h-4 text-sky-300" />
+                  Soul Sea • {ss.coreCount} Eclipsed Core{ss.coreCount > 1 ? 's' : ''} ({ss.coreClass.name})
+                </h3>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Every 1,000 absorbed Soul Fragments saturates a new Eclipsed Sun in your Soul Sea ({ss.slainShades.count} Silent Shades standing guard).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setView3dMode(view3dMode === 'soul_sea' ? 'dream_realm' : 'soul_sea')}
+                className="px-3 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold cursor-pointer shrink-0"
+              >
+                {view3dMode === 'soul_sea' ? '🌍 Return to 3D Dream Realm' : '🌊 Inspect 3D Soul Sea'}
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl sp-inset space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-slate-300">Core Fragment Saturation</span>
+                <span className="font-mono-num text-white">{ss.soulFragments} / 1,000 Fragments</span>
+              </div>
+              <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(100, (ss.soulFragments / 1000) * 100)}%`,
+                    backgroundColor: ss.aspect.primaryColor,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Woven Memories */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-200">
+                🧵 Spellweave Memories ({ss.memories.length})
+              </h3>
+              <span className="font-mono-num text-[11px] font-bold text-amber-300">
+                {ss.spellweaveStrings} Golden Strings • ✦ {profile.shards} Shards
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {idle.squadHeroes.map((h) => (
-                <div
-                  key={h.id}
-                  className={`p-3 rounded-2xl border space-y-2 ${
-                    h.row === 'front' ? 'sp-tab-active border-sky-400/45' : 'sp-inset border-white/15'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg shrink-0">
-                        {h.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-extrabold text-white truncate">{h.name}</span>
-                          <span className="px-1.5 py-0.5 rounded sp-badge text-[9px] font-extrabold uppercase">
-                            {h.row === 'front' ? 'Front Row' : 'Back Row'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-sky-300 font-bold truncate">{h.role}</div>
-                      </div>
+              {ss.memories.map((mem) => (
+                <div key={mem.id} className="p-3 rounded-2xl sp-inset border border-amber-400/30 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-extrabold text-white truncate">
+                      {mem.icon} {mem.name} <span className="text-amber-300">Weave Lv.{mem.weaveLevel}</span>
                     </div>
                     {onIdleConfig && (
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => runAction(() => onIdleConfig({ swapHeroRow: h.id }))}
-                        className="px-2 py-1 rounded-lg sp-badge text-[10px] font-bold hover:text-white cursor-pointer shrink-0"
+                        disabled={busy || profile.shards < mem.weaveCost}
+                        onClick={() =>
+                          runAction(() => onIdleConfig({ shadowAction: { type: 'weave_memory', memoryId: mem.id } }))
+                        }
+                        className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
                       >
-                        Swap Row
+                        🧵 Weave ({mem.weaveCost}✦)
                       </button>
                     )}
                   </div>
-                  <div className="text-[10px] font-mono-num text-slate-300">
-                    ⚔️ {h.effectiveAtk} ATK • ❤️ {h.effectiveHp} HP
-                  </div>
-                  <div className="p-2 rounded-xl sp-inset text-[10px] text-slate-200">
-                    <span className="font-extrabold text-amber-300">Auto-Skill [{h.skillName}]:</span> {h.skillDesc}
+                  <div className="text-[10px] text-slate-300 leading-snug">{mem.enchantment}</div>
+                  <div className="text-[10px] font-mono-num text-sky-300 font-bold">
+                    ⚔️ +{mem.effectiveAtk} ATK • 🛡️ +{mem.effectiveDef} DEF • Durability {mem.durability}%
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* AI Gambit Rules Configurator */}
-          <div className="glass-card rounded-3xl p-4 space-y-3">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <Sliders className="w-3.5 h-3.5" /> Squad Auto-Skill AI Gambits
+          {/* Echoes & Stone Saint Awakening */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-purple-200">
+              🗿 Living Echoes & Shadows ({ss.echoes.filter((e) => e.unlocked).length}/{ss.echoes.length})
             </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
-              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
-                <div className="font-extrabold text-white">🌟 Squad Finisher Timing</div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { ultPolicy: 'auto_ready' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.ultPolicy === 'auto_ready' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    Fire When Ready
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { ultPolicy: 'boss_or_broken' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.ultPolicy === 'boss_or_broken' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    Boss / Broken Only
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
-                <div className="font-extrabold text-white">🎯 Auto-Target Priority</div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { focusTarget: 'shield_break' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.focusTarget === 'shield_break' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    🛡️ Shatter Shields
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { focusTarget: 'highest_dps' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.focusTarget === 'highest_dps' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    ⚔️ All-Out DPS
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
-                <div className="font-extrabold text-white">🗺️ Stage Progression Rule</div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { stageProgression: 'auto_push' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.stageProgression === 'auto_push' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    Auto-Push Next Stage
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { stageProgression: 'farm_stage' } }))}
-                    className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold cursor-pointer ${
-                      idle.gambits.stageProgression === 'farm_stage' ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                    }`}
-                  >
-                    Farm Current Stage
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl sp-inset space-y-1.5">
-                <div className="font-extrabold text-white">✨ Seraphina Heal Threshold</div>
-                <div className="grid grid-cols-3 gap-1">
-                  {([25, 45, 70] as const).map((pct) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {ss.echoes.map((echo) => (
+                <div key={echo.id} className="p-3 rounded-2xl sp-inset border border-purple-400/30 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-extrabold text-white truncate">
+                      {echo.icon} {echo.name} {echo.unlocked ? `(Tier ${echo.level})` : '🔒 Act II+ Blueprint'}
+                    </div>
+                    <div className="text-[10px] text-slate-300 mt-0.5">{echo.desc}</div>
+                  </div>
+                  {onIdleConfig && (
                     <button
-                      key={pct}
                       type="button"
-                      disabled={busy}
-                      onClick={() => onIdleConfig && runAction(() => onIdleConfig({ gambits: { healThreshold: pct } }))}
-                      className={`py-1.5 px-2 rounded-lg text-[10px] font-extrabold font-mono-num cursor-pointer ${
-                        idle.gambits.healThreshold === pct ? 'sp-btn-primary' : 'sp-badge text-slate-400'
-                      }`}
+                      disabled={busy || profile.shards < echo.upgradeCost}
+                      onClick={() =>
+                        runAction(() => onIdleConfig({ shadowAction: { type: 'awaken_echo', echoId: echo.id } }))
+                      }
+                      className="px-2.5 py-1.5 rounded-xl sp-badge text-[10px] font-extrabold text-purple-200 disabled:opacity-40 cursor-pointer shrink-0"
                     >
-                      &lt;{pct}% HP
+                      🗿 Infuse ({echo.upgradeCost}✦)
                     </button>
-                  ))}
+                  )}
                 </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Tab 2: Idle Guild Professions & 12h Offline AFK Chest */}
-      {subTab === 'guild' && idle && (
+      {/* Tab 3: Awakened Runes, 126 Innate Attributes, Tempering & Altar of Weaver */}
+      {subTab === 'runes' && ss && (
         <div className="space-y-3">
-          {/* 12h AFK Loot Chest Card */}
+          <div className="glass-card rounded-3xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span
+                  className="w-11 h-11 rounded-2xl sp-inset flex items-center justify-center text-2xl border shrink-0"
+                  style={{ borderColor: `${ss.aspect.primaryColor}66`, boxShadow: `0 0 18px ${ss.aspect.primaryColor}28` }}
+                >
+                  {ss.aspect.icon}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs font-extrabold text-white">
+                    Aspect: <span style={{ color: ss.aspect.primaryColor }}>[{ss.aspect.name}]</span>{' '}
+                    <span className="text-[10px] font-bold text-slate-400">({ss.aspect.rank} Rank)</span>
+                  </div>
+                  <div className="text-[11px] text-amber-200 font-bold">
+                    True Name: [{ss.trueName}] • {ss.aspect.title}
+                  </div>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full sp-badge text-[10px] font-bold">
+                Focus Ring: {ss.aspect.ringStyle.replace('_', ' ')}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl sp-inset space-y-1 text-[11px]">
+              <div className="font-extrabold text-white">⚡ Aspect Ability: {ss.aspect.abilityName}</div>
+              <div className="text-slate-300">{ss.aspect.abilityDesc}</div>
+              <div className="text-sky-300 font-bold pt-0.5">Passive Resonance: {ss.aspect.passiveBonus}</div>
+            </div>
+
+            {/* 3 Rolled Innate Attributes */}
+            <div>
+              <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+                🧬 Rolled Innate Attributes (from 126-Attribute Arsenal)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {ss.attributes.map((a) => (
+                  <div key={a.id} className="p-3 rounded-2xl sp-inset border border-white/10 space-y-1">
+                    <div className="font-extrabold text-amber-200 text-xs">[{a.name}]</div>
+                    <div className="text-[10px] font-bold text-sky-300">
+                      {a.category} • ×{a.studyFragmentMult} Study Frags
+                    </div>
+                    <div className="text-[10px] text-slate-300 leading-snug">{a.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Flaw Decree */}
+            <div className="p-3 rounded-2xl bg-rose-500/12 border border-rose-400/45 space-y-1">
+              <div className="font-extrabold text-rose-200 text-xs">
+                ⚠️ Flaw: [{ss.flaw.name}] — {ss.flaw.desc}
+              </div>
+              <div className="text-[10px] text-rose-100/85">
+                <strong>Combat Covenant:</strong> {ss.flaw.combatRule} • <strong>Study Covenant:</strong> {ss.flaw.studyRule}
+              </div>
+            </div>
+
+            {/* High-Cost Altar of Weaver */}
+            {onIdleConfig && (
+              <div className="p-3.5 rounded-2xl bg-purple-950/35 border border-purple-400/45 flex flex-wrap items-center justify-between gap-2.5">
+                <div>
+                  <div className="text-xs font-extrabold text-purple-200">
+                    🕸️ Altar of Weaver — Tear & Re-Weave Fate
+                  </div>
+                  <div className="text-[10px] text-slate-300 mt-0.5">
+                    Re-rolling your Aspect, 3 Innate Attributes & Flaw demands intense study effort ({ss.reweaveCost.shards}✦ + {ss.reweaveCost.coins}🪙).
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || profile.shards < ss.reweaveCost.shards || user.coins < ss.reweaveCost.coins}
+                  onClick={() => runAction(() => onIdleConfig({ shadowAction: { type: 'reweave_fate' } }))}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-rose-600 text-white text-[11px] font-extrabold disabled:opacity-40 cursor-pointer shrink-0"
+                >
+                  🕸️ Re-Weave Fate ({ss.reweaveCost.shards}✦ · {ss.reweaveCost.coins}🪙)
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Soul Core Tempering (Permanent Base Stat Upgrades) */}
+          <div className="glass-card rounded-3xl p-4 space-y-2.5">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
+              🔥 Soul Core Tempering (✦ {profile.shards} Shards)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {(
+                [
+                  { key: 'atk', name: 'Aspect Strike Tempering', effect: '+3 Base Nightmare ATK', icon: '⚔️' },
+                  { key: 'vit', name: 'Carapace Vitality', effect: '+20 Max HP & +2 DEF', icon: '❤️' },
+                  { key: 'luck', name: 'Strings of Fate', effect: '+4 Fate Affinity (Rarity Odds)', icon: '🧵' },
+                  { key: 'crit', name: 'Critical Shadow Step', effect: '+2% Critical Strike Chance', icon: '🎯' },
+                ] as const
+              ).map((u) => {
+                const rank = profile.upgrades[u.key];
+                const cost = profile.upgradeCosts[u.key];
+                const canUpgrade = rank < 20 && profile.shards >= cost;
+                return (
+                  <div key={u.key} className="p-2.5 rounded-2xl sp-inset flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-white">
+                        {u.icon} {u.name} <span className="font-mono-num text-[10px] opacity-75">R{rank}/20</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">{u.effect}</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy || !canUpgrade}
+                      onClick={() => runAction(() => onUpgradeStat(u.key))}
+                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold font-mono-num cursor-pointer shrink-0 ${
+                        canUpgrade ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
+                      }`}
+                    >
+                      ✦{cost}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Citadel Sanctuaries, 12h Tribute & Weaver's Lineage */}
+      {subTab === 'citadel' && idle && (
+        <div className="space-y-3">
+          {/* 12h Offline Citadel Tribute */}
           <div className="glass-card rounded-3xl p-4 space-y-2.5 border border-amber-400/40">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-                  <Gift className="w-4 h-4" /> 12-Hour Offline AFK Loot Chest
+                  <Gift className="w-4 h-4" /> 12-Hour Offline Citadel Tribute
                 </h3>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Accumulates Shards, Focus Coins, Hero XP & scaled Gear Rolls 24/7 while you study, work, or sleep (cap 12h).
+                  Gathers Soul Shards, Citadel Coins, Soul XP & scaled Memories 24/7 while you study or rest in the Waking World.
                 </p>
               </div>
               {onIdleClaimAfk && (
@@ -1048,7 +1015,7 @@ export function QuestView({
                   onClick={() => runAction(onIdleClaimAfk)}
                   className="px-3.5 py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer shrink-0"
                 >
-                  🎁 Collect Chest
+                  🏰 Collect Tribute
                 </button>
               )}
             </div>
@@ -1059,7 +1026,7 @@ export function QuestView({
               </div>
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-extrabold text-sky-300">+{idle.afkChest.shards}✦</div>
-                <div className="text-[9px] text-slate-400">Shards</div>
+                <div className="text-[9px] text-slate-400">Soul Shards</div>
               </div>
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-extrabold text-amber-300">+{idle.afkChest.coins}🪙</div>
@@ -1067,16 +1034,16 @@ export function QuestView({
               </div>
               <div className="p-2 rounded-xl sp-inset">
                 <div className="font-extrabold text-emerald-300">+{idle.afkChest.xp} XP</div>
-                <div className="text-[9px] text-slate-400">{Math.max(1, idle.afkChest.itemsRolled)} Gear</div>
+                <div className="text-[9px] text-slate-400">{Math.max(1, idle.afkChest.itemsRolled)} Memor{idle.afkChest.itemsRolled > 1 ? 'ies' : 'y'}</div>
               </div>
             </div>
           </div>
 
-          {/* Upgradable 24/7 Guild Facilities */}
+          {/* Dream Realm Citadel Sanctuaries */}
           <div className="glass-card rounded-3xl p-4 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                🏛️ 24/7 Idle Guild Professions
+                🏛️ Dream Realm Citadel Sanctuaries
               </h3>
               <span className="font-mono-num text-xs font-extrabold text-sky-300">✦ {profile.shards} Shards</span>
             </div>
@@ -1109,7 +1076,7 @@ export function QuestView({
                           canAfford ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
                         }`}
                       >
-                        Upgrade ✦{p.upgradeCost}
+                        Fortify ✦{p.upgradeCost}
                       </button>
                     )}
                   </div>
@@ -1118,62 +1085,15 @@ export function QuestView({
             </div>
           </div>
 
-          {/* Sanctuary Hero Training Upgrades */}
-          <div className="glass-card rounded-3xl p-4 space-y-2.5">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-              🏋️ Squad Sanctuary Mastery Training
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {(
-                [
-                  { key: 'atk', name: 'Might Mastery', effect: '+3 Squad Base ATK', icon: '⚔️' },
-                  { key: 'vit', name: 'Iron Vitality', effect: '+20 Max HP & +2 DEF', icon: '❤️' },
-                  { key: 'luck', name: 'Fortune Shrine', effect: '+4 LUCK (Mythic Odds)', icon: '🍀' },
-                  { key: 'crit', name: 'Focus Precision', effect: '+2% Critical Strike', icon: '🎯' },
-                ] as const
-              ).map((u) => {
-                const rank = profile.upgrades[u.key];
-                const cost = profile.upgradeCosts[u.key];
-                const canUpgrade = rank < 20 && profile.shards >= cost;
-                return (
-                  <div key={u.key} className="p-2.5 rounded-2xl sp-inset flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-white">
-                        {u.icon} {u.name} <span className="font-mono-num text-[10px] opacity-75">R{rank}/20</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">{u.effect}</div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy || !canUpgrade}
-                      onClick={() => runAction(() => onUpgradeStat(u.key))}
-                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold font-mono-num cursor-pointer shrink-0 ${
-                        canUpgrade ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
-                      }`}
-                    >
-                      ✦{cost}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: Celestial Ascension Rebirth & Mythic Forge Milestones */}
-      {subTab === 'ascension' && idle && (
-        <div className="space-y-3">
-          {/* Ascension Rebirth Portal */}
-          <div className="glass-card rounded-3xl p-4 space-y-3 border border-rose-500/50">
+          {/* Soul Lineage Awakening & Weaver's Forbidden Lineage Weaves */}
+          <div className="glass-card rounded-3xl p-4 space-y-3 border border-rose-500/45">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300 flex items-center gap-1.5">
-                  <Flame className="w-4 h-4 text-amber-400" /> Celestial Ascension & Rebirth (Ascension #{idle.ascensions})
+                  <Flame className="w-4 h-4 text-amber-400" /> Weaver&apos;s Lineage Awakening (#{idle.ascensions})
                 </h3>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Reset Stage progress back to Stage 1-1 to awaken permanent{' '}
-                  <strong className="text-amber-300">Celestial Embers (🔥)</strong> & +35% Multiplicative Squad Power! Keeps all Gear, Relics & Guild Levels.
+                  Extract <strong className="text-amber-300">Weaver Sparks (🩸)</strong> for +35% Multiplicative Nightmare Power while keeping all Memories & Citadel levels.
                 </p>
               </div>
               {onIdleAscend && (
@@ -1187,7 +1107,7 @@ export function QuestView({
                       : 'sp-inset text-slate-500 opacity-50 cursor-not-allowed'
                   }`}
                 >
-                  {idle.canAscend ? `🔥 Ascend (+${idle.pendingEmbers} Embers)` : 'Need Stage 2 or 4 Waves'}
+                  {idle.canAscend ? `🩸 Awaken (+${idle.pendingEmbers} Sparks)` : 'Need Act II or 4 Victories'}
                 </button>
               )}
             </div>
@@ -1213,7 +1133,7 @@ export function QuestView({
                           canAfford ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
                         }`}
                       >
-                        🔥 {rel.nextCost}
+                        🩸 {rel.nextCost}
                       </button>
                     )}
                   </div>
@@ -1222,10 +1142,10 @@ export function QuestView({
             </div>
           </div>
 
-          {/* Aethelgard Mythic Forge Milestones */}
+          {/* Divine & Sacred Memory Milestones */}
           <div className="glass-card rounded-3xl p-4 space-y-2.5">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300">
-              👑 Aethelgard Mythic Relic Milestones ({idle.mythicMilestones.filter((m) => m.claimed).length}/
+              🕸️ Divine &amp; Sacred Memory Milestones ({idle.mythicMilestones.filter((m) => m.claimed).length}/
               {idle.mythicMilestones.length})
             </h3>
             <div className="space-y-2">
@@ -1253,7 +1173,7 @@ export function QuestView({
                     </div>
 
                     {m.claimed ? (
-                      <span className="text-[10px] font-extrabold text-emerald-300 shrink-0">✓ Forged</span>
+                      <span className="text-[10px] font-extrabold text-emerald-300 shrink-0">✓ Woven</span>
                     ) : (
                       onIdleForgeMythic && (
                         <button
@@ -1264,7 +1184,7 @@ export function QuestView({
                             m.unlocked ? 'sp-btn-primary' : 'sp-badge opacity-45 cursor-not-allowed'
                           }`}
                         >
-                          {m.unlocked ? '👑 Forge Mythic' : 'In Progress'}
+                          {m.unlocked ? '🕸️ Weave Memory' : 'In Progress'}
                         </button>
                       )
                     )}
@@ -1280,13 +1200,56 @@ export function QuestView({
         </div>
       )}
 
-      {/* Tab 4: Armory, Gear Power Score & Class Specialization */}
-      {subTab === 'armory' && (
+      {/* Tab 5: Bound Relics, Backpack & Citadel Coin Exchange */}
+      {subTab === 'exchange' && (
         <div className="space-y-3">
+          {/* Auto-Bind Preferences */}
+          {idle && onIdleConfig && (
+            <div className="glass-card rounded-3xl p-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  runAction(() =>
+                    onIdleConfig({ automation: { autoEquipBest: !idle.automation.autoEquipBest } })
+                  )
+                }
+                className={`px-3 py-1.5 rounded-xl border font-extrabold cursor-pointer transition ${
+                  idle.automation.autoEquipBest
+                    ? 'sp-tab-active border-emerald-400/60 text-emerald-200'
+                    : 'sp-badge text-slate-400'
+                }`}
+              >
+                ⚡ Auto-Bind Strongest: {idle.automation.autoEquipBest ? 'ON' : 'OFF'}
+              </button>
+
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 mr-1">♻️ Auto-Extract Weaker:</span>
+                {(['off', 'common', 'uncommon', 'rare'] as const).map((cap) => {
+                  const active = idle.automation.autoSalvageMaxRarity === cap;
+                  return (
+                    <button
+                      key={cap}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onIdleConfig({ automation: { autoSalvageMaxRarity: cap } }))}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase cursor-pointer ${
+                        active ? 'sp-tab-active border border-amber-400/50 text-white' : 'sp-badge text-slate-400'
+                      }`}
+                    >
+                      {cap}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Bound Memory Slots */}
           <div className="glass-card rounded-3xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300">
-                Equipped Squad Relics (Great-Success {greatForgeChance}% 🍀)
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <Backpack className="w-3.5 h-3.5" /> Bound Soul Relics (Thread Surge {greatForgeChance}% 🍀)
               </h3>
               <span className="font-mono-num text-[11px] font-bold text-slate-400">
                 ✦ {profile.shards} • 🪙 {user.coins}
@@ -1302,7 +1265,7 @@ export function QuestView({
                       <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center text-lg">{emptyIcon}</span>
                       <div>
                         <div className="text-[10px] uppercase font-bold text-slate-400">{label}</div>
-                        <div className="text-xs text-slate-400">Empty slot</div>
+                        <div className="text-xs text-slate-400">Unbound slot</div>
                       </div>
                     </div>
                   );
@@ -1345,7 +1308,7 @@ export function QuestView({
 
             {heroStats.specializations && heroStats.specializations.length > 0 && onSelectSpecialization && (
               <div className="p-3 rounded-2xl sp-inset space-y-2 border border-white/10">
-                <div className="text-[11px] font-extrabold text-white">🌟 Commander Mastery Specialization</div>
+                <div className="text-[11px] font-extrabold text-white">🌟 Sleeper Combat Discipline</div>
                 <div className="grid grid-cols-2 gap-2">
                   {heroStats.specializations.map((sp) => {
                     const active = heroStats.specialization === sp.key;
@@ -1373,7 +1336,7 @@ export function QuestView({
 
             <div className="pt-2 border-t border-white/10 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-extrabold text-slate-300">Backpack ({unequippedItems.length}/40)</span>
+                <span className="text-xs font-extrabold text-slate-300">Stored Relics ({unequippedItems.length}/40)</span>
                 {unequippedItems.some((i) => i.rarity === 'common') && (
                   <button
                     type="button"
@@ -1381,14 +1344,14 @@ export function QuestView({
                     onClick={() => runAction(() => onSalvageItem({ maxRarity: 'common' }))}
                     className="px-2.5 py-1 rounded-lg sp-badge text-[10px] font-bold hover:opacity-90 cursor-pointer"
                   >
-                    ♻️ Salvage Commons
+                    ♻️ Dissolve Commons
                   </button>
                 )}
               </div>
 
               {unequippedItems.length === 0 ? (
                 <div className="p-3 rounded-2xl sp-inset text-center text-xs text-slate-400">
-                  Auto-Equip & Auto-Salvage keep your armory optimized while your 4-Hero Squad battles 24/7!
+                  Study sessions and Nightmare skirmishes weave new Soul Relics into your storage.
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-64 overflow-y-auto glass-scroll pr-1">
@@ -1417,7 +1380,7 @@ export function QuestView({
                           onClick={() => runAction(() => onEquipItem(item.id))}
                           className="px-2.5 py-1 rounded-lg sp-tab-active border text-[10px] font-extrabold cursor-pointer"
                         >
-                          Equip
+                          Bind
                         </button>
                         <button
                           type="button"
@@ -1436,20 +1399,17 @@ export function QuestView({
               )}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Tab 5: Focus Coin Store */}
-      {subTab === 'store' && (
-        <StorePanel
-          user={user}
-          shop={shop}
-          game={game}
-          onBuyShopItem={onBuyShopItem}
-          onRerollDailyShop={onRerollDailyShop}
-          onEquipLoot={(id) => onEquipItem(id).then(() => undefined)}
-          compact
-        />
+          <StorePanel
+            user={user}
+            shop={shop}
+            game={game}
+            onBuyShopItem={onBuyShopItem}
+            onRerollDailyShop={onRerollDailyShop}
+            onEquipLoot={(id) => onEquipItem(id).then(() => undefined)}
+            compact
+          />
+        </div>
       )}
     </div>
   );

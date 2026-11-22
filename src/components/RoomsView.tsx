@@ -465,11 +465,11 @@ export function RoomsView({
             </div>
 
             {currentRoom.raid && (
-              <div className="rounded-2xl p-3 sp-inset border border-white/10 space-y-1.5">
+              <div className="rounded-2xl p-3 sp-inset border border-rose-500/35 space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Co-Op Weekly Raid Boss
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
+                      🌑 Active Nightmare Gate Siege
                     </div>
                     <div className="text-xs font-extrabold text-white truncate">
                       {currentRoom.raid.bossIcon} {currentRoom.raid.bossName}
@@ -483,16 +483,15 @@ export function RoomsView({
                       className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[10px] font-extrabold shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-45"
                     >
                       <Swords className="w-3 h-3" />
-                      <span>{currentRoom.raid.bossHp <= 0 ? 'Slain!' : 'Strike (1⚡)'}</span>
+                      <span>{currentRoom.raid.bossHp <= 0 ? 'Gate Sealed!' : 'Gate Strike (1⚡)'}</span>
                     </button>
                   )}
                 </div>
-                <div className="h-2 rounded-full bg-black/30 overflow-hidden">
+                <div className="h-2 rounded-full bg-black/40 overflow-hidden border border-white/10">
                   <div
-                    className="h-full rounded-full transition-all"
+                    className="h-full rounded-full transition-all bg-gradient-to-r from-rose-600 via-rose-500 to-amber-400"
                     style={{
                       width: `${Math.max(0, Math.round((currentRoom.raid.bossHp / Math.max(1, currentRoom.raid.bossMaxHp)) * 100))}%`,
-                      backgroundColor: themeMeta.colors.accent,
                     }}
                   />
                 </div>
@@ -500,8 +499,8 @@ export function RoomsView({
                   <span>{currentRoom.raid.bossHp}/{currentRoom.raid.bossMaxHp} HP</span>
                   <span>
                     {currentRoom.raid.contributors[0]
-                      ? `Top: ${currentRoom.raid.contributors[0].avatar} ${currentRoom.raid.contributors[0].damage} DMG`
-                      : 'Focus sessions deal boss DMG'}
+                      ? `Vanguard: ${currentRoom.raid.contributors[0].avatar} ${currentRoom.raid.contributors[0].damage} DMG`
+                      : 'Deep focus weakens the Nightmare Gate'}
                   </span>
                 </div>
               </div>
@@ -513,7 +512,7 @@ export function RoomsView({
             {currentRoom.occupants.length === 0 ? (
               <div className="col-span-full rounded-2xl p-6 sp-inset text-center">
                 <p className="text-xs font-bold text-slate-300">
-                  No one is seated in this room right now. Start a focus session to take the first desk!
+                  No Sleepers anchored in this Citadel yet. Start a focus session to claim the first sanctuary desk!
                 </p>
               </div>
             ) : (
