@@ -552,6 +552,104 @@ export interface IdleAutomationConfig {
   autoSalvageMaxRarity: 'off' | 'common' | 'uncommon' | 'rare';
 }
 
+export interface LoopTileCardDef {
+  key: string;
+  name: string;
+  icon: string;
+  placement: 'road' | 'landscape';
+  traits: string[];
+  color: string;
+  desc: string;
+}
+
+export interface LoopPlacedTile {
+  x: number;
+  y: number;
+  baseKey: string;
+  cardKey: string;
+  stars: number;
+  evolved: boolean;
+  name: string;
+  icon: string;
+  placement: 'road' | 'landscape';
+  color: string;
+  desc: string;
+  traits: string[];
+}
+
+export interface LoopHandCard {
+  id: string;
+  cardKey: string;
+  stars: number;
+  name: string;
+  icon: string;
+  placement: 'road' | 'landscape';
+  traits: string[];
+  color: string;
+  desc: string;
+  threat: number;
+}
+
+export interface LoopTraitStatus {
+  id: string;
+  name: string;
+  icon: string;
+  breakpoints: number[];
+  tierDescs: string[];
+  count: number;
+  tier: number;
+  activeDesc: string;
+}
+
+export interface LoopRelicDef {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+}
+
+export interface LoopLootSack {
+  shards: number;
+  coins: number;
+  xp: number;
+  embers: number;
+  gearRolls: number;
+}
+
+export interface IdleLoopState {
+  gridWidth: number;
+  gridHeight: number;
+  roadPath: { x: number; y: number }[];
+  loopCount: number;
+  tileIndex: number;
+  threatPct: number;
+  bossActive: boolean;
+  autoArchitect: boolean;
+  greedMultiplier: number;
+  board: LoopPlacedTile[];
+  hand: LoopHandCard[];
+  activeTraits: LoopTraitStatus[];
+  bonuses: {
+    atkPct: number;
+    maxHpFlat: number;
+    maxHpPct: number;
+    defFlat: number;
+    defPct: number;
+    lifestealPct: number;
+    executePct: number;
+    chainLightningPct: number;
+    barrierBonusPct: number;
+    speedPct: number;
+    lootMult: number;
+    campfireHealPct: number;
+    bonusGearRolls: number;
+  };
+  activeRelics: LoopRelicDef[];
+  pendingRelicChoices: LoopRelicDef[];
+  lootSack: LoopLootSack;
+  synergiesTriggered: number;
+}
+
 export interface IdleGameState {
   stage: number;
   maxStage: number;
@@ -613,6 +711,7 @@ export interface IdleGameState {
   shardsPerHr: number;
   coinsPerHr: number;
   xpPerHr: number;
+  loop?: IdleLoopState;
 }
 
 export interface GameState {

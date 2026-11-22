@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { EnemyIntent, GameState, GameTurnEvent } from '../types';
+import { EnemyIntent, GameState, GameTurnEvent, LoopHandCard } from '../types';
 import {
   BIOME_PALETTES,
   COMPANION_SPRITES,
@@ -17,8 +17,10 @@ interface PixelCanvasProps {
   eventSeq: number;
   focusFever: boolean;
   isStudying?: boolean;
+  selectedCard?: LoopHandCard | null;
   onAutoWaveClear?: (opts: { isBossWave: boolean; triggerUltimate: boolean; outcome?: 'clear' | 'wipe' }) => void;
   onTileClick?: (tx: number, ty: number) => void;
+  onPlaceLoopTile?: (gx: number, gy: number) => void;
 }
 
 interface FloatingText {
@@ -64,18 +66,32 @@ export function PixelCanvas({
   eventSeq,
   focusFever,
   isStudying = false,
+  selectedCard = null,
   onAutoWaveClear,
   onTileClick,
+  onPlaceLoopTile,
 }: PixelCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const stateRef = useRef({ game, focusFever, isStudying, onAutoWaveClear });
-  stateRef.current = { game, focusFever, isStudying, onAutoWaveClear };
+  const hoverCellRef = useRef<{ x: number; y: number } | null>(null);
+  const stateRef = useRef({ game, focusFever, isStudying, selectedCard, onAutoWaveClear });
+  stateRef.current = { game, focusFever, isStudying, selectedCard, onAutoWaveClear };
 
   const idleSimRef = useRef({
     waveKey: '',
-    phase: 'marching' as 'marching' | 'combat' | 'wipe_pause',
-    marchFrames: 75,
+    phase: 'traveling' as 'traveling' | 'clash' | 'wipe_pause',
+    roadProgress: 0, // Continuous 0..12 position around Loop Road
+    targetStopIdx: 1,
+    marchFrames: 45,
     wipePauseFrames: 0,
+    phoenixUsedThisLoop: false,
+    heroHp: 220,
+    heroMaxHp: 220,
+    heroShield: 25,
+    heroAtb: 30,
+    heroLunge: 0,
+    heroHurtFlash: 0,
+    enemy: { key: 'slime', name: 'Astral Ooze', hp: 110, maxHp: 110, shields: 2, maxShields: 2, atb: 20, lunge: 0, shake: 0, isBoss: false },
+    lightningArc: null as null | { x1: number; y1: number; x2: number; y2: number; life: number },
     heroes: [
       { id: 'solarius', hp: 180, maxHp: 180, shield: 0, atb: 20, lunge: 0, hurtFlash: 0, turnCount: 0 },
       { id: 'kaelis', hp: 140, maxHp: 140, shield: 0, atb: 45, lunge: 0, hurtFlash: 0, turnCount: 0 },
@@ -86,7 +102,7 @@ export function PixelCanvas({
     enemy2: { hp: 80, maxHp: 80, shields: 1, maxShields: 1, atb: 35, lunge: 0, shake: 0, vulnerable: 0, intent: 'VOLLEY' },
     ultCharge: 30,
     scrollX: 0,
-    bossTimerFrames: 1500, // 25s @ 60fps
+    bossTimerFrames: 1500,
     ultBeamLife: 0,
     pendingClearDispatched: false,
   });
@@ -208,21 +224,52 @@ export function PixelCanvas({
   }, [eventSeq, lastEvents]);
 
   function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!onTileClick || !canvasRef.current) return;
+    if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * 320;
     const py = ((e.clientY - rect.top) / rect.height) * 208;
 
     const g = stateRef.current.game;
     if (g.encounter) return;
-    if (g.mode === 'dungeon' && g.dungeon) {
+    if (g.mode === 'dungeon' && g.dungeon && onTileClick) {
       const tx = Math.floor((px - 17) / 26);
       const ty = Math.floor((py - 24) / 20);
       if (tx >= 0 && tx < 11 && ty >= 0 && ty < 9) onTileClick(tx, ty);
-    } else if (g.mode === 'village') {
+    } else if (g.idle?.loop && onPlaceLoopTile) {
+      const gx = Math.floor((px - 10) / 30);
+      const gy = Math.floor((py - 24) / 34);
+      if (gx >= 0 && gx < 7 && gy >= 0 && gy < 5) {
+        fxRef.current.particles.push(
+          ...Array.from({ length: 10 }, () => ({
+            x: 10 + gx * 30 + 15,
+            y: 24 + gy * 34 + 17,
+            vx: (Math.random() - 0.5) * 3.2,
+            vy: (Math.random() - 0.6) * 3.0,
+            color: '#fde047',
+            life: 24,
+            size: 2,
+          }))
+        );
+        onPlaceLoopTile(gx, gy);
+      }
+    } else if (g.mode === 'village' && onTileClick) {
       const tx = Math.floor((px - 16) / 32);
       const ty = Math.floor((py - 22) / 26);
       if (tx >= 0 && tx < 9 && ty >= 0 && ty < 7) onTileClick(tx, ty);
+    }
+  }
+
+  function handleCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * 320;
+    const py = ((e.clientY - rect.top) / rect.height) * 208;
+    const gx = Math.floor((px - 10) / 30);
+    const gy = Math.floor((py - 24) / 34);
+    if (gx >= 0 && gx < 7 && gy >= 0 && gy < 5) {
+      hoverCellRef.current = { x: gx, y: gy };
+    } else {
+      hoverCellRef.current = null;
     }
   }
 
@@ -776,552 +823,574 @@ export function PixelCanvas({
 
     function renderIdleAutoBattler(g: GameState, fever: boolean, animFrame: number, frameCountNum: number) {
       const idle = g.idle!;
+      const loop = idle.loop;
       const sim = idleSimRef.current;
       const fx = fxRef.current;
-      const { isStudying: studying, onAutoWaveClear: onClear } = stateRef.current;
+      const { isStudying: studying, onAutoWaveClear: onClear, selectedCard: cardSel } = stateRef.current;
       const overdrive = idle.overdriveActive || studying;
       const battlePace = idle.gambits?.battlePace || '1x';
-      const paceBase = battlePace === 'overdrive' ? 2.4 : battlePace === '2x' ? 1.8 : 1.0;
-      const paceFactor = overdrive ? (battlePace === 'overdrive' ? 3.4 : battlePace === '2x' ? 2.5 : 1.65) : paceBase;
+      const paceBase = battlePace === 'overdrive' ? 2.4 : battlePace === '2x' ? 1.75 : 1.0;
+      const paceFactor = overdrive ? (battlePace === 'overdrive' ? 3.2 : battlePace === '2x' ? 2.4 : 1.65) : paceBase;
 
-      // Initialize heroes & wave enemies when stage/wave updates
-      const nextKey = `${idle.stage}-${idle.wave}`;
+      const roadPath = loop?.roadPath || [
+        { x: 1, y: 2 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 1 },
+        { x: 4, y: 1 }, { x: 5, y: 1 }, { x: 5, y: 2 }, { x: 5, y: 3 },
+        { x: 4, y: 3 }, { x: 3, y: 3 }, { x: 2, y: 3 }, { x: 1, y: 3 },
+      ];
+      const boardTiles = loop?.board || [];
+      const bonuses = loop?.bonuses || {
+        atkPct: 0, maxHpFlat: 0, maxHpPct: 0, defFlat: 0, defPct: 0,
+        lifestealPct: 0, executePct: 0, chainLightningPct: 0, barrierBonusPct: 0,
+        speedPct: 0, lootMult: 1, campfireHealPct: 18, bonusGearRolls: 0,
+      };
+      const activeRelicIds = new Set((loop?.activeRelics || []).map((r) => r.id));
+
+      const effectiveHeroMaxHp = Math.max(
+        140,
+        Math.round(
+          ((g.heroStats.maxHp || 120) * 1.45 + (bonuses.maxHpFlat || 0) + (activeRelicIds.has('titan_heartstone') ? 120 : 0)) *
+            (1 + (bonuses.maxHpPct || 0) / 100) *
+            (idle.ascensionMult || 1)
+        )
+      );
+
+      // Sync simulation state when backend state advances or starts fresh
+      const nextKey = `${idle.stage}-${idle.wave}-${loop?.loopCount || 1}`;
       if (sim.waveKey !== nextKey) {
-        const isFreshStage = !sim.waveKey || !sim.waveKey.startsWith(`${idle.stage}-`);
+        const isFirstInit = !sim.waveKey;
         sim.waveKey = nextKey;
-        sim.phase = 'marching';
-        sim.marchFrames = Math.round(78 / Math.min(2.2, paceFactor));
-        sim.wipePauseFrames = 0;
+        sim.heroMaxHp = effectiveHeroMaxHp;
+        if (isFirstInit || sim.heroHp <= 0) {
+          sim.heroHp = effectiveHeroMaxHp;
+          sim.heroShield = activeRelicIds.has('titan_heartstone') ? Math.round(effectiveHeroMaxHp * 0.2) : 0;
+          sim.roadProgress = loop?.tileIndex || 0;
+          sim.targetStopIdx = ((loop?.tileIndex || 0) + 1) % roadPath.length;
+        }
         sim.pendingClearDispatched = false;
-        sim.bossTimerFrames = 1500; // 25s @ 60fps
-
-        // Reconcile Hero maxHP & heal +20% between waves (full heal on new stage or wipe recovery)
-        sim.heroes = sim.heroes.map((h, i) => {
-          const serverHero = idle.squadHeroes.find((sh) => sh.id === h.id) || idle.squadHeroes[i];
-          const maxHp = Math.max(80, serverHero?.effectiveHp || 150);
-          const nextHp = isFreshStage || h.hp <= 0 ? maxHp : Math.min(maxHp, Math.round(h.hp + maxHp * 0.22));
-          return {
-            ...h,
-            hp: nextHp,
-            maxHp,
-            shield: Math.round(h.shield * 0.4),
-            atb: 15 + i * 18,
-            lunge: 0,
-            hurtFlash: 0,
-          };
-        });
-
-        const e1Max = Math.max(80, idle.currentEnemy.maxHp);
-        const e2Max = Math.max(55, idle.secondaryEnemy?.maxHp || Math.round(e1Max * 0.65));
-        sim.enemy1 = {
-          hp: e1Max,
-          maxHp: e1Max,
-          shields: idle.currentEnemy.shields,
-          maxShields: idle.currentEnemy.maxShields,
-          atb: 20,
-          lunge: 0,
-          shake: 0,
-          vulnerable: 0,
-          intent: idle.isBossWave ? 'CLEAVE' : 'STRIKE',
-        };
-        sim.enemy2 = {
-          hp: e2Max,
-          maxHp: e2Max,
-          shields: idle.secondaryEnemy?.shields ?? 1,
-          maxShields: idle.secondaryEnemy?.maxShields ?? 1,
-          atb: 45,
-          lunge: 0,
-          shake: 0,
-          vulnerable: 0,
-          intent: 'VOLLEY',
-        };
+        sim.bossTimerFrames = 1500;
       }
 
       const biome = BIOME_PALETTES[idle.realm.key] || BIOME_PALETTES.moss_library;
-      ctx!.fillStyle = biome.bg;
+      ctx!.fillStyle = '#09090b';
       ctx!.fillRect(0, 0, 320, 208);
 
-      // Scroll parallax backdrop & road ONLY during Marching phase
-      if (sim.phase === 'marching') {
-        sim.scrollX = (sim.scrollX + 1.8 * Math.min(2.2, paceFactor)) % 68;
-      }
-      const wallOffset = Math.floor(sim.scrollX * 0.5) % 34;
+      // Subtle atmospheric backdrop behind grid
+      ctx!.fillStyle = biome.bg;
+      ctx!.fillRect(6, 20, 218, 178);
+      ctx!.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx!.lineWidth = 1;
+      ctx!.strokeRect(6.5, 20.5, 217, 177);
 
-      for (let row = 0; row < 7; row++) {
-        for (let col = -1; col < 11; col++) {
-          const bx = col * 34 - wallOffset + (row % 2 === 1 ? 16 : 0);
-          const by = row * 19;
-          ctx!.fillStyle = (row + col) % 3 === 0 ? biome.brickLight : biome.brickDark;
-          ctx!.fillRect(bx, by, 32, 17);
-          ctx!.fillStyle = biome.mortar;
-          ctx!.fillRect(bx, by + 17, 34, 2);
-          ctx!.fillRect(bx + 32, by, 2, 19);
+      // Helper: Predict whether placing `cardSel` at empty cell (gx, gy) triggers a secret adjacency evolution!
+      const willTriggerEvolution = (gx: number, gy: number, key: string) => {
+        const neighbors = boardTiles.filter(
+          (t) => !(t.x === gx && t.y === gy) && Math.abs(t.x - gx) <= 1 && Math.abs(t.y - gy) <= 1
+        );
+        if (key === 'starlight_meadow' && neighbors.some((n) => n.baseKey !== 'starlight_meadow')) return true;
+        if (key === 'ruined_village' && neighbors.some((n) => n.baseKey === 'vampire_manor')) return true;
+        if (key === 'vampire_manor' && neighbors.some((n) => n.baseKey === 'ruined_village')) return true;
+        if (key === 'titan_mountain' && neighbors.filter((n) => n.baseKey === 'titan_mountain').length >= 2) return true;
+        if (key === 'storm_conduit' && neighbors.some((n) => n.baseKey === 'chrono_obelisk' || n.baseKey === 'storm_conduit')) return true;
+        if (key === 'chrono_obelisk' && neighbors.some((n) => n.baseKey === 'storm_conduit')) return true;
+        if (key === 'alchemist_vault' && neighbors.length >= 3) return true;
+        if (neighbors.some((n) => n.baseKey === 'starlight_meadow' && !n.evolved && key !== 'starlight_meadow')) return true;
+        return false;
+      };
+
+      const roadMap = new Map<string, number>();
+      roadPath.forEach((pt, idx) => roadMap.set(`${pt.x},${pt.y}`, idx));
+      const tileMap = new Map<string, (typeof boardTiles)[0]>();
+      boardTiles.forEach((t) => tileMap.set(`${t.x},${t.y}`, t));
+
+      const cellW = 30;
+      const cellH = 34;
+      const ox = 10;
+      const oy = 24;
+      const hover = hoverCellRef.current;
+
+      // Render 7x5 Tactical Loop Grid
+      for (let gy = 0; gy < 5; gy++) {
+        for (let gx = 0; gx < 7; gx++) {
+          const cx = ox + gx * cellW;
+          const cy = oy + gy * cellH;
+          const roadIdx = roadMap.get(`${gx},${gy}`);
+          const isRoad = roadIdx !== undefined;
+          const isCamp = roadIdx === 0;
+          const placed = tileMap.get(`${gx},${gy}`);
+          const isHover = hover && hover.x === gx && hover.y === gy;
+
+          // Base cell background
+          if (isCamp) {
+            ctx!.fillStyle = '#451a03';
+          } else if (isRoad) {
+            ctx!.fillStyle = roadIdx % 2 === 0 ? '#1e293b' : '#263244';
+          } else if (gx >= 2 && gx <= 4 && gy === 2) {
+            // Inner Sanctum Courtyard
+            ctx!.fillStyle = '#13211c';
+          } else {
+            ctx!.fillStyle = (gx + gy) % 2 === 0 ? '#0f172a' : '#131d31';
+          }
+          ctx!.fillRect(cx + 1, cy + 1, cellW - 2, cellH - 2);
+
+          // Road directional track dashes
+          if (isRoad && !isCamp) {
+            ctx!.strokeStyle = 'rgba(251, 191, 36, 0.25)';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(cx + 1.5, cy + 1.5, cellW - 3, cellH - 3);
+            const nextPt = roadPath[(roadIdx + 1) % roadPath.length];
+            const dx = nextPt.x - gx;
+            const dy = nextPt.y - gy;
+            ctx!.fillStyle = 'rgba(251, 191, 36, 0.45)';
+            ctx!.fillRect(cx + 14 + dx * 6, cy + 16 + dy * 6, 3, 3);
+          } else if (!isRoad) {
+            ctx!.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(cx + 1.5, cy + 1.5, cellW - 3, cellH - 3);
+          }
+
+          // Render Campfire at (1, 2)
+          if (isCamp) {
+            ctx!.strokeStyle = '#f59e0b';
+            ctx!.lineWidth = 1.5;
+            ctx!.strokeRect(cx + 1.5, cy + 1.5, cellW - 3, cellH - 3);
+            const pulse = animFrame === 0 ? 0 : 1;
+            ctx!.fillStyle = '#ea580c';
+            ctx!.fillRect(cx + 10, cy + 14 - pulse, 10, 8 + pulse);
+            ctx!.fillStyle = '#fde047';
+            ctx!.fillRect(cx + 12, cy + 12 - pulse, 6, 6);
+            ctx!.fillStyle = '#78350f';
+            ctx!.fillRect(cx + 8, cy + 21, 14, 3);
+            ctx!.fillStyle = '#fef08a';
+            ctx!.font = 'bold 6px monospace';
+            ctx!.fillText('CAMP', cx + 6, cy + 9);
+          }
+
+          // Render Placed Tactical Tile Structure
+          if (placed) {
+            ctx!.fillStyle = placed.evolved ? 'rgba(126, 34, 206, 0.36)' : 'rgba(15, 23, 42, 0.78)';
+            ctx!.fillRect(cx + 2, cy + 2, cellW - 4, cellH - 4);
+            ctx!.strokeStyle = placed.evolved
+              ? frameCountNum % 30 < 15
+                ? '#fde047'
+                : '#c084fc'
+              : placed.color || '#38bdf8';
+            ctx!.lineWidth = placed.evolved ? 2 : 1.5;
+            ctx!.strokeRect(cx + 2, cy + 2, cellW - 4, cellH - 4);
+
+            // Tile Icon
+            ctx!.font = '13px sans-serif';
+            ctx!.fillText(placed.icon || '🏛️', cx + 6, cy + 21);
+
+            // Star Pips (★1..★3)
+            for (let s = 0; s < placed.stars; s++) {
+              ctx!.fillStyle = placed.stars >= 3 ? '#f43f5e' : placed.stars === 2 ? '#fde047' : '#e2e8f0';
+              ctx!.fillRect(cx + 4 + s * 6, cy + 4, 4, 3);
+            }
+            if (placed.evolved) {
+              ctx!.fillStyle = '#fde047';
+              ctx!.font = 'bold 5px monospace';
+              ctx!.fillText('EVO', cx + 4, cy + 31);
+            }
+          }
+
+          // Interactive Placement Highlights when a Tactical Card is selected
+          if (cardSel && !isCamp) {
+            const validTerrain = (cardSel.placement === 'road') === isRoad;
+            const canMergeHere = placed && placed.baseKey === cardSel.cardKey && placed.stars < 3;
+            const canPlaceEmpty = !placed && validTerrain;
+            if (canMergeHere) {
+              ctx!.strokeStyle = frameCountNum % 24 < 12 ? '#fde047' : '#f59e0b';
+              ctx!.lineWidth = 2;
+              ctx!.strokeRect(cx + 2, cy + 2, cellW - 4, cellH - 4);
+              ctx!.fillStyle = '#fde047';
+              ctx!.font = 'bold 6px monospace';
+              ctx!.fillText('★MRG', cx + 3, cy + 31);
+            } else if (canPlaceEmpty) {
+              const evolves = willTriggerEvolution(gx, gy, cardSel.cardKey);
+              ctx!.strokeStyle = evolves
+                ? '#22d3ee'
+                : isHover
+                  ? '#4ade80'
+                  : 'rgba(74, 222, 128, 0.72)';
+              ctx!.lineWidth = evolves || isHover ? 2 : 1.25;
+              ctx!.strokeRect(cx + 2, cy + 2, cellW - 4, cellH - 4);
+              if (evolves) {
+                ctx!.fillStyle = '#22d3ee';
+                ctx!.font = 'bold 6px monospace';
+                ctx!.fillText('⚡EVO', cx + 4, cy + 10);
+              } else if (isHover) {
+                ctx!.fillStyle = '#4ade80';
+                ctx!.font = 'bold 6px monospace';
+                ctx!.fillText('+SET', cx + 4, cy + 10);
+              }
+            }
+          } else if (isHover && !isCamp) {
+            ctx!.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+            ctx!.lineWidth = 1;
+            ctx!.strokeRect(cx + 1.5, cy + 1.5, cellW - 3, cellH - 3);
+          }
         }
       }
 
-      for (let tx = 40; tx <= 340; tx += 120) {
-        drawTorch(tx - wallOffset, 56, animFrame, overdrive ? '#38bdf8' : biome.torchGlow);
-      }
-
-      const roadOffset = Math.floor(sim.scrollX) % 32;
-      ctx!.fillStyle = biome.floorA;
-      ctx!.fillRect(0, 128, 320, 80);
-      for (let fy = 128; fy < 208; fy += 16) {
-        for (let fxTile = -32; fxTile < 352; fxTile += 32) {
-          const checker = (((fy - 128) / 16 + Math.floor((fxTile + 32) / 32)) & 1) === 0;
-          ctx!.fillStyle = checker ? biome.floorA : biome.floorB;
-          ctx!.fillRect(fxTile - roadOffset, fy, 32, 16);
-          ctx!.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-          ctx!.lineWidth = 1;
-          ctx!.strokeRect(fxTile - roadOffset + 0.5, fy + 0.5, 31, 15);
-        }
-      }
-
-      // Decay lunge, flash & shake timers
-      for (const h of sim.heroes) {
-        if (h.lunge > 0) h.lunge = Math.max(0, h.lunge - 1.5);
-        if (h.hurtFlash > 0) h.hurtFlash--;
-      }
-      if (sim.enemy1.lunge < 0) sim.enemy1.lunge = Math.min(0, sim.enemy1.lunge + 1.5);
-      if (sim.enemy2.lunge < 0) sim.enemy2.lunge = Math.min(0, sim.enemy2.lunge + 1.5);
-      if (sim.enemy1.shake > 0) sim.enemy1.shake--;
-      if (sim.enemy2.shake > 0) sim.enemy2.shake--;
+      // Advance Hero Expedition Loop Simulation
+      if (sim.heroLunge > 0) sim.heroLunge = Math.max(0, sim.heroLunge - 1.2);
+      if (sim.heroHurtFlash > 0) sim.heroHurtFlash--;
+      if (sim.enemy.lunge < 0) sim.enemy.lunge = Math.min(0, sim.enemy.lunge + 1.2);
+      if (sim.enemy.shake > 0) sim.enemy.shake--;
+      if (sim.lightningArc && sim.lightningArc.life > 0) sim.lightningArc.life--;
       if (sim.ultBeamLife > 0) sim.ultBeamLife--;
 
-      // Phase Machine: Marching -> Two-Way ATB Clash -> Victory / Wipe Retreat
-      let marchEnemySlideOffset = 0;
-      if (sim.phase === 'marching') {
-        sim.marchFrames--;
-        marchEnemySlideOffset = Math.max(0, sim.marchFrames * 1.4);
-        if (sim.marchFrames <= 0) {
-          sim.phase = 'combat';
-        }
-      } else if (sim.phase === 'wipe_pause') {
+      if (sim.phase === 'wipe_pause') {
         sim.wipePauseFrames--;
         if (sim.wipePauseFrames <= 0) {
-          sim.waveKey = ''; // Force re-sync on next frame
+          sim.phase = 'traveling';
+          sim.heroHp = effectiveHeroMaxHp;
+          sim.roadProgress = 0;
+          sim.targetStopIdx = 1;
+          sim.pendingClearDispatched = false;
         }
-      } else if (sim.phase === 'combat') {
-        // Boss Enrage Countdown on Wave 10
-        let enrageMult = 1.0;
-        if (idle.isBossWave) {
+      } else if (sim.phase === 'traveling') {
+        const moveStep = 0.032 * paceFactor;
+        const prevFloor = Math.floor(sim.roadProgress) % roadPath.length;
+        sim.roadProgress = (sim.roadProgress + moveStep) % roadPath.length;
+        const curFloor = Math.floor(sim.roadProgress) % roadPath.length;
+
+        if (curFloor !== prevFloor) {
+          const stoppedPt = roadPath[curFloor];
+          const steppedTile = tileMap.get(`${stoppedPt.x},${stoppedPt.y}`);
+          const adjacentVampire = boardTiles.some(
+            (t) =>
+              t.baseKey === 'vampire_manor' &&
+              Math.abs(t.x - stoppedPt.x) <= 1 &&
+              Math.abs(t.y - stoppedPt.y) <= 1
+          );
+          const cellScreenX = ox + stoppedPt.x * cellW + 15;
+          const cellScreenY = oy + stoppedPt.y * cellH + 10;
+
+          if (curFloor === 0) {
+            // Campfire Pass Heal + Boss Check
+            sim.phoenixUsedThisLoop = false;
+            const healPct = (bonuses.campfireHealPct + (activeRelicIds.has('starlight_aegis') ? 35 : 0)) / 100;
+            const healAmt = Math.round(sim.heroMaxHp * healPct);
+            sim.heroHp = Math.min(sim.heroMaxHp, sim.heroHp + healAmt);
+            if (activeRelicIds.has('starlight_aegis')) {
+              sim.heroShield = Math.round(sim.heroMaxHp * 0.25);
+            }
+            fx.floaters.push({ x: cellScreenX, y: cellScreenY, vy: -0.45, text: `+${healAmt} HP`, color: '#4ade80', life: 36 });
+          } else if (steppedTile && (steppedTile.cardKey === 'ruined_village' || steppedTile.cardKey === 'counts_estate')) {
+            const hPct = steppedTile.cardKey === 'counts_estate' ? 0.35 : 0.22;
+            const hAmt = Math.round(sim.heroMaxHp * hPct);
+            sim.heroHp = Math.min(sim.heroMaxHp, sim.heroHp + hAmt);
+            fx.floaters.push({ x: cellScreenX, y: cellScreenY, vy: -0.45, text: `+${hAmt}HP +🪙`, color: '#34d399', life: 34 });
+          }
+
+          // Trigger Encounter Clash if Campfire Boss Ready OR Encounter Road Tile OR every 3rd road step
+          const isBossFight = Boolean(loop?.bossActive && curFloor === 0);
+          const hasCombatTile =
+            steppedTile && ['spider_cocoon', 'blood_grove', 'vanguard_outpost'].includes(steppedTile.baseKey);
+          const hasMonsterSpawn = isBossFight || hasCombatTile || adjacentVampire || curFloor % 3 === 1;
+
+          if (hasMonsterSpawn) {
+            sim.phase = 'clash';
+            sim.pendingClearDispatched = false;
+            sim.bossTimerFrames = 1500;
+            const baseHp = isBossFight
+              ? idle.currentEnemy.maxHp
+              : Math.round(idle.currentEnemy.maxHp * (0.58 + (loop?.loopCount || 1) * 0.08));
+            sim.enemy = {
+              key: isBossFight
+                ? 'dragon'
+                : adjacentVampire
+                  ? 'wraith'
+                  : steppedTile?.baseKey === 'spider_cocoon'
+                    ? 'bat'
+                    : idle.currentEnemy.key,
+              name: isBossFight
+                ? idle.currentEnemy.name
+                : adjacentVampire
+                  ? 'Crimson Count'
+                  : idle.currentEnemy.name,
+              hp: baseHp,
+              maxHp: baseHp,
+              shields: isBossFight ? 3 : adjacentVampire ? 2 : 1,
+              maxShields: isBossFight ? 3 : adjacentVampire ? 2 : 1,
+              atb: 25,
+              lunge: 0,
+              shake: 0,
+              isBoss: isBossFight,
+            };
+          }
+        }
+      } else if (sim.phase === 'clash') {
+        // Two-way ATB clash powered by Loop Synergies!
+        const speedMult = 1 + (bonuses.speedPct || 0) / 100 + (activeRelicIds.has('chrono_pendulum') ? 0.25 : 0);
+        sim.heroAtb += 1.45 * speedMult * paceFactor;
+        sim.enemy.atb += 1.05 * paceFactor;
+        if (sim.enemy.isBoss) {
           sim.bossTimerFrames = Math.max(0, sim.bossTimerFrames - paceFactor);
-          if (sim.bossTimerFrames <= 0) {
-            enrageMult = 2.6;
+        }
+
+        const heroPos = roadPath[Math.floor(sim.roadProgress) % roadPath.length];
+        const hxScreen = ox + heroPos.x * cellW + 14;
+        const hyScreen = oy + heroPos.y * cellH + 14;
+
+        if (sim.heroAtb >= 100) {
+          sim.heroAtb = 0;
+          sim.heroLunge = 8;
+          sim.ultCharge = Math.min(100, sim.ultCharge + 24);
+          if (sim.enemy.shields > 0) {
+            sim.enemy.shields = Math.max(0, sim.enemy.shields - 1);
+            if (sim.enemy.shields === 0) {
+              fx.floaters.push({ x: 266, y: 100, vy: -0.45, text: '💥 BROKEN!', color: '#facc15', life: 30 });
+            }
+          }
+
+          const prismMult = activeRelicIds.has('scholar_prism')
+            ? 1 + 0.2 * boardTiles.filter((t) => t.evolved).length
+            : 1;
+          const baseAtk = Math.round((idle.squadDps || 35) * 0.85 * (1 + bonuses.atkPct / 100) * prismMult);
+          let dmg = Math.round(baseAtk * (sim.enemy.shields === 0 ? 1.45 : 0.95));
+
+          // Chain Lightning Synergy
+          const lightningChance = (bonuses.chainLightningPct || 0) + (activeRelicIds.has('tesla_capacitor') ? 35 : 0);
+          if (lightningChance > 0 && Math.random() * 100 < lightningChance) {
+            const boltDmg = Math.round(dmg * 0.6);
+            dmg += boltDmg;
+            sim.lightningArc = { x1: hxScreen, y1: hyScreen, x2: 268, y2: 118, life: 12 };
+            fx.floaters.push({ x: 256, y: 92, vy: -0.5, text: `⚡+${boltDmg}`, color: '#38bdf8', life: 28 });
+          }
+
+          sim.enemy.hp = Math.max(0, sim.enemy.hp - dmg);
+          sim.enemy.shake = 10;
+          fx.floaters.push({ x: hxScreen, y: hyScreen - 8, vy: -0.5, text: `-${dmg}`, color: '#fde047', life: 26 });
+
+          // Crimson Lifesteal Synergy
+          const lifesteal = (bonuses.lifestealPct || 0) + (activeRelicIds.has('vampiric_fang') ? 15 : 0);
+          if (lifesteal > 0) {
+            const leech = Math.max(3, Math.round((dmg * lifesteal) / 100));
+            const prevHp = sim.heroHp;
+            sim.heroHp = Math.min(sim.heroMaxHp, sim.heroHp + leech);
+            if (activeRelicIds.has('vampiric_fang') && prevHp + leech > sim.heroMaxHp) {
+              sim.heroShield = Math.min(Math.round(sim.heroMaxHp * 0.5), sim.heroShield + (prevHp + leech - sim.heroMaxHp));
+            }
+          }
+
+          // Blood Grove / Guillotine Execute Check!
+          const execThresh = Math.max(
+            bonuses.executePct || 0,
+            activeRelicIds.has('guillotine_edge') ? (sim.enemy.isBoss ? 12 : 25) : 0
+          );
+          if (sim.enemy.hp > 0 && execThresh > 0 && (sim.enemy.hp / sim.enemy.maxHp) * 100 <= execThresh) {
+            sim.enemy.hp = 0;
+            fx.floaters.push({ x: hxScreen, y: hyScreen - 14, vy: -0.55, text: '🪓 EXECUTE!', color: '#f43f5e', life: 36 });
+          }
+
+          // Squad Ultimate Auto-Discharge at 100%
+          if (sim.ultCharge >= 100 && sim.enemy.hp > 0) {
+            sim.ultCharge = 0;
+            sim.ultBeamLife = 20;
+            const burst = Math.round(baseAtk * 1.9);
+            sim.enemy.shields = 0;
+            sim.enemy.hp = Math.max(0, sim.enemy.hp - burst);
+            fx.floaters.push({ x: hxScreen, y: hyScreen - 16, vy: -0.55, text: `🌟 -${burst}!`, color: '#fde047', life: 34 });
+          }
+
+          if (sim.enemy.hp <= 0 && !sim.pendingClearDispatched) {
+            sim.pendingClearDispatched = true;
+            sim.phase = 'traveling';
+            fx.floaters.push({
+              x: hxScreen,
+              y: hyScreen - 14,
+              vy: -0.5,
+              text: sim.enemy.isBoss ? '👑 BOSS SLAIN!' : '+✦ +🃏',
+              color: '#4ade80',
+              life: 36,
+            });
+            if (onClear) {
+              onClear({ isBossWave: sim.enemy.isBoss, triggerUltimate: sim.ultBeamLife > 0, outcome: 'clear' });
+            }
           }
         }
 
-        const anyHeroAlive = sim.heroes.some((h) => h.hp > 0);
-        const anyEnemyAlive = sim.enemy1.hp > 0 || sim.enemy2.hp > 0;
+        if (sim.enemy.hp > 0 && sim.enemy.atb >= 100) {
+          sim.enemy.atb = 0;
+          sim.enemy.lunge = -6;
+          const enrage = sim.enemy.isBoss && sim.bossTimerFrames <= 0 ? 2.2 : 1.0;
+          const bastionMit = Math.max(0.5, 1 - (bonuses.barrierBonusPct || 0) * 0.004);
+          const hit = Math.max(6, Math.round((idle.enemyDps || 12) * 0.72 * enrage * bastionMit));
+          const absorbed = Math.min(sim.heroShield, hit);
+          sim.heroShield -= absorbed;
+          const net = hit - absorbed;
+          sim.heroHp = Math.max(0, sim.heroHp - net);
+          sim.heroHurtFlash = 10;
 
-        if (anyHeroAlive && anyEnemyAlive) {
-          // 1) Advance Living Heroes ATB & Resolve Skills
-          const atbRates: Record<string, number> = { solarius: 0.72, kaelis: 0.96, aurelia: 0.66, seraphina: 0.80 };
-          for (let i = 0; i < sim.heroes.length; i++) {
-            const hero = sim.heroes[i];
-            if (hero.hp <= 0) continue;
-            const rate = atbRates[hero.id] || 0.75;
-            hero.atb += rate * paceFactor;
-            if (hero.atb < 100) continue;
+          fx.floaters.push({
+            x: hxScreen,
+            y: hyScreen - 10,
+            vy: -0.45,
+            text: net === 0 ? '🛡️' : `-${net}`,
+            color: net === 0 ? '#38bdf8' : '#fb7185',
+            life: 24,
+          });
 
-            hero.atb = 0;
-            hero.turnCount++;
-            hero.lunge = 15;
-
-            const heroMeta = idle.squadHeroes.find((sh) => sh.id === hero.id);
-            const isBack = heroMeta?.row === 'back';
-            const lowestHero = sim.heroes
-              .filter((x) => x.hp > 0)
-              .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
-            const healThresh = idle.gambits?.healThreshold || 45;
-
-            // Check Ultimate Trigger
-            const ultReady =
-              sim.ultCharge >= 100 &&
-              (idle.gambits.ultPolicy === 'auto_ready' ||
-                idle.isBossWave ||
-                sim.enemy1.shields === 0);
-
-            if (ultReady) {
-              sim.ultCharge = 0;
-              sim.ultBeamLife = 30;
-              const baseDps = idle.squadDps || 35;
-              const ultDmg = Math.max(18, Math.round(baseDps * 1.45));
-              for (const t of [sim.enemy1, sim.enemy2]) {
-                if (t.hp <= 0) continue;
-                t.shields = 0;
-                t.hp = Math.max(0, t.hp - ultDmg);
-                t.shake = 18;
-              }
-              fx.floaters.push({ x: 162, y: 54, vy: -0.45, text: `🌟 SQUAD FINISHER -${ultDmg}!`, color: '#fde047', life: 46 });
-              for (let p = 0; p < 18; p++) {
-                fx.particles.push({
-                  x: 222 + (Math.random() * 24 - 12),
-                  y: 112 + (Math.random() * 20 - 10),
-                  vx: (Math.random() - 0.5) * 4.2,
-                  vy: (Math.random() - 0.7) * 3.8,
-                  color: p % 2 === 0 ? '#fde047' : '#f43f5e',
-                  life: 26,
-                  size: 3,
-                });
-              }
-              if (sim.enemy1.hp <= 0 && sim.enemy2.hp <= 0 && !sim.pendingClearDispatched) {
-                sim.pendingClearDispatched = true;
-                fx.floaters.push({ x: 192, y: 66, vy: -0.5, text: idle.isBossWave ? '👑 BOSS CLEARED!' : 'WAVE CLEAR!', color: '#4ade80', life: 42 });
-                if (onClear) onClear({ isBossWave: idle.isBossWave, triggerUltimate: true, outcome: 'clear' });
-              }
-              continue;
-            }
-
-            // Individual Hero Skill Logic
-            const target = sim.enemy1.hp > 0 ? sim.enemy1 : sim.enemy2;
-            const singleDmgBase = Math.max(8, Math.round((heroMeta?.effectiveAtk || hero.maxHp * 0.16) * 0.75 * (isBack ? 1.1 : 1.0)));
-
-            if (hero.id === 'seraphina' && lowestHero && (lowestHero.hp / lowestHero.maxHp) * 100 <= healThresh) {
-              const healAmt = Math.round(lowestHero.maxHp * 0.35);
-              for (const ally of sim.heroes) {
-                if (ally.hp > 0) {
-                  ally.hp = Math.min(ally.maxHp, ally.hp + healAmt);
-                }
-              }
-              fx.floaters.push({ x: 56, y: 82, vy: -0.45, text: `✨ PANACEA +${healAmt} HP`, color: '#4ade80', life: 36 });
-              sim.ultCharge = Math.min(100, sim.ultCharge + 14);
-            } else if (hero.id === 'solarius') {
-              // Paladin: Solar Aegis Squad Barrier + Shield Smash
-              if (hero.turnCount % 2 === 1) {
-                const barrier = Math.round(hero.maxHp * 0.2);
-                for (const ally of sim.heroes) {
-                  if (ally.hp > 0) ally.shield = Math.min(Math.round(ally.maxHp * 0.45), ally.shield + barrier);
-                }
-                fx.floaters.push({ x: 64, y: 82, vy: -0.45, text: `🛡️ AEGIS +${barrier}`, color: '#38bdf8', life: 34 });
-              }
-              if (target.shields > 0) {
-                target.shields = Math.max(0, target.shields - (idle.gambits.focusTarget === 'shield_break' ? 2 : 1));
-                if (target.shields === 0) {
-                  target.vulnerable = 3;
-                  fx.floaters.push({ x: 214, y: 74, vy: -0.5, text: '💥 BROKEN!', color: '#facc15', life: 38 });
-                }
-              }
-              const dmg = Math.round(singleDmgBase * (target.shields === 0 ? 1.5 : 0.9));
-              target.hp = Math.max(0, target.hp - dmg);
-              target.shake = 10;
-              sim.ultCharge = Math.min(100, sim.ultCharge + 16);
-              fx.floaters.push({ x: 215, y: 88, vy: -0.5, text: `-${dmg}`, color: '#ffffff', life: 28 });
-            } else if (hero.id === 'aurelia') {
-              // Mage: Singularity Nova hits BOTH enemies + charges +22% Ult
-              const novDmg = Math.round(singleDmgBase * 0.95);
-              for (const eTarget of [sim.enemy1, sim.enemy2]) {
-                if (eTarget.hp <= 0) continue;
-                if (eTarget.shields > 0 && idle.gambits.focusTarget === 'shield_break') {
-                  eTarget.shields = Math.max(0, eTarget.shields - 1);
-                }
-                const dealt = Math.round(novDmg * (eTarget.shields === 0 ? 1.4 : 0.95));
-                eTarget.hp = Math.max(0, eTarget.hp - dealt);
-                eTarget.shake = 10;
-              }
-              sim.ultCharge = Math.min(100, sim.ultCharge + 22);
-              fx.floaters.push({ x: 224, y: 82, vy: -0.5, text: `☄️ NOVA -${novDmg}`, color: '#c084fc', life: 30 });
-            } else {
-              // Kaelis (Assassin) or Seraphina offensive bolt
-              if (target.shields > 0 && (hero.id === 'kaelis' || idle.gambits.focusTarget === 'shield_break')) {
-                target.shields = Math.max(0, target.shields - 1);
-                if (target.shields === 0) {
-                  fx.floaters.push({ x: 214, y: 74, vy: -0.5, text: '💥 BROKEN!', color: '#facc15', life: 38 });
-                }
-              }
-              const isCrit = Math.random() * 100 < (g.heroStats.critPct || 15) + (hero.id === 'kaelis' ? 22 : 8);
-              const dmg = Math.round(singleDmgBase * (target.shields === 0 ? 1.55 : 0.9) * (isCrit ? 1.65 : 1.0));
-              target.hp = Math.max(0, target.hp - dmg);
-              target.shake = isCrit ? 12 : 7;
-              sim.ultCharge = Math.min(100, sim.ultCharge + 15);
-              fx.floaters.push({
-                x: 215 + (Math.random() * 16 - 8),
-                y: 90,
-                vy: -0.55,
-                text: isCrit ? `⚡${dmg}!` : `-${dmg}`,
-                color: isCrit ? '#fde047' : '#ffffff',
-                life: 30,
-              });
-            }
-
-            if (sim.enemy1.hp <= 0 && sim.enemy2.hp <= 0 && !sim.pendingClearDispatched) {
-              sim.pendingClearDispatched = true;
-              fx.floaters.push({
-                x: 196,
-                y: 66,
-                vy: -0.5,
-                text: idle.isBossWave ? '👑 BOSS CLEARED!' : 'WAVE CLEAR!',
-                color: '#4ade80',
-                life: 44,
-              });
-              if (onClear) onClear({ isBossWave: idle.isBossWave, triggerUltimate: false, outcome: 'clear' });
-            }
-          }
-
-          // 2) Advance Living Enemies ATB & Resolve Counterattacks Against Squad!
-          const enemies = [
-            { ref: sim.enemy1, rate: idle.isBossWave ? 0.92 : 0.76, dpsShare: 0.65, isBoss: idle.isBossWave },
-            { ref: sim.enemy2, rate: 0.68, dpsShare: 0.4, isBoss: false },
-          ];
-          const baseEnemyDps = (idle.enemyDps || 14) * enrageMult;
-          const frontIds = idle.formation.front;
-
-          for (const e of enemies) {
-            if (e.ref.hp <= 0) continue;
-            e.ref.atb += e.rate * paceFactor;
-            if (e.ref.atb < 100) continue;
-
-            e.ref.atb = 0;
-            e.ref.lunge = -14;
-            const rawEnemyHit = Math.max(8, Math.round(baseEnemyDps * e.dpsShare * (e.ref.shields === 0 ? 0.75 : 1.15)));
-
-            // AoE Volley if Boss Enraged or Secondary Volley; Cleave hits Front Row first
-            const isAoe = e.ref.intent === 'VOLLEY' || (e.isBoss && Math.random() < 0.4);
-            if (isAoe) {
-              const aoeDmg = Math.max(5, Math.round(rawEnemyHit * 0.55));
-              for (const h of sim.heroes) {
-                if (h.hp <= 0) continue;
-                const absorbed = Math.min(h.shield, aoeDmg);
-                h.shield -= absorbed;
-                const net = aoeDmg - absorbed;
-                h.hp = Math.max(0, h.hp - net);
-                h.hurtFlash = 10;
-              }
-              fx.floaters.push({ x: 54, y: 76, vy: -0.45, text: `☄️ -${aoeDmg} ALL`, color: '#fb7185', life: 34 });
-            } else {
-              const livingFront = sim.heroes.filter((h) => h.hp > 0 && frontIds.includes(h.id));
-              const pool = livingFront.length > 0 ? livingFront : sim.heroes.filter((h) => h.hp > 0);
-              const victim = pool[Math.floor(Math.random() * pool.length)];
-              if (victim) {
-                const absorbed = Math.min(victim.shield, rawEnemyHit);
-                victim.shield -= absorbed;
-                const net = rawEnemyHit - absorbed;
-                victim.hp = Math.max(0, victim.hp - net);
-                victim.hurtFlash = 12;
-                const vIdx = sim.heroes.findIndex((x) => x.id === victim.id);
-                const vx = vIdx >= 2 ? 26 : 72;
-                const vy = vIdx % 2 === 0 ? 94 : 126;
-                fx.floaters.push({
-                  x: vx,
-                  y: vy - 8,
-                  vy: -0.5,
-                  text: net === 0 ? '🛡️ BLOCKED!' : `-${net}`,
-                  color: net === 0 ? '#38bdf8' : '#fb7185',
-                  life: 32,
-                });
-              }
-            }
-
-            // Check Full Squad Wipe -> Trigger Boss Wall Retreat!
-            if (sim.heroes.every((h) => h.hp <= 0) && !sim.pendingClearDispatched) {
+          if (sim.heroHp <= 0) {
+            if (activeRelicIds.has('phoenix_plume') && !sim.phoenixUsedThisLoop) {
+              sim.phoenixUsedThisLoop = true;
+              sim.heroHp = Math.round(sim.heroMaxHp * 0.35);
+              fx.floaters.push({ x: hxScreen, y: hyScreen - 14, vy: -0.5, text: '🔥 PHOENIX REBIRTH!', color: '#fb923c', life: 42 });
+            } else if (!sim.pendingClearDispatched) {
               sim.pendingClearDispatched = true;
               sim.phase = 'wipe_pause';
               sim.wipePauseFrames = 55;
-              fx.floaters.push({ x: 108, y: 74, vy: -0.4, text: '💀 BOSS WALL! RETREATING...', color: '#fb7185', life: 52 });
-              if (onClear) {
-                onClear({ isBossWave: idle.isBossWave, triggerUltimate: false, outcome: 'wipe' });
-              }
-              break;
+              fx.floaters.push({ x: 96, y: 98, vy: -0.4, text: '🌀 60% PORTAL EXTRACT!', color: '#fb7185', life: 52 });
+              if (onClear) onClear({ isBossWave: sim.enemy.isBoss, triggerUltimate: false, outcome: 'wipe' });
             }
           }
         }
       }
 
-      // Draw 2x2 Front/Back 4-Hero Squad on Left with HP, Shield & ATB Bars
-      const frontIds = idle.formation.front;
-      const backIds = idle.formation.back;
-      const slots: Array<{ heroId: string; bx: number; by: number }> = [
-        { heroId: backIds[0] || 'aurelia', bx: 18, by: 90 },
-        { heroId: backIds[1] || 'seraphina', bx: 22, by: 136 },
-        { heroId: frontIds[0] || 'solarius', bx: 72, by: 90 },
-        { heroId: frontIds[1] || 'kaelis', bx: 76, by: 136 },
-      ];
+      // Draw Traveling Hero + Familiar Sprite on exact interpolated loop coordinates
+      const rIdx0 = Math.floor(sim.roadProgress) % roadPath.length;
+      const rIdx1 = (rIdx0 + 1) % roadPath.length;
+      const frac = sim.roadProgress - Math.floor(sim.roadProgress);
+      const pt0 = roadPath[rIdx0];
+      const pt1 = roadPath[rIdx1];
+      const hxGrid = pt0.x + (pt1.x - pt0.x) * frac;
+      const hyGrid = pt0.y + (pt1.y - pt0.y) * frac;
+      const heroDrawX = Math.floor(ox + hxGrid * cellW + 5 + sim.heroLunge * 0.5);
+      const heroDrawY = Math.floor(oy + hyGrid * cellH + 5 + (sim.phase === 'traveling' && animFrame === 1 ? -2 : 0));
+
+      const heroSprite = HERO_SPRITES[g.profile.heroClass] || HERO_SPRITES.hero_knight;
+      if (overdrive || fever) {
+        ctx!.fillStyle = overdrive ? 'rgba(56, 189, 248, 0.28)' : 'rgba(250, 204, 21, 0.25)';
+        ctx!.fillRect(heroDrawX - 2, heroDrawY - 2, 24, 24);
+      }
+      drawPixelMatrix(ctx!, heroSprite.frames[animFrame], heroSprite.palette, heroDrawX, heroDrawY, 1.8);
+      if (sim.heroHurtFlash > 0) {
+        ctx!.fillStyle = 'rgba(244, 63, 94, 0.45)';
+        ctx!.fillRect(heroDrawX, heroDrawY, 20, 20);
+      }
 
       const pet = g.equippedBySlot?.companion;
       if (pet && COMPANION_SPRITES[pet.spriteKey]) {
         const petSp = COMPANION_SPRITES[pet.spriteKey];
-        const py = Math.floor(62 + Math.sin(frameCountNum * 0.09) * 3);
-        drawPixelMatrix(ctx!, petSp.frames[animFrame], petSp.palette, 50, py, 2);
+        drawPixelMatrix(ctx!, petSp.frames[animFrame], petSp.palette, heroDrawX + 12, heroDrawY - 6, 1.1);
       }
 
-      for (const sl of slots) {
-        const heroMeta = idle.squadHeroes.find((h) => h.id === sl.heroId);
-        const hSim = sim.heroes.find((h) => h.id === sl.heroId) || sim.heroes[0];
-        const sp = HERO_SPRITES[heroMeta?.spriteKey || 'hero_knight'] || HERO_SPRITES.hero_knight;
-        const hx = Math.floor(sl.bx + hSim.lunge);
-        const walkBob = sim.phase === 'marching' && animFrame === 1 ? -2 : animFrame === 1 ? -1 : 0;
-        const hy = Math.floor(sl.by + walkBob);
-
-        ctx!.fillStyle = 'rgba(0,0,0,0.42)';
-        ctx!.fillRect(hx + 2, hy + 28, 24, 4);
-
-        if (hSim.hp <= 0) {
-          ctx!.save();
-          ctx!.globalAlpha = 0.35;
-          drawPixelMatrix(ctx!, sp.frames[animFrame], sp.palette, hx, hy + 4, 2.5);
-          ctx!.restore();
-          ctx!.fillStyle = '#dc2626';
-          ctx!.fillRect(hx + 4, hy + 10, 20, 9);
-          ctx!.fillStyle = '#ffffff';
-          ctx!.font = 'bold 7px monospace';
-          ctx!.fillText('KO', hx + 9, hy + 17);
-        } else {
-          if (overdrive || fever) {
-            ctx!.fillStyle = overdrive ? 'rgba(56, 189, 248, 0.20)' : 'rgba(250, 204, 21, 0.20)';
-            ctx!.fillRect(hx - 2, hy - 2, 32, 32);
-          }
-          drawPixelMatrix(ctx!, sp.frames[animFrame], sp.palette, hx, hy, 2.5);
-
-          if (hSim.hurtFlash > 0 && hSim.hurtFlash % 4 < 2) {
-            ctx!.fillStyle = 'rgba(244, 63, 94, 0.48)';
-            ctx!.fillRect(hx, hy, 28, 28);
-          }
-          if (hSim.shield > 0) {
-            ctx!.strokeStyle = 'rgba(56, 189, 248, 0.78)';
-            ctx!.lineWidth = 1.5;
-            ctx!.strokeRect(hx - 2, hy - 2, 32, 32);
-          }
-
-          // Hero Name Tag
-          ctx!.fillStyle = 'rgba(9, 9, 11, 0.78)';
-          ctx!.fillRect(hx - 2, hy - 10, 34, 8);
-          ctx!.fillStyle = overdrive ? '#7dd3fc' : '#e2e8f0';
-          ctx!.font = 'bold 6px monospace';
-          ctx!.fillText((heroMeta?.name || 'HERO').slice(0, 8).toUpperCase(), hx, hy - 4);
-
-          // Hero HP Bar + Shield Overlay + ATB Bar underneath sprite
-          const hpPctHero = Math.max(0, Math.min(1, hSim.hp / Math.max(1, hSim.maxHp)));
-          const barX = hx;
-          const barY = hy + 30;
-          ctx!.fillStyle = '#09090b';
-          ctx!.fillRect(barX, barY, 28, 6);
-          ctx!.fillStyle = hpPctHero > 0.5 ? '#22c55e' : hpPctHero > 0.25 ? '#f59e0b' : '#ef4444';
-          ctx!.fillRect(barX + 1, barY + 1, Math.floor(26 * hpPctHero), 2.5);
-          if (hSim.shield > 0) {
-            const shRatio = Math.min(1, hSim.shield / Math.max(1, hSim.maxHp * 0.45));
-            ctx!.fillStyle = '#38bdf8';
-            ctx!.fillRect(barX + 1, barY + 1, Math.floor(26 * shRatio), 1.5);
-          }
-          // Cyan ATB Gauge
-          ctx!.fillStyle = '#0ea5e9';
-          ctx!.fillRect(barX + 1, barY + 4, Math.floor(26 * Math.min(1, hSim.atb / 100)), 1.5);
-        }
-      }
-
-      // Draw Ultimate Laser / Finisher Cross-Slash Beam when active
-      if (sim.ultBeamLife > 0) {
+      // Chain Lightning Canvas Bolt FX
+      if (sim.lightningArc && sim.lightningArc.life > 0) {
         ctx!.save();
-        ctx!.strokeStyle = sim.ultBeamLife % 4 < 2 ? '#fde047' : '#f43f5e';
-        ctx!.lineWidth = 4;
+        ctx!.strokeStyle = sim.lightningArc.life % 2 === 0 ? '#38bdf8' : '#fef08a';
+        ctx!.lineWidth = 2;
         ctx!.beginPath();
-        ctx!.moveTo(96, 118);
-        ctx!.lineTo(246, 118);
-        ctx!.moveTo(202, 86);
-        ctx!.lineTo(264, 148);
-        ctx!.moveTo(264, 86);
-        ctx!.lineTo(202, 148);
+        ctx!.moveTo(sim.lightningArc.x1, sim.lightningArc.y1);
+        ctx!.lineTo((sim.lightningArc.x1 + sim.lightningArc.x2) / 2, sim.lightningArc.y1 - 18);
+        ctx!.lineTo(sim.lightningArc.x2, sim.lightningArc.y2);
         ctx!.stroke();
         ctx!.restore();
       }
 
-      // Draw 2-Enemy Pack (or Stage Boss + Royal Guard) on Right
-      const drawWaveEnemy = (
-        ref: typeof sim.enemy1,
-        spriteKey: string,
-        baseX: number,
-        baseY: number,
-        scale: number
-      ) => {
-        if (ref.hp <= 0) return;
-        const mSprite = MONSTER_SPRITES[spriteKey] || MONSTER_SPRITES.slime;
-        const shakeOff = ref.shake > 0 ? (ref.shake % 4 < 2 ? -3 : 3) : 0;
-        const mx = Math.floor(baseX + marchEnemySlideOffset + ref.lunge + shakeOff);
-        const my = Math.floor(baseY + (animFrame === 1 ? -1 : 0));
+      // ==========================================
+      // RIGHT TACTICAL TELEMETRY HUD (x: 228..314, y: 20..198)
+      // ==========================================
+      ctx!.fillStyle = '#0f172a';
+      ctx!.fillRect(228, 20, 86, 178);
+      ctx!.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+      ctx!.lineWidth = 1;
+      ctx!.strokeRect(228.5, 20.5, 85, 177);
 
-        ctx!.fillStyle = 'rgba(0,0,0,0.45)';
-        ctx!.fillRect(mx + 2, my + 12 * scale - 4, 12 * scale - 4, 4);
-        drawPixelMatrix(ctx!, mSprite.frames[animFrame], mSprite.palette, mx, my, scale);
-
-        // HP Bar + Enemy Crimson ATB Bar
-        const hpRatio = Math.max(0, Math.min(1, ref.hp / Math.max(1, ref.maxHp)));
-        ctx!.fillStyle = '#09090b';
-        ctx!.fillRect(mx - 4, my - 11, 46, 7);
-        ctx!.fillStyle = idle.isBossWave && scale >= 3.5 ? '#f59e0b' : '#ef4444';
-        ctx!.fillRect(mx - 3, my - 10, Math.floor(44 * hpRatio), 3);
-        ctx!.fillStyle = '#fb7185';
-        ctx!.fillRect(mx - 3, my - 6, Math.floor(44 * Math.min(1, ref.atb / 100)), 1.5);
-
-        // Shields / BROKEN + Intent
-        if (ref.shields <= 0) {
-          ctx!.fillStyle = '#dc2626';
-          ctx!.fillRect(mx - 2, my - 22, 42, 9);
-          ctx!.fillStyle = '#fef08a';
-          ctx!.font = 'bold 6px monospace';
-          ctx!.fillText('BROKEN!', mx + 4, my - 15);
-        } else {
-          for (let s = 0; s < ref.maxShields; s++) {
-            const sx = mx + s * 11;
-            const sy = my - 21;
-            ctx!.fillStyle = s < ref.shields ? '#38bdf8' : '#1e293b';
-            ctx!.fillRect(sx, sy, 8, 8);
-            ctx!.strokeStyle = '#09090b';
-            ctx!.lineWidth = 1;
-            ctx!.strokeRect(sx, sy, 8, 8);
-          }
-        }
-      };
-
-      drawWaveEnemy(
-        sim.enemy1,
-        idle.currentEnemy.key,
-        idle.isBossWave ? 196 : 198,
-        idle.isBossWave ? 92 : 100,
-        idle.isBossWave ? 4 : 3
-      );
-      if (idle.secondaryEnemy) {
-        drawWaveEnemy(sim.enemy2, idle.secondaryEnemy.key, 254, 130, 2.5);
-      }
-
-      // Top HUD: Realm Stage-Wave pill + Phase/Enrage + Pace
-      ctx!.fillStyle = 'rgba(9, 9, 11, 0.86)';
-      ctx!.fillRect(6, 6, 146, 17);
-      ctx!.fillStyle = '#fafafa';
-      ctx!.font = 'bold 8px monospace';
-      ctx!.fillText(`STAGE ${idle.stage} • WAVE ${idle.wave}/10${idle.isBossWave ? ' 👑' : ''}`, 11, 17);
-
-      if (idle.isBossWave && sim.phase === 'combat') {
-        const secsLeft = Math.max(0, sim.bossTimerFrames / 60).toFixed(1);
-        ctx!.fillStyle = Number(secsLeft) <= 6 ? 'rgba(220, 38, 38, 0.92)' : 'rgba(180, 83, 9, 0.90)';
-        ctx!.fillRect(156, 6, 82, 17);
-        ctx!.fillStyle = '#fef08a';
-        ctx!.font = 'bold 8px monospace';
-        ctx!.fillText(`⏱ ${secsLeft}s`, 166, 17);
-      } else {
-        ctx!.fillStyle = overdrive ? 'rgba(14, 165, 233, 0.90)' : 'rgba(15, 23, 42, 0.85)';
-        ctx!.fillRect(156, 6, 158, 17);
-        ctx!.fillStyle = overdrive ? '#fef08a' : '#cbd5e1';
-        ctx!.font = 'bold 8px monospace';
-        ctx!.fillText(
-          sim.phase === 'marching'
-            ? `🚶 MARCHING NEXT WAVE...`
-            : overdrive
-              ? `🔥 ${paceFactor.toFixed(1)}x STUDY OVERDRIVE`
-              : `⚔️ ${paceFactor.toFixed(1)}x ATB CLASH`,
-          162,
-          17
-        );
-      }
-
-      // Squad Ultimate Gauge at bottom-right
-      ctx!.fillStyle = 'rgba(9, 9, 11, 0.84)';
-      ctx!.fillRect(174, 186, 138, 14);
-      ctx!.fillStyle = '#fbbf24';
-      ctx!.font = 'bold 7px monospace';
-      ctx!.fillText('ULT', 180, 195);
+      // Loop & Greed Multiplier Box
       ctx!.fillStyle = '#1e293b';
-      ctx!.fillRect(200, 190, 104, 6);
-      ctx!.fillStyle = sim.ultCharge >= 100 ? '#f43f5e' : '#38bdf8';
-      ctx!.fillRect(201, 191, Math.floor(102 * (sim.ultCharge / 100)), 4);
+      ctx!.fillRect(232, 24, 78, 28);
+      ctx!.fillStyle = '#fef08a';
+      ctx!.font = 'bold 8px monospace';
+      ctx!.fillText(`LOOP #${loop?.loopCount || 1}`, 236, 35);
+      ctx!.fillStyle = '#4ade80';
+      ctx!.font = 'bold 7px monospace';
+      ctx!.fillText(`GREED ×${(loop?.greedMultiplier || 1).toFixed(2)}`, 236, 46);
+
+      // Boss Emergence Threat Meter
+      const threat = Math.max(0, Math.min(100, loop?.threatPct || 0));
+      ctx!.fillStyle = '#e2e8f0';
+      ctx!.font = 'bold 6.5px monospace';
+      ctx!.fillText(loop?.bossActive ? '👑 BOSS READY!' : `BOSS ${threat}%`, 234, 63);
+      ctx!.fillStyle = '#09090b';
+      ctx!.fillRect(233, 66, 76, 6);
+      ctx!.fillStyle = loop?.bossActive ? '#ef4444' : '#f59e0b';
+      ctx!.fillRect(234, 67, Math.floor(74 * (threat / 100)), 4);
+
+      // Live Clash / Hero HP vs Enemy Preview Box
+      ctx!.fillStyle = '#09090b';
+      ctx!.fillRect(232, 77, 78, 72);
+      ctx!.strokeStyle = sim.phase === 'clash' ? '#fb7185' : '#334155';
+      ctx!.strokeRect(232.5, 77.5, 77, 71);
+
+      ctx!.fillStyle = '#cbd5e1';
+      ctx!.font = 'bold 6.5px monospace';
+      ctx!.fillText(sim.phase === 'clash' ? '⚔️ CLASHING' : '🚶 MARCHING', 236, 87);
+
+      // Hero HP & Shield in Right Panel
+      const hpPct = Math.max(0, Math.min(1, sim.heroHp / Math.max(1, sim.heroMaxHp)));
+      ctx!.fillStyle = '#1e293b';
+      ctx!.fillRect(236, 91, 70, 6);
+      ctx!.fillStyle = hpPct > 0.45 ? '#22c55e' : '#ef4444';
+      ctx!.fillRect(237, 92, Math.floor(68 * hpPct), 4);
+      if (sim.heroShield > 0) {
+        ctx!.fillStyle = '#38bdf8';
+        ctx!.fillRect(237, 92, Math.floor(68 * Math.min(1, sim.heroShield / Math.max(1, sim.heroMaxHp * 0.5))), 2);
+      }
+
+      if (sim.phase === 'clash') {
+        const mSp = MONSTER_SPRITES[sim.enemy.key] || MONSTER_SPRITES.slime;
+        drawPixelMatrix(ctx!, mSp.frames[animFrame], mSp.palette, 256, 102, 2.2);
+        const eRatio = Math.max(0, Math.min(1, sim.enemy.hp / Math.max(1, sim.enemy.maxHp)));
+        ctx!.fillStyle = '#1e293b';
+        ctx!.fillRect(236, 134, 70, 5);
+        ctx!.fillStyle = sim.enemy.isBoss ? '#f59e0b' : '#ef4444';
+        ctx!.fillRect(237, 135, Math.floor(68 * eRatio), 3);
+      } else {
+        ctx!.fillStyle = '#94a3b8';
+        ctx!.font = 'bold 6.5px monospace';
+        ctx!.fillText(`HP ${sim.heroHp}/${sim.heroMaxHp}`, 236, 112);
+        ctx!.fillStyle = '#38bdf8';
+        ctx!.fillText(`ULT ${Math.round(sim.ultCharge)}%`, 236, 124);
+        ctx!.fillStyle = '#fbbf24';
+        ctx!.fillText(`TILES ${boardTiles.length}`, 236, 136);
+      }
+
+      // Active Trait Synergies summary at bottom of Right Panel
+      const litTraits = (loop?.activeTraits || []).filter((t) => t.count > 0).slice(0, 4);
+      ctx!.fillStyle = '#94a3b8';
+      ctx!.font = 'bold 6px monospace';
+      ctx!.fillText('SYNERGIES:', 233, 160);
+      litTraits.forEach((tr, idx) => {
+        const tx = 233 + (idx % 2) * 39;
+        const ty = 171 + Math.floor(idx / 2) * 12;
+        ctx!.fillStyle = tr.tier > 0 ? '#fde047' : '#cbd5e1';
+        ctx!.font = 'bold 7px monospace';
+        ctx!.fillText(`${tr.icon}${tr.count}`, tx, ty);
+      });
+
+      // Top HUD Banner across 320px
+      ctx!.fillStyle = 'rgba(9, 9, 11, 0.90)';
+      ctx!.fillRect(6, 3, 186, 14);
+      ctx!.fillStyle = '#fafafa';
+      ctx!.font = 'bold 7.5px monospace';
+      ctx!.fillText(`STAGE ${idle.stage} • ${idle.realm.name.slice(0, 14).toUpperCase()}`, 10, 12.5);
+
+      ctx!.fillStyle = overdrive ? 'rgba(14, 165, 233, 0.92)' : cardSel ? 'rgba(16, 185, 129, 0.92)' : 'rgba(15, 23, 42, 0.92)';
+      ctx!.fillRect(195, 3, 119, 14);
+      ctx!.fillStyle = '#fef08a';
+      ctx!.font = 'bold 7px monospace';
+      ctx!.fillText(
+        cardSel
+          ? `TAP GRID: ${cardSel.name.slice(0, 11)}`
+          : overdrive
+            ? `🔥 ${paceFactor.toFixed(1)}x OVERDRIVE`
+            : `⚔️ ${paceFactor.toFixed(1)}x LOOP PACE`,
+        199,
+        12.5
+      );
     }
 
     function render() {
@@ -1355,7 +1424,11 @@ export function PixelCanvas({
         width={320}
         height={208}
         onClick={handleCanvasClick}
-        aria-label="Pixel Spire Dungeon Viewport"
+        onMouseMove={handleCanvasMouseMove}
+        onMouseLeave={() => {
+          hoverCellRef.current = null;
+        }}
+        aria-label="Aethelgard Loop Architect Interactive Grid"
         className="w-full aspect-[320/208] pixel-canvas block rounded-xl cursor-pointer"
       />
     </div>

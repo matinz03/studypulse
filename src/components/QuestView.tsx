@@ -27,6 +27,7 @@ import {
   IdleAutomationConfig,
   IdleGambitsConfig,
   ItemRarity,
+  LoopHandCard,
   ShopBuyResponse,
   ShopState,
   User,
@@ -53,6 +54,11 @@ export interface QuestViewProps {
     swapHeroRow?: string;
     stage?: number;
     challengeBoss?: boolean;
+    placeCard?: { cardId?: string; cardKey?: string; x?: number; y?: number };
+    mergeHand?: boolean;
+    pickRelic?: string;
+    extractLoop?: boolean;
+    toggleAutoArchitect?: boolean;
   }) => Promise<GameActionResponse>;
   onIdleUpgradeProf?: (professionId: string) => Promise<GameActionResponse>;
   onIdleAscend?: () => Promise<GameActionResponse>;
@@ -141,11 +147,16 @@ export function QuestView({
   const [sfxMuted, setSfxMuted] = useState(() => soundEngine.isSfxMuted());
   const [showStudyQuiz, setShowStudyQuiz] = useState(false);
   const [quizCardIdx, setQuizCardIdx] = useState(0);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [showRecipes, setShowRecipes] = useState(false);
 
   const quizCards = flashcards.filter((c) => c.options && c.options.length > 0);
   const activeQuizCard = quizCards.length > 0 ? quizCards[quizCardIdx % quizCards.length] : null;
 
   const { profile, heroStats, items, equippedBySlot, recentLogs, idle } = game;
+  const loop = idle?.loop;
+  const handCards: LoopHandCard[] = loop?.hand || [];
+  const selectedCard = handCards.find((c) => c.id === selectedCardId) || null;
   const unequippedItems = items.filter((i) => !i.equipped);
   const greatForgeChance = Math.min(35, Math.round(6 + heroStats.luck * 0.45));
 
@@ -208,16 +219,40 @@ export function QuestView({
   const overdriveActive = Boolean(idle?.overdriveActive || isStudying);
   const afkSeconds = idle?.afkChest?.accumulatedSec || 0;
 
+  const handlePlaceLoopTile = useCallback(
+    async (gx: number, gy: number) => {
+      if (!onIdleConfig || !loop) return;
+      const roadSet = new Set(loop.roadPath.map((p) => `${p.x},${p.y}`));
+      const camp = loop.roadPath[0];
+      if (camp && gx === camp.x && gy === camp.y) return;
+      const isRoad = roadSet.has(`${gx},${gy}`);
+      const cardToPlace =
+        selectedCard ||
+        handCards.find((c) => (c.placement === 'road') === isRoad) ||
+        null;
+      if (!cardToPlace) return;
+      setSelectedCardId(null);
+      try {
+        await runAction(() =>
+          onIdleConfig({ placeCard: { cardId: cardToPlace.id, x: gx, y: gy } })
+        );
+      } catch {
+        // Invalid placement errors handled silently without crashing loop
+      }
+    },
+    [onIdleConfig, loop, selectedCard, handCards, runAction]
+  );
+
   return (
     <div className="space-y-3.5 pb-6">
-      {/* Main Idle Auto-Battler Cockpit Card */}
+      {/* Main Loop Architect Cockpit Card */}
       <div className="glass-card rounded-3xl p-4 space-y-3">
-        {/* Realm Stage-Wave & Audio/Focus Header */}
+        {/* Realm Stage, Loop Greed & Audio/Focus Header */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
-                ⚔️ Aethelgard: Astral Vanguard
+                🗺️ Aethelgard: Loop Architect
               </span>
               {overdriveActive ? (
                 <span className="px-2 py-0.5 rounded-full bg-sky-500/25 border border-sky-400/60 text-sky-200 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
@@ -227,13 +262,14 @@ export function QuestView({
                 </span>
               ) : (
                 <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold text-slate-300">
-                  ⚡ {(idle?.speedMultiplier || 1.0).toFixed(1)}× Base Idle
+                  ⚡ {(idle?.speedMultiplier || 1.0).toFixed(1)}× Base Pace
                 </span>
               )}
             </div>
             <div className="text-xs font-extrabold text-white mt-0.5">
-              {idle?.realm?.name || 'Verdant Sky-Bastion'} · Stage {idle?.stage || 1} — Wave {idle?.wave || 1}/10
-              {idle?.isBossWave ? ' 👑 BOSS' : ''}
+              {idle?.realm?.name || 'Verdant Sky-Bastion'} · Stage {idle?.stage || 1} · Loop #{loop?.loopCount || 1} (Greed ×
+              {(loop?.greedMultiplier || 1).toFixed(2)}) · Boss Threat {loop?.threatPct ?? 0}%
+              {loop?.bossActive ? ' 👑 BOSS READY' : ''}
             </div>
           </div>
 
@@ -320,17 +356,48 @@ export function QuestView({
           );
         })()}
 
+        {/* Campfire 1-of-3 Run Relic Draft Banner */}
+        {loop && loop.pendingRelicChoices.length > 0 && onIdleConfig && (
+          <div className="p-3 rounded-2xl bg-sky-500/12 border border-sky-400/45 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-extrabold text-sky-200">
+                🕯️ Campfire Relic Draft — Choose 1 Permanent Run Power
+              </span>
+              <span className="text-[10px] text-slate-300 font-bold">
+                Active: {loop.activeRelics.length} Relic{loop.activeRelics.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {loop.pendingRelicChoices.map((rel) => (
+                <button
+                  key={rel.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => runAction(() => onIdleConfig({ pickRelic: rel.id }))}
+                  className="p-2.5 rounded-xl sp-inset border border-sky-400/40 hover:border-amber-300/70 text-left space-y-1 cursor-pointer transition"
+                >
+                  <div className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                    <span>{rel.icon}</span>
+                    <span className="truncate">{rel.name}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-300 leading-snug">{rel.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Boss Wall Alert & Re-Challenge Banner */}
         {idle && (idle.bossWallStuck || idle.gambits.stageProgression === 'farm_stage') && onIdleConfig && (
           <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-400/50 flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11px] font-extrabold text-amber-200">
                 {idle.bossWallStuck
-                  ? `🛡️ Squad Tactical Retreat — Farming Stage ${idle.stage} Waves 1–9`
-                  : `🔁 Farming Mode Active — Looping Stage ${idle.stage} Waves 1–9`}
+                  ? `🛡️ Emergency Extraction Retreat — Farming Stage ${idle.stage}`
+                  : `🔁 Farming Mode Active — Stage ${idle.stage}`}
               </div>
               <div className="text-[10px] text-amber-100/80">
-                Stage {idle.stage} Boss Rec Power: {idle.bossRecPower ?? Math.round((idle.recommendedPower ?? 160) * 1.45)} · Upgrade gear, adjust rows, or trigger Study Overdrive before retrying.
+                Stage {idle.stage} Boss Rec Power: {idle.bossRecPower ?? Math.round((idle.recommendedPower ?? 160) * 1.45)} · Stack Loop Synergies or Study Overdrive before retrying.
               </div>
             </div>
             <button
@@ -344,46 +411,228 @@ export function QuestView({
           </div>
         )}
 
-        {/* Side-Scrolling 4-Hero Auto-Battler Pixel Canvas */}
+        {/* Active Loop Trait Synergies & Campfire Relics Bar */}
+        {loop && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {loop.activeTraits.map((tr) => {
+              const lit = tr.tier > 0;
+              const nextBp = tr.breakpoints.find((b) => b > tr.count) ?? tr.breakpoints[tr.breakpoints.length - 1];
+              return (
+                <span
+                  key={tr.id}
+                  title={`${tr.name}: ${tr.activeDesc}`}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border ${
+                    lit
+                      ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
+                      : tr.count > 0
+                        ? 'sp-badge border-white/20 text-slate-200'
+                        : 'sp-inset border-white/10 text-slate-500'
+                  }`}
+                >
+                  {tr.icon} {tr.name.split(' ')[0]} {tr.count}/{nextBp}
+                </span>
+              );
+            })}
+            {loop.activeRelics.map((r) => (
+              <span
+                key={r.id}
+                title={r.desc}
+                className="px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-400/45 text-sky-200 text-[10px] font-bold"
+              >
+                {r.icon} {r.name}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Interactive 7x5 Tactical Loop-Builder Pixel Canvas */}
         <PixelCanvas
           game={game}
           lastEvents={lastEvents}
           eventSeq={eventSeq}
           focusFever={heroStats.studyBonuses.focusFever}
           isStudying={isStudying}
+          selectedCard={selectedCard}
           onAutoWaveClear={handleAutoWaveClear}
+          onPlaceLoopTile={handlePlaceLoopTile}
         />
 
-        {/* Battle Pace Pill Switcher */}
+        {/* Battle Pace Pill Switcher & Auto-Architect Toggle */}
         {idle && onIdleConfig && (
           <div className="p-2 rounded-2xl sp-inset flex flex-wrap items-center justify-between gap-2 text-[11px]">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 px-1">
-              ⏱️ Battle Pace
-            </span>
-            <div className="grid grid-cols-3 gap-1 flex-1 max-w-xs">
-              {(
-                [
-                  { key: '1x', label: '1× Tactical' },
-                  { key: '2x', label: '2× Brisk' },
-                  { key: 'overdrive', label: '⚡ Max' },
-                ] as const
-              ).map((opt) => {
-                const active = (idle.gambits.battlePace || '1x') === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => runAction(() => onIdleConfig({ gambits: { battlePace: opt.key } }))}
-                    className={`py-1.5 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
-                      active ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300 px-1">
+                ⏱️ Pace
+              </span>
+              <div className="grid grid-cols-3 gap-1">
+                {(
+                  [
+                    { key: '1x', label: '1× Tactical' },
+                    { key: '2x', label: '2× Brisk' },
+                    { key: 'overdrive', label: '⚡ Max' },
+                  ] as const
+                ).map((opt) => {
+                  const active = (idle.gambits.battlePace || '1x') === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => runAction(() => onIdleConfig({ gambits: { battlePace: opt.key } }))}
+                      className={`py-1 px-2 rounded-xl text-[10px] font-extrabold cursor-pointer transition ${
+                        active ? 'sp-btn-primary text-white' : 'sp-badge text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {loop && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  runAction(() => onIdleConfig({ toggleAutoArchitect: !loop.autoArchitect }))
+                }
+                className={`px-2.5 py-1 rounded-xl border text-[10px] font-extrabold cursor-pointer transition ${
+                  loop.autoArchitect
+                    ? 'sp-tab-active border-sky-400/60 text-sky-200'
+                    : 'sp-badge text-slate-300 hover:text-white'
+                }`}
+              >
+                🤖 Auto-Architect: {loop.autoArchitect ? 'ON' : 'OFF'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Tactical Tile Card Hand + Adjacency Evolution Recipes */}
+        {loop && onIdleConfig && (
+          <div className="p-3 rounded-2xl sp-inset space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[11px] font-extrabold text-white">
+                🃏 Tactical Tile Hand ({handCards.length}/7)
+                <span className="text-[10px] font-normal text-slate-400 ml-1.5">
+                  {selectedCard
+                    ? `Selected ${selectedCard.icon} ${selectedCard.name} — tap any highlighted ${selectedCard.placement.toUpperCase()} cell above!`
+                    : 'Select a card & tap the 7×5 grid, or click Place / Merge'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setShowRecipes((v) => !v)}
+                  className="px-2 py-1 rounded-lg sp-badge text-[10px] font-extrabold text-amber-300 cursor-pointer"
+                >
+                  🧪 5 Evolutions
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || handCards.length === 0}
+                  onClick={() => runAction(() => onIdleConfig({ mergeHand: true }))}
+                  className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold disabled:opacity-40 cursor-pointer"
+                >
+                  ✨ Merge Duplicates
+                </button>
+              </div>
+            </div>
+
+            {showRecipes && (
+              <div className="p-2.5 rounded-xl bg-slate-900/80 border border-amber-400/35 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[10px] text-slate-200">
+                <div>🌸 Meadow + Non-Meadow → <strong className="text-emerald-300">🌺 Blooming Sanctuary</strong></div>
+                <div>🏚️ Village + 🧛 Vampire Manor → <strong className="text-amber-300">🏰 Count&apos;s Estate</strong></div>
+                <div>⛰️ Mountain + 2 Mountains → <strong className="text-sky-300">🏔️ Celestial Summit</strong></div>
+                <div>🗼 Storm + 🔮 Chrono/Storm → <strong className="text-cyan-300">⚡ Tesla Spire</strong></div>
+                <div className="sm:col-span-2">⚗️ Alchemist Vault + 3 Neighbor Tiles → <strong className="text-rose-300">💎 Mythic Treasury (+1 Gear Roll!)</strong></div>
+              </div>
+            )}
+
+            {handCards.length === 0 ? (
+              <div className="text-[11px] text-slate-400 py-2 text-center">
+                Hand empty — let your hero battle along the Loop or answer a Study Quiz to draw +2 ★2 Cards!
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {handCards.map((c) => {
+                  const isSel = selectedCard?.id === c.id;
+                  const starsStr = '★'.repeat(c.stars || 1);
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedCardId(isSel ? null : c.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') setSelectedCardId(isSel ? null : c.id);
+                      }}
+                      className={`p-2 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-1.5 ${
+                        isSel
+                          ? 'bg-emerald-500/20 border-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.28)]'
+                          : 'bg-slate-900/70 border-white/15 hover:border-sky-400/60'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-base">{c.icon}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                              c.placement === 'road'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : 'bg-emerald-500/20 text-emerald-300'
+                            }`}
+                          >
+                            {c.placement === 'road' ? 'ROAD' : 'LAND'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-extrabold text-white truncate">
+                          <span className="text-amber-300 mr-1">{starsStr}</span>
+                          {c.name}
+                        </div>
+                        <div className="text-[9px] text-slate-300 line-clamp-2 leading-tight">{c.desc}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCardId(null);
+                          runAction(() => onIdleConfig({ placeCard: { cardId: c.id } }));
+                        }}
+                        className="w-full py-1 px-1.5 rounded-lg sp-badge hover:text-white text-[9px] font-extrabold text-sky-300 cursor-pointer"
+                      >
+                        ⚡ Place / Merge
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Push-Your-Luck Expedition Loot Sack & Extraction Bar */}
+        {loop && onIdleConfig && (
+          <div className="p-2.5 rounded-2xl bg-emerald-500/12 border border-emerald-400/40 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
+                🎒 Unbanked Expedition Loot Sack (Greed ×{loop.greedMultiplier.toFixed(2)})
+              </div>
+              <div className="text-xs font-mono-num font-extrabold text-white mt-0.5">
+                +{loop.lootSack.shards}✦ Shards · +{loop.lootSack.coins}🪙 · +{loop.lootSack.xp} XP · {loop.lootSack.gearRolls} Gear Roll{loop.lootSack.gearRolls === 1 ? '' : 's'}
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => runAction(() => onIdleConfig({ extractLoop: true }))}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-extrabold text-[11px] cursor-pointer shrink-0"
+            >
+              🏕️ Extract at Campfire (Keep 100%)
+            </button>
           </div>
         )}
 
@@ -410,7 +659,7 @@ export function QuestView({
               className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-rose-600/90 via-amber-500/90 to-rose-600/90 text-white border border-amber-300/60 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span>🌟 Squad Finisher Burst</span>
+              <span>🌟 Loop Finisher / Advance</span>
             </button>
           )}
           {onStudyCast && activeQuizCard && (
@@ -420,7 +669,7 @@ export function QuestView({
               onClick={() => setShowStudyQuiz((v) => !v)}
               className="py-2.5 px-3 rounded-xl sp-tab-active border border-sky-400/50 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span>🎓 Study Overdrive Quiz (+30m 4×)</span>
+              <span>🎓 Tactical Quiz (+2 Cards & 4×)</span>
             </button>
           )}
         </div>
@@ -430,7 +679,7 @@ export function QuestView({
           <div className="p-3 rounded-2xl sp-inset border border-sky-400/40 space-y-2">
             <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-sky-300">
               <span>
-                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +30m 4.0× Overdrive, +2 Waves & Gear!
+                🎓 {activeQuizCard.subjectName} · {activeQuizCard.conceptTitle} — Answer correctly for +30m 4.0× Overdrive, +2 ★2 Cards & Gear!
               </span>
               <button
                 type="button"

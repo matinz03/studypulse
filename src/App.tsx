@@ -1096,6 +1096,11 @@ export function App() {
     swapHeroRow?: string;
     stage?: number;
     challengeBoss?: boolean;
+    placeCard?: { cardId?: string; cardKey?: string; x?: number; y?: number };
+    mergeHand?: boolean;
+    pickRelic?: string;
+    extractLoop?: boolean;
+    toggleAutoArchitect?: boolean;
   }) => callGameApi('/api/game/idle/config', payload);
   const handleIdleUpgradeProf = (professionId: string) =>
     callGameApi('/api/game/idle/upgrade-profession', { professionId });

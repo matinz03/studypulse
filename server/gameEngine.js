@@ -8,6 +8,13 @@ import {
   IDLE_REALMS,
   IDLE_SQUAD_HEROES,
   IDLE_STAGE_ENEMIES,
+  LOOP_CAMPFIRE_RELICS,
+  LOOP_GRID_HEIGHT,
+  LOOP_GRID_WIDTH,
+  LOOP_PLACEABLE_CARD_KEYS,
+  LOOP_ROAD_PATH,
+  LOOP_TILE_CARDS,
+  LOOP_TRAIT_SYNERGIES,
   LORE_CODEX,
   MYTHIC_SIDE_STORIES,
   NPCS,
@@ -746,10 +753,326 @@ export function getIdleRealmForStage(stage) {
   return active;
 }
 
+const ROAD_COORD_SET = new Set(LOOP_ROAD_PATH.map((p) => `${p.x},${p.y}`));
+
+function isCampfireCoord(x, y) {
+  return x === LOOP_ROAD_PATH[0].x && y === LOOP_ROAD_PATH[0].y;
+}
+
+function isRoadCoord(x, y) {
+  return ROAD_COORD_SET.has(`${x},${y}`);
+}
+
+function makeLoopHandCard(cardKey, stars = 1) {
+  const validKey = LOOP_TILE_CARDS[cardKey]?.placeable ? cardKey : LOOP_PLACEABLE_CARD_KEYS[0];
+  return {
+    id: `lc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+    cardKey: validKey,
+    stars: Math.max(1, Math.min(3, Number(stars) || 1)),
+  };
+}
+
+function rollRandomRelicChoices(activeRelics = [], count = 3) {
+  const activeSet = new Set(activeRelics || []);
+  const unowned = LOOP_CAMPFIRE_RELICS.filter((r) => !activeSet.has(r.id));
+  const pool = unowned.length >= count ? [...unowned] : [...LOOP_CAMPFIRE_RELICS];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count).map((r) => r.id);
+}
+
+function rollLoopCardKey() {
+  return LOOP_PLACEABLE_CARD_KEYS[Math.floor(Math.random() * LOOP_PLACEABLE_CARD_KEYS.length)];
+}
+
+function drawCardsIntoHand(loop, cardKeys, stars = 1) {
+  if (!Array.isArray(loop.hand)) loop.hand = [];
+  for (const key of cardKeys) {
+    if (!LOOP_TILE_CARDS[key]?.placeable) continue;
+    // Merge into an existing matching card if hand is already at capacity (7)
+    if (loop.hand.length >= 7) {
+      const match = loop.hand.find((c) => c.cardKey === key && (c.stars || 1) < 3);
+      if (match) {
+        match.stars = Math.min(3, (match.stars || 1) + 1);
+      } else {
+        // Merge any pair in hand to free a slot, otherwise replace oldest ★1 card
+        let merged = false;
+        for (let i = 0; i < loop.hand.length && !merged; i++) {
+          for (let j = i + 1; j < loop.hand.length && !merged; j++) {
+            if (loop.hand[i].cardKey === loop.hand[j].cardKey && loop.hand[i].stars < 3) {
+              loop.hand[i].stars = Math.min(3, Math.max(loop.hand[i].stars, loop.hand[j].stars) + 1);
+              loop.hand.splice(j, 1);
+              merged = true;
+            }
+          }
+        }
+        if (loop.hand.length < 7) loop.hand.push(makeLoopHandCard(key, stars));
+      }
+    } else {
+      loop.hand.push(makeLoopHandCard(key, stars));
+    }
+  }
+}
+
+export function recomputeLoopBoardSynergies(rawBoard = []) {
+  const cleanBoard = (Array.isArray(rawBoard) ? rawBoard : []).map((t) => {
+    const baseKey = LOOP_TILE_CARDS[t.baseKey]?.placeable
+      ? t.baseKey
+      : LOOP_TILE_CARDS[t.cardKey]?.placeable
+        ? t.cardKey
+        : 'starlight_meadow';
+    return {
+      x: Math.max(0, Math.min(LOOP_GRID_WIDTH - 1, Number(t.x || 0))),
+      y: Math.max(0, Math.min(LOOP_GRID_HEIGHT - 1, Number(t.y || 0))),
+      baseKey,
+      cardKey: baseKey,
+      stars: Math.max(1, Math.min(3, Number(t.stars || 1))),
+      evolved: false,
+    };
+  });
+
+  const getNeighbors = (tile) =>
+    cleanBoard.filter(
+      (other) =>
+        !(other.x === tile.x && other.y === tile.y) &&
+        Math.abs(other.x - tile.x) <= 1 &&
+        Math.abs(other.y - tile.y) <= 1
+    );
+
+  let evolvedCount = 0;
+  for (const tile of cleanBoard) {
+    const neighbors = getNeighbors(tile);
+    let evolvedKey = null;
+    if (tile.baseKey === 'ruined_village' && neighbors.some((n) => n.baseKey === 'vampire_manor')) {
+      evolvedKey = 'counts_estate';
+    } else if (tile.baseKey === 'starlight_meadow' && neighbors.some((n) => n.baseKey !== 'starlight_meadow')) {
+      evolvedKey = 'blooming_sanctuary';
+    } else if (
+      tile.baseKey === 'titan_mountain' &&
+      neighbors.filter((n) => n.baseKey === 'titan_mountain').length >= 2
+    ) {
+      evolvedKey = 'celestial_summit';
+    } else if (
+      tile.baseKey === 'storm_conduit' &&
+      neighbors.some((n) => n.baseKey === 'chrono_obelisk' || n.baseKey === 'storm_conduit')
+    ) {
+      evolvedKey = 'tesla_spire';
+    } else if (tile.baseKey === 'alchemist_vault' && neighbors.length >= 3) {
+      evolvedKey = 'mythic_treasury';
+    }
+
+    if (evolvedKey && LOOP_TILE_CARDS[evolvedKey]) {
+      tile.evolved = true;
+      tile.cardKey = evolvedKey;
+      evolvedCount += 1;
+    } else {
+      tile.evolved = false;
+      tile.cardKey = tile.baseKey;
+    }
+  }
+
+  const traitCounts = {
+    verdant: 0,
+    storm: 0,
+    crimson: 0,
+    bastion: 0,
+    titan: 0,
+    chrono: 0,
+  };
+
+  let tileAtkPct = 0;
+  let tileMaxHpFlat = 0;
+  let tileDefFlat = 0;
+  let tileLifestealPct = 0;
+  let tileExecutePct = 0;
+  let tileChainPct = 0;
+  let tileSpeedPct = 0;
+  let tileLootPct = 0;
+  let tileCampfireHealPct = 0;
+  let bonusGearRolls = 0;
+
+  for (const tile of cleanBoard) {
+    const def = LOOP_TILE_CARDS[tile.cardKey] || LOOP_TILE_CARDS[tile.baseKey];
+    if (!def) continue;
+    const mult = 1 + (tile.stars - 1) * 0.55 + (tile.evolved ? 0.5 : 0);
+    const weight = tile.stars + (tile.evolved ? 1 : 0);
+    for (const tr of def.traits || []) {
+      if (traitCounts[tr] !== undefined) traitCounts[tr] += weight;
+    }
+
+    switch (tile.cardKey) {
+      case 'starlight_meadow':
+        tileMaxHpFlat += Math.round(25 * mult);
+        tileCampfireHealPct += Math.round(6 * mult);
+        break;
+      case 'blooming_sanctuary':
+        tileMaxHpFlat += Math.round(60 * mult);
+        tileCampfireHealPct += Math.round(14 * mult);
+        break;
+      case 'titan_mountain':
+        tileMaxHpFlat += Math.round(35 * mult);
+        tileDefFlat += Math.round(4 * mult);
+        break;
+      case 'celestial_summit':
+        tileMaxHpFlat += Math.round(95 * mult);
+        tileDefFlat += Math.round(12 * mult);
+        tileAtkPct += 12;
+        break;
+      case 'vampire_manor':
+        tileLifestealPct += Math.round(12 * mult);
+        tileAtkPct += Math.round(6 * mult);
+        break;
+      case 'ruined_village':
+        tileCampfireHealPct += Math.round(10 * mult);
+        tileLootPct += Math.round(8 * mult);
+        break;
+      case 'counts_estate':
+        tileCampfireHealPct += Math.round(18 * mult);
+        tileAtkPct += Math.round(18 * mult);
+        tileLootPct += Math.round(18 * mult);
+        break;
+      case 'blood_grove':
+        tileExecutePct = Math.max(tileExecutePct, Math.round(18 + tile.stars * 4));
+        tileAtkPct += Math.round(8 * mult);
+        break;
+      case 'vanguard_outpost':
+        tileDefFlat += Math.round(6 * mult);
+        tileAtkPct += Math.round(10 * mult);
+        break;
+      case 'chrono_obelisk':
+        tileSpeedPct += Math.round(18 * mult);
+        break;
+      case 'storm_conduit':
+        tileChainPct += Math.round(16 * mult);
+        tileAtkPct += Math.round(10 * mult);
+        break;
+      case 'tesla_spire':
+        tileChainPct += Math.round(36 * mult);
+        tileSpeedPct += Math.round(20 * mult);
+        tileAtkPct += Math.round(16 * mult);
+        break;
+      case 'alchemist_vault':
+        tileLootPct += Math.round(18 * mult);
+        break;
+      case 'mythic_treasury':
+        tileLootPct += Math.round(45 * mult);
+        bonusGearRolls += 1;
+        break;
+      case 'spider_cocoon':
+        tileSpeedPct += Math.round(8 * mult);
+        tileLootPct += Math.round(10 * mult);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const activeTraits = LOOP_TRAIT_SYNERGIES.map((tr) => {
+    const count = traitCounts[tr.id] || 0;
+    let tier = 0;
+    for (let i = 0; i < tr.breakpoints.length; i++) {
+      if (count >= tr.breakpoints[i]) tier = i + 1;
+    }
+    return {
+      ...tr,
+      count,
+      tier,
+      activeDesc: tier > 0 ? tr.tierDescs[tier - 1] : tr.tierDescs[0],
+    };
+  });
+
+  const tTier = Object.fromEntries(activeTraits.map((t) => [t.id, t.tier]));
+  const maxHpPct = [0, 12, 28, 55][tTier.verdant || 0];
+  const chainLightningPct = tileChainPct + [0, 18, 38, 65][tTier.storm || 0];
+  const lifestealPct = tileLifestealPct + [0, 10, 22, 40][tTier.crimson || 0];
+  const executePct = Math.max(tileExecutePct, [0, 0, 12, 20][tTier.crimson || 0]);
+  const barrierBonusPct = [0, 12, 25, 45][tTier.bastion || 0];
+  const defPct = [0, 14, 30, 55][tTier.titan || 0];
+  const speedPct = tileSpeedPct + [0, 15, 32, 55][tTier.chrono || 0];
+  const sackTraitPct = [0, 15, 30, 55][tTier.chrono || 0];
+
+  return {
+    board: cleanBoard,
+    traitCounts,
+    activeTraits,
+    evolvedCount,
+    bonuses: {
+      atkPct: tileAtkPct,
+      maxHpFlat: tileMaxHpFlat,
+      maxHpPct,
+      defFlat: tileDefFlat,
+      defPct,
+      lifestealPct,
+      executePct,
+      chainLightningPct,
+      barrierBonusPct,
+      speedPct,
+      lootMult: Math.round((1 + (tileLootPct + sackTraitPct) / 100) * 100) / 100,
+      campfireHealPct: 18 + tileCampfireHealPct + [0, 6, 12, 20][tTier.verdant || 0],
+      bonusGearRolls,
+    },
+  };
+}
+
+function smartPickPlacementCell(cardKey, board) {
+  const def = LOOP_TILE_CARDS[cardKey];
+  if (!def || !def.placeable) return null;
+
+  // Prefer upgrading a matching card on board to ★2/★3 if available
+  const mergeTarget = board.find((t) => t.baseKey === cardKey && t.stars < 3);
+  const occupied = new Set(board.map((t) => `${t.x},${t.y}`));
+
+  const candidates = [];
+  for (let y = 0; y < LOOP_GRID_HEIGHT; y++) {
+    for (let x = 0; x < LOOP_GRID_WIDTH; x++) {
+      if (isCampfireCoord(x, y)) continue;
+      const road = isRoadCoord(x, y);
+      if (def.placement === 'road' && !road) continue;
+      if (def.placement === 'landscape' && road) continue;
+      if (occupied.has(`${x},${y}`)) continue;
+
+      const trialBoard = [...board.map((t) => ({ ...t })), { x, y, baseKey: cardKey, cardKey, stars: 1, evolved: false }];
+      const beforeEvo = recomputeLoopBoardSynergies(board).evolvedCount;
+      const afterEvo = recomputeLoopBoardSynergies(trialBoard).evolvedCount;
+      const adjCount = board.filter((t) => Math.abs(t.x - x) <= 1 && Math.abs(t.y - y) <= 1).length;
+      const isCourtyard = x >= 2 && x <= 4 && y === 2 ? 1 : 0;
+      const score = (afterEvo - beforeEvo) * 100 + adjCount * 10 + isCourtyard * 5;
+      candidates.push({ x, y, score, triggersEvo: afterEvo > beforeEvo });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates[0]?.triggersEvo) return { x: candidates[0].x, y: candidates[0].y, isMerge: false };
+  if (mergeTarget) return { x: mergeTarget.x, y: mergeTarget.y, isMerge: true };
+  if (candidates[0]) return { x: candidates[0].x, y: candidates[0].y, isMerge: false };
+  return null;
+}
+
 export function ensureIdleState(flags, profile, now = Date.now()) {
   const existing = flags.idle && typeof flags.idle === 'object' ? flags.idle : {};
   const stage = Math.max(1, Number(existing.stage || profile.floor || 1));
   const maxStage = Math.max(stage, Number(existing.maxStage || profile.best_floor || 1));
+  const rawLoop = existing.loop && typeof existing.loop === 'object' ? existing.loop : {};
+  const starterBoard = [
+    { x: 2, y: 2, baseKey: 'starlight_meadow', cardKey: 'starlight_meadow', stars: 1, evolved: false },
+    { x: 5, y: 2, baseKey: 'spider_cocoon', cardKey: 'spider_cocoon', stars: 1, evolved: false },
+  ];
+  const resolvedBoard = recomputeLoopBoardSynergies(
+    Array.isArray(rawLoop.board) ? rawLoop.board : starterBoard
+  );
+  const starterHand = [
+    makeLoopHandCard('vampire_manor', 1),
+    makeLoopHandCard('ruined_village', 1),
+    makeLoopHandCard('starlight_meadow', 1),
+    makeLoopHandCard('titan_mountain', 1),
+  ];
+  const activeRelics = Array.isArray(rawLoop.activeRelics) ? rawLoop.activeRelics : [];
+  const pendingRelicChoices = Array.isArray(rawLoop.pendingRelicChoices)
+    ? rawLoop.pendingRelicChoices
+    : rollRandomRelicChoices(activeRelics, 3);
+
   return {
     stage,
     maxStage,
@@ -807,6 +1130,25 @@ export function ensureIdleState(flags, profile, now = Date.now()) {
       lastClaimedAtMs: Number(existing.afkChest?.lastClaimedAtMs || now),
     },
     claimedMilestones: Array.isArray(existing.claimedMilestones) ? existing.claimedMilestones : [],
+    loop: {
+      loopCount: Math.max(1, Number(rawLoop.loopCount || 1)),
+      tileIndex: Math.max(0, Math.min(LOOP_ROAD_PATH.length - 1, Number(rawLoop.tileIndex || 0))),
+      threatPct: Math.max(0, Math.min(100, Number(rawLoop.threatPct ?? 18))),
+      bossActive: Boolean(rawLoop.bossActive),
+      autoArchitect: Boolean(rawLoop.autoArchitect),
+      board: resolvedBoard.board,
+      hand: Array.isArray(rawLoop.hand) ? rawLoop.hand : starterHand,
+      activeRelics,
+      pendingRelicChoices,
+      lootSack: {
+        shards: Math.max(0, Number(rawLoop.lootSack?.shards || 0)),
+        coins: Math.max(0, Number(rawLoop.lootSack?.coins || 0)),
+        xp: Math.max(0, Number(rawLoop.lootSack?.xp || 0)),
+        embers: Math.max(0, Number(rawLoop.lootSack?.embers || 0)),
+        gearRolls: Math.max(0, Number(rawLoop.lootSack?.gearRolls || 0)),
+      },
+      synergiesTriggered: Math.max(Number(rawLoop.synergiesTriggered || 0), resolvedBoard.evolvedCount),
+    },
   };
 }
 
@@ -820,25 +1162,47 @@ export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
   const alchemyLvl = idle.professions.alchemy_lab || 1;
   const scribesLvl = idle.professions.rune_scribes || 1;
 
+  const loopAnalysis = recomputeLoopBoardSynergies(idle.loop?.board || []);
+  const lb = loopAnalysis.bonuses;
+  const activeRelicSet = new Set(idle.loop?.activeRelics || []);
+  const scholarPrismAtkPct = activeRelicSet.has('scholar_prism') ? loopAnalysis.evolvedCount * 20 : 0;
+  const heartstoneHp = activeRelicSet.has('titan_heartstone') ? 120 : 0;
+  const midasRelicMult = activeRelicSet.has('midas_astrolabe') ? 1.45 : 1.0;
+  const chronoRelicSpeed = activeRelicSet.has('chrono_pendulum') ? 0.25 : 0;
+
   const ascensionMult = 1 + (idle.ascensions || 0) * 0.35 + warlordRank * 0.25;
-  const profAtkMult = 1 + (miningLvl - 1) * 0.04;
-  const profHpMult = 1 + (alchemyLvl - 1) * 0.05;
+  const loopAtkMult = 1 + (lb.atkPct + scholarPrismAtkPct) / 100;
+  const loopHpMult = 1 + lb.maxHpPct / 100;
+  const profAtkMult = (1 + (miningLvl - 1) * 0.04) * loopAtkMult;
+  const profHpMult = (1 + (alchemyLvl - 1) * 0.05) * loopHpMult;
   const overdriveActive = (idle.overdriveUntilMs || 0) > now;
   const studyFeverMult = heroStats.studyBonuses?.focusFever ? 1.25 : 1.0;
-  const baseSpeedMult = 1 + chronosRank * 0.2;
+  const baseSpeedMult = 1 + chronosRank * 0.2 + lb.speedPct / 100 + chronoRelicSpeed;
   const speedMultiplier = Math.round((overdriveActive ? 4.0 : 1.0) * baseSpeedMult * studyFeverMult * 10) / 10;
 
+  const effectiveHpPool = heroStats.maxHp + lb.maxHpFlat + heartstoneHp;
+  const effectiveDef = heroStats.def + lb.defFlat * (1 + lb.defPct / 100);
   const squadPower = Math.round(
     (heroStats.atk * 4.2 * profAtkMult +
-      heroStats.maxHp * 0.35 * profHpMult +
-      heroStats.def * 2.5 +
+      effectiveHpPool * 0.35 * profHpMult +
+      effectiveDef * 2.5 +
       heroStats.critPct * 2.2 +
       heroStats.luck * 1.4) *
       ascensionMult
   );
-  const squadDps = Math.max(18, Math.round(heroStats.atk * 3.1 * profAtkMult * ascensionMult * (1 + (heroStats.critPct + (scribesLvl - 1) * 2) * 0.008)));
+  const squadDps = Math.max(
+    18,
+    Math.round(
+      heroStats.atk *
+        3.1 *
+        profAtkMult *
+        ascensionMult *
+        (1 + (heroStats.critPct + (scribesLvl - 1) * 2) * 0.008) *
+        (1 + lb.chainLightningPct * 0.003)
+    )
+  );
 
-  const midasMult = 1 + midasRank * 0.3;
+  const midasMult = (1 + midasRank * 0.3) * lb.lootMult * midasRelicMult;
   const shardsPerHr = Math.round((45 + (miningLvl - 1) * 28 + idle.stage * 10) * midasMult * (overdriveActive ? 1.6 : 1));
   const coinsPerHr = Math.round((30 + (alchemyLvl - 1) * 18 + idle.stage * 7) * midasMult * (overdriveActive ? 1.5 : 1));
   const xpPerHr = Math.round((120 + (scribesLvl - 1) * 75 + idle.stage * 22) * (overdriveActive ? 1.6 : 1));
@@ -847,7 +1211,12 @@ export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
   const bossRecPower = Math.round(165 * Math.pow(1.36, Math.max(0, idle.stage - 1)));
   const enemyDps = Math.max(
     9,
-    Math.round(11 * Math.pow(1.32, Math.max(0, idle.stage - 1)) * (idle.wave === 10 ? 1.55 : 0.85 + idle.wave * 0.04))
+    Math.round(
+      11 *
+        Math.pow(1.32, Math.max(0, idle.stage - 1)) *
+        (1 + ((idle.loop?.loopCount || 1) - 1) * 0.14) *
+        (idle.wave === 10 || idle.loop?.bossActive ? 1.55 : 0.85 + idle.wave * 0.04)
+    )
   );
 
   return {
@@ -866,6 +1235,7 @@ export function computeIdleMetrics(idle, heroStats, now = Date.now()) {
     shardsPerHr,
     coinsPerHr,
     xpPerHr,
+    loopAnalysis,
   };
 }
 
@@ -950,6 +1320,41 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
     ? Math.max(2, idle.maxStage + Math.floor((idle.wavesClearedTotal || 0) / 6))
     : 0;
 
+  const { loopAnalysis, ...publicMetrics } = metrics;
+  const loopState = idle.loop || {};
+  const activeRelicSet = new Set(loopState.activeRelics || []);
+  const enrichedBoard = loopAnalysis.board.map((tile) => {
+    const def = LOOP_TILE_CARDS[tile.cardKey] || LOOP_TILE_CARDS[tile.baseKey];
+    return {
+      ...tile,
+      name: def?.name || tile.cardKey,
+      icon: def?.icon || '🗺️',
+      placement: def?.placement || 'landscape',
+      color: def?.color || '#38bdf8',
+      desc: def?.desc || '',
+      traits: def?.traits || [],
+    };
+  });
+  const enrichedHand = (loopState.hand || []).map((c) => {
+    const def = LOOP_TILE_CARDS[c.cardKey];
+    return {
+      ...c,
+      name: def?.name || c.cardKey,
+      icon: def?.icon || '🃏',
+      placement: def?.placement || 'landscape',
+      color: def?.color || '#38bdf8',
+      desc: def?.desc || '',
+      traits: def?.traits || [],
+      threat: def?.threat || 5,
+    };
+  });
+  const activeRelicObjs = LOOP_CAMPFIRE_RELICS.filter((r) => activeRelicSet.has(r.id));
+  const pendingRelicObjs = (loopState.pendingRelicChoices || [])
+    .map((id) => LOOP_CAMPFIRE_RELICS.find((r) => r.id === id))
+    .filter(Boolean);
+  const loopCount = Math.max(1, Number(loopState.loopCount || 1));
+  const greedMultiplier = Math.round((1 + (loopCount - 1) * 0.35) * 100) / 100;
+
   return {
     stage: idle.stage,
     maxStage: idle.maxStage,
@@ -978,8 +1383,8 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
     squadHeroes: IDLE_SQUAD_HEROES.map((h) => ({
       ...h,
       row: idle.formation.front.includes(h.id) ? 'front' : 'back',
-      effectiveAtk: Math.round((h.baseAtk + heroStats.atk * 0.65) * metrics.ascensionMult),
-      effectiveHp: Math.round((h.baseHp + heroStats.maxHp * 0.45) * metrics.ascensionMult),
+      effectiveAtk: Math.round((h.baseAtk + heroStats.atk * 0.65) * publicMetrics.ascensionMult),
+      effectiveHp: Math.round((h.baseHp + heroStats.maxHp * 0.45) * publicMetrics.ascensionMult),
     })),
     formation: idle.formation,
     gambits: idle.gambits,
@@ -996,7 +1401,26 @@ function buildIdleClientState(idle, heroStats, now = Date.now()) {
       ...idle.afkChest,
       capSec: 43200,
     },
-    ...metrics,
+    loop: {
+      gridWidth: LOOP_GRID_WIDTH,
+      gridHeight: LOOP_GRID_HEIGHT,
+      roadPath: LOOP_ROAD_PATH,
+      loopCount,
+      tileIndex: Math.max(0, Math.min(LOOP_ROAD_PATH.length - 1, Number(loopState.tileIndex || 0))),
+      threatPct: Math.max(0, Math.min(100, Number(loopState.threatPct || 0))),
+      bossActive: Boolean(loopState.bossActive),
+      autoArchitect: Boolean(loopState.autoArchitect),
+      greedMultiplier,
+      board: enrichedBoard,
+      hand: enrichedHand,
+      activeTraits: loopAnalysis.activeTraits,
+      bonuses: loopAnalysis.bonuses,
+      activeRelics: activeRelicObjs,
+      pendingRelicChoices: pendingRelicObjs,
+      lootSack: loopState.lootSack || { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 },
+      synergiesTriggered: Number(loopState.synergiesTriggered || 0),
+    },
+    ...publicMetrics,
   };
 }
 
@@ -2898,6 +3322,14 @@ export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, g
   idle.maxStage = nextMaxStage;
   idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + bonusWaves;
   idle.lastTickAtMs = now;
+
+  // Draw +2 ★2 Tactical Loop Cards on correct Study Quiz answer (+1 ★1 on miss)
+  const cardsDrawn = isCorrect ? [rollLoopCardKey(), rollLoopCardKey()] : [rollLoopCardKey()];
+  drawCardsIntoHand(idle.loop, cardsDrawn, isCorrect ? 2 : 1);
+  if (isCorrect) {
+    idle.loop.lootSack.shards += 22;
+    idle.loop.lootSack.gearRolls += 1;
+  }
   flags.idle = idle;
 
   const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
@@ -2906,9 +3338,9 @@ export function resolveStudyCast(db, user, userStats, { cardId, selectedIndex, g
   const extraXp = isCorrect ? 25 + idle.stage * 5 : 8;
   if (isCorrect) {
     droppedItem = generateLootItem(db, user.id, idle.stage, heroStats.luck + 10, { minRarity: 'uncommon' });
-    msg = `🎓 Study Overdrive [${card.concept_title || card.subject_name}]! +30m 4.0× Speed, +2 Waves & +${extraShards}✦!`;
+    msg = `🎓 Study Overdrive [${card.concept_title || card.subject_name}]! +30m 4.0× Speed, +2 ★2 Tactical Cards, +2 Waves & +${extraShards}✦!`;
   } else {
-    msg = `📖 Study Spark [${card.concept_title || card.subject_name}]: +${shardsGain + extraShards}✦ & +1 Wave progress!`;
+    msg = `📖 Study Spark [${card.concept_title || card.subject_name}]: +1 Tactical Card, +${shardsGain + extraShards}✦ & +1 Wave progress!`;
   }
 
   db.prepare(`
@@ -3206,34 +3638,46 @@ export function processIdleWaveTick(
     idle.overdriveUntilMs = Math.max(idle.overdriveUntilMs || 0, now + 90_000);
   }
 
-  // Boss Wall / Wipe retreat -> drops back to Waves 1-9 farming mode until challenged again
+  // Emergency Portal Extraction on wipe: saves 60% of Expedition Loot Sack and retreats safely
   if (outcome === 'wipe') {
+    const sack = idle.loop.lootSack || { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 };
+    const recoveryShards = Math.max(5 + idle.stage, Math.round((sack.shards || 0) * 0.6));
+    const recoveryCoins = Math.round((sack.coins || 0) * 0.6);
+    const recoveryXp = Math.round((sack.xp || 0) * 0.6);
+
+    idle.loop.lootSack = { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 };
+    idle.loop.loopCount = 1;
+    idle.loop.tileIndex = 0;
+    idle.loop.threatPct = 0;
+    idle.loop.bossActive = false;
     idle.bossWallStuck = true;
     idle.wave = Math.max(1, idle.wave === 10 ? 9 : idle.wave - 1);
     idle.gambits.stageProgression = 'farm_stage';
     idle.lastTickAtMs = now;
     flags.idle = idle;
 
-    const recoveryShards = 4 + idle.stage;
-    const msg = `💀 BOSS WALL on Stage ${idle.stage}! Enemy counter-assault overwhelmed the Frontline — farming Wave ${idle.wave}/9 (+${recoveryShards}✦). Upgrade Gear, tweak Gambits, or Study for 4× Overdrive, then tap 👑 Challenge Boss!`;
+    const msg = `🌀 Emergency Portal Extraction! Saved 60% of Expedition Sack (+${recoveryShards}✦, +${recoveryCoins}🪙, +${recoveryXp} XP) and returned to Campfire.`;
+    if (recoveryCoins > 0) {
+      db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(recoveryCoins, user.id);
+    }
     db.prepare(`
       UPDATE game_profiles
-      SET shards = shards + ?, story_flags_json = ?, last_log_json = ?, updated_at = ?
+      SET shards = shards + ?, hero_xp = hero_xp + ?, story_flags_json = ?, last_log_json = ?, updated_at = ?
       WHERE user_id = ?
-    `).run(recoveryShards, JSON.stringify(flags), appendLogs(profile, [msg]), now, user.id);
+    `).run(recoveryShards, recoveryXp, JSON.stringify(flags), appendLogs(profile, [msg]), now, user.id);
 
     const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     return {
       game: buildGameState(db, refreshedUser, userStats),
       shardsGained: recoveryShards,
-      events: [{ kind: 'defeat', target: 'hero', text: '💀 BOSS WALL!' }],
+      events: [{ kind: 'defeat', target: 'hero', text: '🌀 60% PORTAL EXTRACT!' }],
       message: msg,
     };
   }
 
   const metrics = computeIdleMetrics(idle, heroStats, now);
   const steps = Math.max(1, Math.min(5, Math.round(Number(wavesCleared || 1))));
-  const wasBoss = idle.wave === 10 || steps >= 10;
+  const wasBoss = idle.wave === 10 || idle.loop.bossActive || steps >= 10;
 
   let curWave = idle.wave;
   let curStage = idle.stage;
@@ -3256,6 +3700,77 @@ export function processIdleWaveTick(
     }
   }
 
+  // Advance Loop Architect expedition along the 12-tile loop
+  const loop = idle.loop;
+  const prevTile = loop.tileIndex || 0;
+  const rawNextTile = prevTile + steps;
+  const wrappedCampfire = rawNextTile >= LOOP_ROAD_PATH.length;
+  loop.tileIndex = rawNextTile % LOOP_ROAD_PATH.length;
+
+  const greedMult = 1 + ((loop.loopCount || 1) - 1) * 0.35;
+  const lb = metrics.loopAnalysis.bonuses;
+  const boardHasCocoon = loop.board.some((t) => t.baseKey === 'spider_cocoon');
+  const boardHasEstate = loop.board.some((t) => t.cardKey === 'counts_estate' || t.baseKey === 'ruined_village');
+
+  const sackShards = Math.max(
+    4,
+    Math.round((5 + curStage * 2 + (boardHasCocoon ? 4 : 0)) * steps * greedMult * lb.lootMult)
+  );
+  const sackCoins = Math.max(
+    3,
+    Math.round((3 + curStage + (boardHasEstate ? 6 : 0)) * steps * greedMult * lb.lootMult)
+  );
+  const sackXp = Math.max(8, Math.round((10 + curStage * 4) * steps * greedMult));
+
+  loop.lootSack.shards += sackShards;
+  loop.lootSack.coins += sackCoins;
+  loop.lootSack.xp += sackXp;
+  if (bossesSlainDelta > 0) {
+    loop.lootSack.gearRolls += 1;
+    loop.lootSack.shards += 18 + curStage * 4;
+    loop.bossActive = false;
+    loop.threatPct = 0;
+  } else {
+    loop.threatPct = Math.min(100, (loop.threatPct || 0) + 14 * steps);
+    if (loop.threatPct >= 100) loop.bossActive = true;
+  }
+
+  if (wrappedCampfire) {
+    loop.loopCount = (loop.loopCount || 1) + 1;
+    loop.lootSack.gearRolls = Math.min(6, (loop.lootSack.gearRolls || 0) + 1);
+    if (!loop.pendingRelicChoices || loop.pendingRelicChoices.length === 0) {
+      loop.pendingRelicChoices = rollRandomRelicChoices(loop.activeRelics, 3);
+    }
+  }
+
+  const drawCount = wrappedCampfire || triggerUltimate || boardHasCocoon ? 2 : 1;
+  const drawnKeys = Array.from({ length: drawCount }, () => rollLoopCardKey());
+  drawCardsIntoHand(loop, drawnKeys, 1);
+
+  if (loop.autoArchitect && loop.hand.length > 0) {
+    const autoCard = loop.hand[0];
+    const targetCell = smartPickPlacementCell(autoCard.cardKey, loop.board);
+    if (targetCell) {
+      loop.hand.shift();
+      if (targetCell.isMerge) {
+        const match = loop.board.find((t) => t.x === targetCell.x && t.y === targetCell.y);
+        if (match && match.stars < 3) match.stars += 1;
+      } else {
+        loop.board.push({
+          x: targetCell.x,
+          y: targetCell.y,
+          baseKey: autoCard.cardKey,
+          cardKey: autoCard.cardKey,
+          stars: autoCard.stars || 1,
+          evolved: false,
+        });
+      }
+      const nextSyn = recomputeLoopBoardSynergies(loop.board);
+      loop.board = nextSyn.board;
+      loop.synergiesTriggered = Math.max(loop.synergiesTriggered || 0, nextSyn.evolvedCount);
+    }
+  }
+
   idle.wave = curWave;
   idle.stage = curStage;
   idle.maxStage = curMaxStage;
@@ -3267,9 +3782,9 @@ export function processIdleWaveTick(
   flags.idle = idle;
 
   const mult = metrics.midasMult * (metrics.overdriveActive || timerRunning ? 2.2 : 1.0) * (triggerUltimate ? 1.35 : 1.0);
-  const shardsGain = Math.max(3, Math.round((4 + curStage * 2 + (bossesSlainDelta > 0 ? 12 : 0)) * steps * mult));
-  const coinsGain = Math.max(2, Math.round((2 + curStage + (bossesSlainDelta > 0 ? 8 : 0)) * steps * metrics.midasMult));
-  const xpGain = Math.max(8, Math.round((10 + curStage * 5 + (bossesSlainDelta > 0 ? 25 : 0)) * steps * mult));
+  const shardsGain = Math.max(3, Math.round((3 + curStage + (bossesSlainDelta > 0 ? 10 : 0)) * steps * mult));
+  const coinsGain = Math.max(2, Math.round((2 + curStage + (bossesSlainDelta > 0 ? 6 : 0)) * steps * metrics.midasMult));
+  const xpGain = Math.max(6, Math.round((8 + curStage * 4 + (bossesSlainDelta > 0 ? 20 : 0)) * steps * mult));
 
   let droppedItem = null;
   const dropChance = bossesSlainDelta > 0 || triggerUltimate ? 1.0 : Math.min(0.65, 0.28 + metrics.effectiveLuck * 0.004);
@@ -3282,10 +3797,14 @@ export function processIdleWaveTick(
     {
       kind: triggerUltimate ? 'finisher' : bossesSlainDelta > 0 ? 'crit' : 'hit',
       target: 'enemy',
-      text: triggerUltimate ? '🌟 SQUAD FINISHER!' : bossesSlainDelta > 0 ? `👑 STAGE ${curStage} CLEAR!` : `+${shardsGain}✦`,
+      text: triggerUltimate
+        ? `🌟 +${sackShards}✦ SACK · +${drawCount}🃏`
+        : bossesSlainDelta > 0
+          ? `👑 STAGE ${curStage} CLEAR!`
+          : `+${sackShards}✦ +${drawCount}🃏`,
     },
   ];
-  let logText = `⚔️ Squad cleared Wave ${idle.wave}/10 (Stage ${curStage}): +${shardsGain}✦, +${coinsGain}🪙, +${xpGain} XP`;
+  let logText = `🗺️ Loop #${loop.loopCount} Tile ${loop.tileIndex}/11 (Stage ${curStage}): +${sackShards}✦ into Sack, Drew ${drawCount} Card${drawCount > 1 ? 's' : ''}`;
   if (droppedItem) {
     if (droppedItem.autoEquipped) {
       logText += ` & ⚡ Auto-Equipped [${droppedItem.rarity.toUpperCase()}] ${droppedItem.name}!`;
@@ -3295,7 +3814,7 @@ export function processIdleWaveTick(
       logText += ` & Looted ${droppedItem.name}!`;
     }
   }
-  const nextLogs = wasBoss || triggerUltimate || droppedItem ? appendLogs(profile, [logText]) : profile.last_log_json;
+  const nextLogs = wasBoss || triggerUltimate || droppedItem || wrappedCampfire ? appendLogs(profile, [logText]) : profile.last_log_json;
 
   db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(coinsGain, user.id);
   db.prepare(`
@@ -3385,10 +3904,181 @@ export function claimIdleAfkChest(db, user, userStats) {
 
 export function updateIdleConfig(db, user, userStats, payload = {}) {
   const profile = ensureGameProfile(db, user.id);
+  const rawItems = db.prepare('SELECT * FROM game_items WHERE user_id = ? AND equipped = 1').all(user.id);
+  const heroStats = computeHeroStats(profile, rawItems, computeStudyBonuses(user, userStats));
   const flags = parseJsonSafe(profile.story_flags_json, {});
   const now = Date.now();
   const idle = ensureIdleState(flags, profile, now);
   let msg = '';
+  const customEvents = [];
+  let droppedItem = null;
+
+  if (payload.placeCard && typeof payload.placeCard === 'object') {
+    const { cardId, cardKey, x, y } = payload.placeCard;
+    let handIdx = -1;
+    if (cardId) handIdx = idle.loop.hand.findIndex((c) => c.id === cardId);
+    if (handIdx < 0 && cardKey) handIdx = idle.loop.hand.findIndex((c) => c.cardKey === cardKey);
+    if (handIdx < 0 && idle.loop.hand.length > 0 && !cardId && !cardKey) handIdx = 0;
+    if (handIdx < 0) {
+      throw new Error('Selected tactical card not found in hand — clear tiles or answer a Study Quiz to draw cards!');
+    }
+
+    const card = idle.loop.hand[handIdx];
+    const cardDef = LOOP_TILE_CARDS[card.cardKey];
+    if (!cardDef || !cardDef.placeable) throw new Error('Invalid Loop Architect card');
+
+    let tx = Number.isInteger(x) ? Number(x) : null;
+    let ty = Number.isInteger(y) ? Number(y) : null;
+    if (tx === null || ty === null) {
+      const pick = smartPickPlacementCell(card.cardKey, idle.loop.board);
+      if (!pick) throw new Error('No valid empty cells remain for this tile type — try merging duplicates!');
+      tx = pick.x;
+      ty = pick.y;
+    }
+
+    if (tx < 0 || tx >= LOOP_GRID_WIDTH || ty < 0 || ty >= LOOP_GRID_HEIGHT) {
+      throw new Error('Grid coordinates out of 7×5 Loop bounds');
+    }
+    if (isCampfireCoord(tx, ty)) {
+      throw new Error('The Campfire anchor tile cannot be overwritten!');
+    }
+    const roadCell = isRoadCoord(tx, ty);
+    if (cardDef.placement === 'road' && !roadCell) {
+      throw new Error(`${cardDef.name} must be placed directly on the Expedition Road!`);
+    }
+    if (cardDef.placement === 'landscape' && roadCell) {
+      throw new Error(`${cardDef.name} must be placed on Landscape / Courtyard tiles off the road!`);
+    }
+
+    const prevEvoCount = recomputeLoopBoardSynergies(idle.loop.board).evolvedCount;
+    const occupying = idle.loop.board.find((t) => t.x === tx && t.y === ty);
+    let actionLabel = '';
+    if (occupying) {
+      if (occupying.baseKey === card.cardKey && occupying.stars < 3) {
+        occupying.stars = Math.min(3, occupying.stars + Math.max(1, card.stars || 1));
+        idle.loop.hand.splice(handIdx, 1);
+        actionLabel = `★ Merged ${cardDef.icon} ${cardDef.name} up to ★${occupying.stars}`;
+      } else {
+        throw new Error('That cell is already occupied by a different structure — choose an empty cell or matching tile!');
+      }
+    } else {
+      idle.loop.board.push({
+        x: tx,
+        y: ty,
+        baseKey: card.cardKey,
+        cardKey: card.cardKey,
+        stars: card.stars || 1,
+        evolved: false,
+      });
+      idle.loop.hand.splice(handIdx, 1);
+      actionLabel = `🗺️ Placed ${cardDef.icon} ${cardDef.name} at (${tx},${ty})`;
+    }
+
+    const nextAnalysis = recomputeLoopBoardSynergies(idle.loop.board);
+    idle.loop.board = nextAnalysis.board;
+    idle.loop.threatPct = Math.min(100, (idle.loop.threatPct || 0) + (cardDef.threat || 6));
+    if (idle.loop.threatPct >= 100) idle.loop.bossActive = true;
+
+    if (nextAnalysis.evolvedCount > prevEvoCount) {
+      const gainedEvo = nextAnalysis.evolvedCount - prevEvoCount;
+      idle.loop.synergiesTriggered = (idle.loop.synergiesTriggered || 0) + gainedEvo;
+      idle.loop.lootSack.shards += 15 * gainedEvo;
+      idle.loop.lootSack.coins += 10 * gainedEvo;
+      customEvents.push({ kind: 'crit', target: 'hero', text: '⚡ ADJACENCY EVOLVED!' });
+      msg = `⚡ ADJACENCY SYNERGY DISCOVERED! ${actionLabel} & awakened an Evolved Structure (+${15 * gainedEvo}✦ into Sack)!`;
+    } else {
+      customEvents.push({ kind: 'hit', target: 'hero', text: `${cardDef.icon} PLACED!` });
+      msg = actionLabel;
+    }
+  }
+
+  if (payload.mergeHand === true) {
+    let merges = 0;
+    // First merge hand cards onto matching <3★ board tiles
+    for (let i = idle.loop.hand.length - 1; i >= 0; i--) {
+      const hc = idle.loop.hand[i];
+      const boardMatch = idle.loop.board.find((t) => t.baseKey === hc.cardKey && t.stars < 3);
+      if (boardMatch) {
+        boardMatch.stars = Math.min(3, boardMatch.stars + 1);
+        idle.loop.hand.splice(i, 1);
+        merges += 1;
+      }
+    }
+    // Then merge duplicate cards inside hand into ★2/★3 cards
+    for (let i = 0; i < idle.loop.hand.length; i++) {
+      for (let j = i + 1; j < idle.loop.hand.length; j++) {
+        if (idle.loop.hand[i].cardKey === idle.loop.hand[j].cardKey && idle.loop.hand[i].stars < 3) {
+          idle.loop.hand[i].stars = Math.min(3, Math.max(idle.loop.hand[i].stars, idle.loop.hand[j].stars) + 1);
+          idle.loop.hand.splice(j, 1);
+          merges += 1;
+          j -= 1;
+        }
+      }
+    }
+    const nextAnalysis = recomputeLoopBoardSynergies(idle.loop.board);
+    idle.loop.board = nextAnalysis.board;
+    if (merges > 0) {
+      drawCardsIntoHand(idle.loop, [rollLoopCardKey()], 1);
+      customEvents.push({ kind: 'finisher', target: 'hero', text: `✨ ${merges}× STAR MERGE!` });
+      msg = `✨ Merged ${merges} duplicate Tactical Card${merges > 1 ? 's' : ''} into higher Star ranks & drew +1 Card!`;
+    } else {
+      msg = 'No duplicate Tactical Cards ready to merge yet — place cards on the 7×5 board or battle to draw more!';
+    }
+  }
+
+  if (typeof payload.pickRelic === 'string' && payload.pickRelic) {
+    const relic = LOOP_CAMPFIRE_RELICS.find((r) => r.id === payload.pickRelic);
+    if (!relic) throw new Error('Unknown Campfire Relic');
+    if (!idle.loop.activeRelics.includes(relic.id)) {
+      idle.loop.activeRelics.push(relic.id);
+    }
+    idle.loop.pendingRelicChoices = [];
+    customEvents.push({ kind: 'heal', target: 'hero', text: `${relic.icon} ${relic.name}!` });
+    msg = `🕯️ Claimed Campfire Relic [${relic.icon} ${relic.name}]: ${relic.desc}`;
+  }
+
+  if (payload.extractLoop === true) {
+    const analysis = recomputeLoopBoardSynergies(idle.loop.board);
+    const metrics = computeIdleMetrics(idle, heroStats, now);
+    const sack = idle.loop.lootSack || { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 };
+    const totalShards = Math.max(12, Math.round(sack.shards || 0));
+    const totalCoins = Math.max(6, Math.round(sack.coins || 0));
+    const totalXp = Math.max(20, Math.round(sack.xp || 0));
+    const totalRolls = Math.max(1, Math.min(4, (sack.gearRolls || 0) + analysis.bonuses.bonusGearRolls));
+
+    for (let r = 0; r < totalRolls; r++) {
+      const roll = generateLootItem(db, user.id, idle.stage, metrics.effectiveLuck + 6, {
+        minRarity: r === 0 && (idle.loop.loopCount || 1) >= 2 ? 'rare' : 'uncommon',
+      });
+      if (!droppedItem || computeItemPower(roll) > computeItemPower(droppedItem)) {
+        droppedItem = roll;
+      }
+    }
+
+    const oldLoopCount = idle.loop.loopCount || 1;
+    idle.loop.lootSack = { shards: 0, coins: 0, xp: 0, embers: 0, gearRolls: 0 };
+    idle.loop.loopCount = 1;
+    idle.loop.tileIndex = 0;
+    idle.loop.threatPct = 0;
+    idle.loop.bossActive = false;
+    idle.wavesClearedTotal = (idle.wavesClearedTotal || 0) + 1;
+    drawCardsIntoHand(idle.loop, [rollLoopCardKey(), rollLoopCardKey()], 1);
+
+    db.prepare('UPDATE users SET coins = coins + ? WHERE id = ?').run(totalCoins, user.id);
+    db.prepare('UPDATE game_profiles SET shards = shards + ?, hero_xp = hero_xp + ?, chests_opened = chests_opened + 1 WHERE user_id = ?').run(
+      totalShards,
+      totalXp,
+      user.id
+    );
+
+    customEvents.push({ kind: 'loot', target: 'hero', text: `🏕️ +${totalShards}✦ EXTRACTED!` });
+    msg = `🏕️ Campfire Extraction (100% Loot from Loop #${oldLoopCount})! Banked +${totalShards}✦ Shards, +${totalCoins}🪙 Coins, +${totalXp} XP & ${totalRolls} Gear Roll${totalRolls > 1 ? 's' : ''}!`;
+  }
+
+  if (payload.toggleAutoArchitect !== undefined) {
+    idle.loop.autoArchitect = Boolean(payload.toggleAutoArchitect);
+    msg = `🤖 Auto-Architect Mode: ${idle.loop.autoArchitect ? 'ON (places & merges cards automatically)' : 'OFF (Manual Strategy)'}`;
+  }
 
   if (payload.gambits && typeof payload.gambits === 'object') {
     const g = payload.gambits;
@@ -3408,12 +4098,14 @@ export function updateIdleConfig(db, user, userStats, payload = {}) {
     if (g.battlePace === '1x' || g.battlePace === '2x' || g.battlePace === 'overdrive') {
       idle.gambits.battlePace = g.battlePace;
     }
-    msg = '⚙️ Updated Squad AI Gambit tactics!';
+    if (!msg) msg = '⚙️ Updated Squad AI Gambit tactics!';
   }
 
   if (payload.challengeBoss === true) {
     idle.wave = 10;
     idle.bossWallStuck = false;
+    idle.loop.bossActive = true;
+    idle.loop.threatPct = 100;
     idle.gambits.stageProgression = 'auto_push';
     msg = `👑 Challenging Stage ${idle.stage} Boss Warden!`;
   }
@@ -3464,8 +4156,9 @@ export function updateIdleConfig(db, user, userStats, payload = {}) {
   const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   return {
     game: buildGameState(db, refreshedUser, userStats),
+    droppedItem: droppedItem && !droppedItem.autoSalvagedShards ? droppedItem : null,
     message: msg || 'Updated Squad settings',
-    events: [],
+    events: customEvents,
   };
 }
 

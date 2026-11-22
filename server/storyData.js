@@ -1018,6 +1018,322 @@ export const IDLE_MYTHIC_BOUNTIES = [
   },
 ];
 
+// ==========================================
+// AETHELGARD: LOOP ARCHITECT (TILE CARDS, SYNERGIES & RELICS)
+// ==========================================
+
+export const LOOP_GRID_WIDTH = 7;
+export const LOOP_GRID_HEIGHT = 5;
+
+export const LOOP_ROAD_PATH = [
+  { x: 1, y: 2 }, // 0: Campfire Start/End Anchor
+  { x: 1, y: 1 }, // 1
+  { x: 2, y: 1 }, // 2
+  { x: 3, y: 1 }, // 3
+  { x: 4, y: 1 }, // 4
+  { x: 5, y: 1 }, // 5
+  { x: 5, y: 2 }, // 6
+  { x: 5, y: 3 }, // 7
+  { x: 4, y: 3 }, // 8
+  { x: 3, y: 3 }, // 9
+  { x: 2, y: 3 }, // 10
+  { x: 1, y: 3 }, // 11
+];
+
+export const LOOP_TILE_CARDS = {
+  // Placeable Road Cards
+  spider_cocoon: {
+    key: 'spider_cocoon',
+    name: 'Spider Cocoon',
+    icon: '🕸️',
+    placement: 'road',
+    placeable: true,
+    evolved: false,
+    traits: ['crimson', 'chrono'],
+    threat: 8,
+    color: '#a855f7',
+    desc: 'Spawns fast Astral Spiders every loop (+1 Card Draw & +14✦ on clear).',
+  },
+  blood_grove: {
+    key: 'blood_grove',
+    name: 'Blood Grove',
+    icon: '🩸',
+    placement: 'road',
+    placeable: true,
+    evolved: false,
+    traits: ['crimson', 'verdant'],
+    threat: 9,
+    color: '#e11d48',
+    desc: 'Roots across the road: instantly EXECUTES any enemy or Boss below 22% HP!',
+  },
+  ruined_village: {
+    key: 'ruined_village',
+    name: 'Ruined Village',
+    icon: '🏚️',
+    placement: 'road',
+    placeable: true,
+    evolved: false,
+    traits: ['bastion', 'verdant'],
+    threat: 7,
+    color: '#10b981',
+    desc: 'Heals +22% HP when stepped on & awards +15🪙 Bounty. Evolves beside Vampire Manor!',
+  },
+  vanguard_outpost: {
+    key: 'vanguard_outpost',
+    name: 'Vanguard Outpost',
+    icon: '⚔️',
+    placement: 'road',
+    placeable: true,
+    evolved: false,
+    traits: ['bastion', 'titan'],
+    threat: 8,
+    color: '#38bdf8',
+    desc: 'Deploys an allied Paladin Lancer who absorbs 35% damage & strikes enemies.',
+  },
+  chrono_obelisk: {
+    key: 'chrono_obelisk',
+    name: 'Chrono Obelisk',
+    icon: '🔮',
+    placement: 'road',
+    placeable: true,
+    evolved: false,
+    traits: ['chrono', 'storm'],
+    threat: 9,
+    color: '#06b6d4',
+    desc: '+30% Loop & Attack Speed on adjacent road tiles; charges Finisher +35% faster.',
+  },
+
+  // Placeable Landscape Cards
+  starlight_meadow: {
+    key: 'starlight_meadow',
+    name: 'Starlight Meadow',
+    icon: '🌸',
+    placement: 'landscape',
+    placeable: true,
+    evolved: false,
+    traits: ['verdant'],
+    threat: 5,
+    color: '#22c55e',
+    desc: '+25 Max HP & +8% Campfire Heal. Evolves into 🌺 Blooming Sanctuary beside any non-Meadow tile!',
+  },
+  titan_mountain: {
+    key: 'titan_mountain',
+    name: 'Titan Mountain',
+    icon: '⛰️',
+    placement: 'landscape',
+    placeable: true,
+    evolved: false,
+    traits: ['titan'],
+    threat: 6,
+    color: '#64748b',
+    desc: '+35 Max HP & +4 DEF. Evolves into 🏔️ Celestial Summit when touching 2+ Mountains!',
+  },
+  vampire_manor: {
+    key: 'vampire_manor',
+    name: 'Vampire Manor',
+    icon: '🧛',
+    placement: 'landscape',
+    placeable: true,
+    evolved: false,
+    traits: ['crimson'],
+    threat: 8,
+    color: '#be123c',
+    desc: '+12% Lifesteal & adds Vampire Lord encounters (+24✦) to adjacent road tiles.',
+  },
+  storm_conduit: {
+    key: 'storm_conduit',
+    name: 'Storm Conduit',
+    icon: '🗼',
+    placement: 'landscape',
+    placeable: true,
+    evolved: false,
+    traits: ['storm'],
+    threat: 8,
+    color: '#3b82f6',
+    desc: '+18% Skill Damage & orbital lightning strike. Evolves into ⚡ Tesla Spire beside Chrono/Storm!',
+  },
+  alchemist_vault: {
+    key: 'alchemist_vault',
+    name: 'Alchemist Vault',
+    icon: '⚗️',
+    placement: 'landscape',
+    placeable: true,
+    evolved: false,
+    traits: ['chrono', 'bastion'],
+    threat: 7,
+    color: '#f59e0b',
+    desc: '+18% Loot Yield. Evolves into 💎 Mythic Treasury when surrounded by 3+ tiles!',
+  },
+
+  // Evolved Secret Adjacency Forms
+  counts_estate: {
+    key: 'counts_estate',
+    name: "Count's Sovereign Estate",
+    icon: '🏰',
+    placement: 'road',
+    placeable: false,
+    evolved: true,
+    traits: ['crimson', 'bastion', 'verdant'],
+    threat: 0,
+    color: '#fbbf24',
+    desc: 'EVOLVED: Restores +38% HP on step, awards +32🪙 Bounty & grants +18% Squad ATK!',
+  },
+  blooming_sanctuary: {
+    key: 'blooming_sanctuary',
+    name: 'Blooming Sanctuary',
+    icon: '🌺',
+    placement: 'landscape',
+    placeable: false,
+    evolved: true,
+    traits: ['verdant'],
+    threat: 0,
+    color: '#34d399',
+    desc: 'EVOLVED: +60 Max HP, +16% Campfire Heal & +14% Regen Aura per loop!',
+  },
+  celestial_summit: {
+    key: 'celestial_summit',
+    name: 'Celestial Summit',
+    icon: '🏔️',
+    placement: 'landscape',
+    placeable: false,
+    evolved: true,
+    traits: ['titan'],
+    threat: 0,
+    color: '#93c5fd',
+    desc: 'EVOLVED: +95 Max HP, +12 DEF & hurls Stone Meteors at Stage Bosses!',
+  },
+  tesla_spire: {
+    key: 'tesla_spire',
+    name: 'Singularity Tesla Spire',
+    icon: '⚡',
+    placement: 'landscape',
+    placeable: false,
+    evolved: true,
+    traits: ['storm', 'chrono'],
+    threat: 0,
+    color: '#38bdf8',
+    desc: 'EVOLVED: +42% Chain Lightning Chance & +25% Speed Aura across adjacent tiles!',
+  },
+  mythic_treasury: {
+    key: 'mythic_treasury',
+    name: 'Opened Mythic Treasury',
+    icon: '💎',
+    placement: 'landscape',
+    placeable: false,
+    evolved: true,
+    traits: ['chrono', 'bastion'],
+    threat: 0,
+    color: '#f43f5e',
+    desc: 'EVOLVED: +45% Expedition Sack Multiplier & +1 Bonus Gear Roll on Extraction!',
+  },
+};
+
+export const LOOP_PLACEABLE_CARD_KEYS = Object.keys(LOOP_TILE_CARDS).filter(
+  (k) => LOOP_TILE_CARDS[k].placeable
+);
+
+export const LOOP_TRAIT_SYNERGIES = [
+  {
+    id: 'verdant',
+    name: 'Verdant Bloom',
+    icon: '🌿',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+12% Max HP & +6% Heal', '+28% Max HP & +12% Heal', '+55% Max HP & +20% Heal'],
+  },
+  {
+    id: 'storm',
+    name: 'Storm Conduit',
+    icon: '⚡',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+18% Chain Lightning', '+38% Chain Lightning', '+65% Chain Lightning'],
+  },
+  {
+    id: 'crimson',
+    name: 'Crimson Pact',
+    icon: '🩸',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+10% Lifesteal', '+22% Lifesteal & +6% Exec', '+40% Lifesteal & +12% Exec'],
+  },
+  {
+    id: 'bastion',
+    name: 'Iron Bastion',
+    icon: '🛡️',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+12% Max Barrier', '+25% Max Barrier & Ward', '+45% Barrier & -18% DMG Taken'],
+  },
+  {
+    id: 'titan',
+    name: 'Titan Forge',
+    icon: '⛰️',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+14% Base DEF & Thorns', '+30% Base DEF & Thorns', '+55% Base DEF & Meteor Strike'],
+  },
+  {
+    id: 'chrono',
+    name: 'Chrono Weave',
+    icon: '🔮',
+    breakpoints: [2, 4, 6],
+    tierDescs: ['+15% ATB Speed & Sack Loot', '+32% ATB Speed & +30% Loot', '+55% ATB Speed & +55% Loot'],
+  },
+];
+
+export const LOOP_CAMPFIRE_RELICS = [
+  {
+    id: 'vampiric_fang',
+    name: 'Vampiric Fang',
+    icon: '🦇',
+    desc: 'Grants +15% Squad Lifesteal and converts overheal into Cyan Barrier.',
+  },
+  {
+    id: 'tesla_capacitor',
+    name: 'Tesla Capacitor',
+    icon: '⚡',
+    desc: 'Every attack has a 35% chance to arc Chain Lightning for +60% bonus DMG.',
+  },
+  {
+    id: 'midas_astrolabe',
+    name: 'Midas Astrolabe',
+    icon: '🪙',
+    desc: 'Boosts Expedition Loot Sack Shards, Coins & XP generation by +45%.',
+  },
+  {
+    id: 'titan_heartstone',
+    name: 'Titan Heartstone',
+    icon: '🗿',
+    desc: 'Grants +120 Squad Max HP and +15% Start-of-Clash Guard Barrier.',
+  },
+  {
+    id: 'chrono_pendulum',
+    name: 'Chrono Pendulum',
+    icon: '⏳',
+    desc: 'Accelerates Squad ATB gauges & Loop expedition pace by +25%.',
+  },
+  {
+    id: 'guillotine_edge',
+    name: 'Guillotine Edge',
+    icon: '🪓',
+    desc: 'Executes standard enemies below 25% HP and Bosses below 12% HP.',
+  },
+  {
+    id: 'starlight_aegis',
+    name: 'Starlight Aegis',
+    icon: '🛡️',
+    desc: 'Passing the Campfire restores +35% HP & refreshes full Squad Barrier.',
+  },
+  {
+    id: 'scholar_prism',
+    name: "Scholar's Prism",
+    icon: '💎',
+    desc: 'Grants +20% cumulative Squad ATK per evolved adjacency structure on board.',
+  },
+  {
+    id: 'phoenix_plume',
+    name: 'Phoenix Plume',
+    icon: '🔥',
+    desc: 'Prevents 1 fatal squad blow per loop, healing 30% HP in solar fire.',
+  },
+];
+
 export function trustRankLabel(score) {
   if (score >= 60) return 'Sworn Ally';
   if (score >= 25) return 'Trusted';
