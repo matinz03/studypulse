@@ -1315,6 +1315,15 @@ export function App() {
     await refreshBootstrap();
   }
 
+  async function handleUpdateSessionTopic(sessionId: number, subjectName: string, subjectColor?: string) {
+    await apiFetch(`/api/sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ subjectName, subjectColor }),
+    });
+    await refreshBootstrap();
+    pushToast(`Updated topic to "${subjectName}" ✨`);
+  }
+
   async function handleUpdateProfile(payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) {
     await apiFetch('/api/profile', {
       method: 'PATCH',
@@ -1727,6 +1736,9 @@ export function App() {
                   <FeedView
                     themeId={themeId}
                     feed={data.feed}
+                    currentUserId={user.id}
+                    subjects={data.subjects}
+                    onUpdateSessionTopic={handleUpdateSessionTopic}
                     onReact={handleReactFeed}
                     onComment={handleCommentFeed}
                     onJumpToFocus={() => setTab('focus')}
@@ -1741,6 +1753,8 @@ export function App() {
                     heatmap365={data.heatmap365}
                     prevWeekMins={data.prevWeekMins}
                     todayTimeline={data.todayTimeline}
+                    studyLogs={data.studyLogs}
+                    onUpdateSessionTopic={handleUpdateSessionTopic}
                     weekTrend={data.weekTrend}
                     subjectBreakdown={data.subjectBreakdown}
                     hourlyDistribution={data.hourlyDistribution}

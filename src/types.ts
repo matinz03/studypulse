@@ -1241,6 +1241,7 @@ export interface BootstrapData {
   activeDuel?: FocusDuel;
   prevWeekMins?: number;
   todayTimeline?: TodayTimelineItem[];
+  studyLogs?: TodayTimelineItem[];
   vapidPublicKey: string;
   directory: PeerUser[];
   leaderboards: {

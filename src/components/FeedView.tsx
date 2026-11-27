@@ -1,12 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Send, ShieldCheck, Sparkles, Flame, Clock } from 'lucide-react';
-import { FeedItem } from '../types';
+import { MessageCircle, Send, ShieldCheck, Sparkles, Flame, Clock, Pencil, Check, X } from 'lucide-react';
+import { FeedItem, Subject } from '../types';
 import { ThemeId, getThemeMeta } from '../themes';
 
 interface FeedViewProps {
   themeId?: ThemeId;
   feed: FeedItem[];
+  currentUserId?: number;
+  subjects?: Subject[];
+  onUpdateSessionTopic?: (sessionId: number, subjectName: string, subjectColor?: string) => Promise<void>;
   onReact: (sessionId: number, emoji: string) => Promise<void>;
   onComment: (sessionId: number, content: string) => Promise<void>;
   onJumpToFocus: () => void;
@@ -33,11 +36,37 @@ function formatDurationBadge(sec: number) {
   return `${mins}m`;
 }
 
-export function FeedView({ themeId = 'shadcn-dark', feed, onReact, onComment, onJumpToFocus }: FeedViewProps) {
+export function FeedView({
+  themeId = 'shadcn-dark',
+  feed,
+  currentUserId,
+  subjects = [],
+  onUpdateSessionTopic,
+  onReact,
+  onComment,
+  onJumpToFocus,
+}: FeedViewProps) {
   const [filter, setFilter] = useState<'all' | 'friends'>('all');
   const [openCommentsId, setOpenCommentsId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [editingTopicId, setEditingTopicId] = useState<number | null>(null);
+  const [topicInput, setTopicInput] = useState('');
+  const [topicColor, setTopicColor] = useState<string | undefined>(undefined);
+  const [savingTopicId, setSavingTopicId] = useState<number | null>(null);
+
+  async function saveFeedTopic(sessionId: number, customName?: string, customColor?: string) {
+    if (!onUpdateSessionTopic) return;
+    const nextName = (customName ?? topicInput).trim().slice(0, 40);
+    if (!nextName || savingTopicId === sessionId) return;
+    setSavingTopicId(sessionId);
+    try {
+      await onUpdateSessionTopic(sessionId, nextName, customColor ?? topicColor);
+      setEditingTopicId(null);
+    } finally {
+      setSavingTopicId(null);
+    }
+  }
 
   const themeMeta = getThemeMeta(themeId);
 
@@ -152,10 +181,89 @@ export function FeedView({ themeId = 'shadcn-dark', feed, onReact, onComment, on
                     </div>
                   </div>
 
-                  <span className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold">
-                    {item.subjectName}
-                  </span>
+                  {currentUserId && item.userId === currentUserId && onUpdateSessionTopic ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingTopicId === item.id) {
+                          setEditingTopicId(null);
+                        } else {
+                          setEditingTopicId(item.id);
+                          setTopicInput(item.subjectName);
+                          setTopicColor(item.subjectColor);
+                        }
+                      }}
+                      title="Change topic"
+                      className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer hover:opacity-90"
+                    >
+                      <span>{item.subjectName}</span>
+                      <Pencil className="w-2.5 h-2.5 opacity-75" />
+                    </button>
+                  ) : (
+                    <span className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold">
+                      {item.subjectName}
+                    </span>
+                  )}
                 </div>
+
+                {editingTopicId === item.id && onUpdateSessionTopic && (
+                  <div className="mb-3 p-2.5 rounded-2xl sp-inset border border-white/15 space-y-2">
+                    {subjects.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {subjects.map((sub) => (
+                          <button
+                            key={sub.id}
+                            type="button"
+                            disabled={savingTopicId === item.id}
+                            onClick={() => saveFeedTopic(item.id, sub.name, sub.color)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                              sub.name.toLowerCase() === item.subjectName.toLowerCase()
+                                ? 'sp-tab-active'
+                                : 'sp-badge hover:opacity-90'
+                            }`}
+                          >
+                            {sub.icon} {sub.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveFeedTopic(item.id);
+                      }}
+                      className="flex items-center gap-1.5"
+                    >
+                      <input
+                        type="text"
+                        maxLength={40}
+                        value={topicInput}
+                        onChange={(e) => {
+                          setTopicInput(e.target.value);
+                          setTopicColor(undefined);
+                        }}
+                        placeholder="Custom topic name..."
+                        className="flex-1 px-2.5 py-1.5 rounded-xl sp-input text-xs"
+                      />
+                      <button
+                        type="submit"
+                        disabled={savingTopicId === item.id || !topicInput.trim()}
+                        className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>{savingTopicId === item.id ? 'Saving...' : 'Save'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingTopicId(null)}
+                        className="p-1.5 rounded-xl sp-badge text-slate-300 hover:text-white cursor-pointer"
+                        aria-label="Cancel topic edit"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  </div>
+                )}
 
                 {/* Strava-style Session Stat Strip */}
                 <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl sp-inset mb-3">

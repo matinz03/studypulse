@@ -15,6 +15,8 @@ import {
   BarChart3,
   ShoppingBag,
   LayoutGrid,
+  Pencil,
+  X,
 } from 'lucide-react';
 import {
   Achievement,
@@ -38,6 +40,7 @@ interface ProfileViewProps {
   heatmap365?: HeatmapDay[];
   prevWeekMins?: number;
   todayTimeline?: TodayTimelineItem[];
+  studyLogs?: TodayTimelineItem[];
   weekTrend: WeekDay[];
   hourlyDistribution: number[];
   peakWindowLabel: string;
@@ -47,6 +50,7 @@ interface ProfileViewProps {
   game: GameState;
   achievements: Achievement[];
   onUpdateProfile: (payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) => Promise<void>;
+  onUpdateSessionTopic?: (sessionId: number, subjectName: string, subjectColor?: string) => Promise<void>;
   onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
   onRerollDailyShop: () => Promise<void>;
   onEquipGameItem: (itemId: number) => Promise<void>;
@@ -71,6 +75,7 @@ export function ProfileView({
   heatmap365,
   prevWeekMins = 0,
   todayTimeline = [],
+  studyLogs = [],
   weekTrend,
   hourlyDistribution,
   peakWindowLabel,
@@ -80,6 +85,7 @@ export function ProfileView({
   game,
   achievements,
   onUpdateProfile,
+  onUpdateSessionTopic,
   onBuyShopItem,
   onRerollDailyShop,
   onEquipGameItem,
@@ -93,6 +99,27 @@ export function ProfileView({
   const [saving, setSaving] = useState(false);
   const [heatRange, setHeatRange] = useState<'90' | '365'>('90');
   const [section, setSection] = useState<MeSection>('all');
+  const [logScope, setLogScope] = useState<'today' | 'all'>(() => (todayTimeline.length > 0 ? 'today' : 'all'));
+  const [editingLogId, setEditingLogId] = useState<number | null>(null);
+  const [logTopicInput, setLogTopicInput] = useState('');
+  const [logTopicColor, setLogTopicColor] = useState<string | undefined>(undefined);
+  const [savingLogId, setSavingLogId] = useState<number | null>(null);
+
+  const allLogs = studyLogs.length > 0 ? studyLogs : [...todayTimeline].reverse();
+  const visibleLogs = logScope === 'today' ? todayTimeline : allLogs;
+
+  async function saveLogTopic(sessionId: number, customName?: string, customColor?: string) {
+    if (!onUpdateSessionTopic) return;
+    const nextName = (customName ?? logTopicInput).trim().slice(0, 40);
+    if (!nextName || savingLogId === sessionId) return;
+    setSavingLogId(sessionId);
+    try {
+      await onUpdateSessionTopic(sessionId, nextName, customColor ?? logTopicColor);
+      setEditingLogId(null);
+    } finally {
+      setSavingLogId(null);
+    }
+  }
 
   const themeMeta = getThemeMeta(themeId);
   const activeHeatmap = heatRange === '365' && heatmap365?.length ? heatmap365 : heatmap;
@@ -601,14 +628,34 @@ export function ProfileView({
         </div>
       )}
 
-      {/* 4. YPT DAILY TIMELINE RECEIPT & DATA EXPORTS */}
+      {/* 4. YPT STUDY LOGS, DAILY RECEIPT & DATA EXPORTS */}
       {(section === 'all' || section === 'receipt') && (
         <div className="glass-card rounded-3xl p-4 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <Receipt className="w-3.5 h-3.5" /> Daily Focus Receipt & Exports
+              <Receipt className="w-3.5 h-3.5" /> Study Logs, Receipt &amp; Exports
             </h3>
             <div className="flex flex-wrap items-center gap-1.5">
+              <div className="p-0.5 rounded-xl sp-inset flex items-center gap-0.5 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setLogScope('today')}
+                  className={`px-2 py-0.5 rounded-lg cursor-pointer transition ${
+                    logScope === 'today' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Today ({todayTimeline.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLogScope('all')}
+                  className={`px-2 py-0.5 rounded-lg cursor-pointer transition ${
+                    logScope === 'all' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All Logs ({allLogs.length})
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={downloadReceiptPng}
@@ -640,28 +687,124 @@ export function ProfileView({
             </div>
           </div>
 
-          {todayTimeline.length === 0 ? (
+          {visibleLogs.length === 0 ? (
             <div className="p-2.5 rounded-xl sp-inset text-[11px] text-slate-400">
-              Finish a session today to generate chronological YPT receipt blocks.
+              {logScope === 'today'
+                ? 'No sessions recorded today yet. Switch to "All Logs" to inspect or re-tag earlier study sessions.'
+                : 'Finish a study session to generate chronological receipt blocks and editable logs.'}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {todayTimeline.slice(0, 8).map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-2 p-2 rounded-xl sp-inset text-[11px]"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono-num text-[10px] text-slate-400 shrink-0">
-                      {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <span className="font-bold text-white truncate">{item.subjectName}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto glass-scroll pr-0.5">
+              {visibleLogs.map((item) => {
+                const isEditingRow = editingLogId === item.id;
+                const d = new Date(item.createdAt);
+                const stamp =
+                  logScope === 'all'
+                    ? `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-2 rounded-xl sp-inset text-[11px] space-y-1.5 border transition ${
+                      isEditingRow ? 'sm:col-span-2 border-white/25' : 'border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono-num text-[10px] text-slate-400 shrink-0">{stamp}</span>
+                        {onUpdateSessionTopic ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isEditingRow) {
+                                setEditingLogId(null);
+                              } else {
+                                setEditingLogId(item.id);
+                                setLogTopicInput(item.subjectName);
+                                setLogTopicColor(item.subjectColor);
+                              }
+                            }}
+                            title="Change topic"
+                            className="inline-flex items-center gap-1 font-bold text-white hover:underline cursor-pointer truncate min-w-0"
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: resolveAccent(item.subjectColor, themeId) }}
+                            />
+                            <span className="truncate">{item.subjectName}</span>
+                            <Pencil className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                          </button>
+                        ) : (
+                          <span className="font-bold text-white truncate">{item.subjectName}</span>
+                        )}
+                      </div>
+                      <span className="font-mono-num text-[10px] text-slate-300 shrink-0">
+                        {Math.max(1, Math.round(item.durationSec / 60))}m · {item.purityPct}%
+                      </span>
+                    </div>
+
+                    {isEditingRow && onUpdateSessionTopic && (
+                      <div className="pt-1.5 border-t border-white/10 space-y-1.5">
+                        {subjects.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {subjects.map((sub) => (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                disabled={savingLogId === item.id}
+                                onClick={() => saveLogTopic(item.id, sub.name, sub.color)}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                                  sub.name.toLowerCase() === item.subjectName.toLowerCase()
+                                    ? 'sp-tab-active'
+                                    : 'sp-badge hover:opacity-90'
+                                }`}
+                              >
+                                {sub.icon} {sub.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            saveLogTopic(item.id);
+                          }}
+                          className="flex items-center gap-1.5"
+                        >
+                          <input
+                            type="text"
+                            maxLength={40}
+                            value={logTopicInput}
+                            onChange={(e) => {
+                              setLogTopicInput(e.target.value);
+                              setLogTopicColor(undefined);
+                            }}
+                            placeholder="Custom topic name..."
+                            className="flex-1 px-2.5 py-1 rounded-lg sp-input text-[11px]"
+                          />
+                          <button
+                            type="submit"
+                            disabled={savingLogId === item.id || !logTopicInput.trim()}
+                            className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{savingLogId === item.id ? 'Saving...' : 'Save'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingLogId(null)}
+                            className="p-1 rounded-lg sp-badge text-slate-300 hover:text-white cursor-pointer"
+                            aria-label="Cancel topic edit"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </form>
+                      </div>
+                    )}
                   </div>
-                  <span className="font-mono-num text-[10px] text-slate-300 shrink-0">
-                    {Math.max(1, Math.round(item.durationSec / 60))}m · {item.purityPct}%
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

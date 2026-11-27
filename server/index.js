@@ -846,6 +846,20 @@ function buildBootstrap(userId) {
     }
   }
 
+  const studyLogs = mySessions
+    .slice(-100)
+    .reverse()
+    .map((s) => ({
+      id: s.id,
+      subjectName: s.subject_name,
+      subjectColor: s.subject_color,
+      mode: s.mode,
+      durationSec: s.duration_sec,
+      purityPct: s.purity_pct,
+      note: s.note,
+      createdAt: s.created_at,
+    }));
+
   const hourlyDistribution = hourSec.map((sec) => Math.round(sec / 60));
   let peakHour = 0;
   let peakMin = 0;
@@ -980,6 +994,7 @@ function buildBootstrap(userId) {
     activeDuel,
     prevWeekMins: Math.round(prevWeekSec / 60),
     todayTimeline,
+    studyLogs,
     vapidPublicKey: vapidKeys.publicKey,
     directory,
     leaderboards: {
@@ -1632,6 +1647,52 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     newStreak: nextStreak,
     usedFreeze,
     gameRewards,
+  });
+});
+
+app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
+  const sessionId = Number(req.params.id);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const existing = db.prepare('SELECT id, user_id, subject_color FROM study_sessions WHERE id = ?').get(sessionId);
+  if (!existing) {
+    return res.status(404).json({ error: 'Study session not found' });
+  }
+  if (existing.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'You can only edit your own study logs' });
+  }
+
+  const subjectName = String(req.body?.subjectName || '').trim().slice(0, 40);
+  if (!subjectName) {
+    return res.status(400).json({ error: 'Topic cannot be empty' });
+  }
+
+  let subjectColor = '';
+  if (/^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '')) {
+    subjectColor = req.body.subjectColor;
+  } else {
+    const matchedSubject = db
+      .prepare('SELECT color FROM subjects WHERE user_id = ? AND LOWER(name) = LOWER(?) LIMIT 1')
+      .get(req.user.id, subjectName);
+    subjectColor = matchedSubject?.color || existing.subject_color || '#10B981';
+  }
+
+  db.prepare('UPDATE study_sessions SET subject_name = ?, subject_color = ? WHERE id = ? AND user_id = ?').run(
+    subjectName,
+    subjectColor,
+    sessionId,
+    req.user.id
+  );
+
+  res.json({
+    ok: true,
+    session: {
+      id: sessionId,
+      subjectName,
+      subjectColor,
+    },
   });
 });
 
