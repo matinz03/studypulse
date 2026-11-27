@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   Timer,
   Users,
@@ -7,8 +7,9 @@ import {
   Flame,
   User as UserIcon,
   Coins,
-  Radio,
-  Zap,
+  ArrowRight,
+  AudioLines,
+  ChevronRight,
   Bell,
   BellRing,
   PictureInPicture2,
@@ -187,13 +188,21 @@ export function App() {
   const [tab, setTab] = useState<TabKey>('focus');
   const [themeId, setThemeId] = useState<ThemeId>(() => {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    return isValidThemeId(saved) ? saved : 'shadcn-dark';
+    return isValidThemeId(saved) ? saved : 'sage-dark';
   });
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [tab]);
+
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeId);
-    document.documentElement.setAttribute('data-light', String(getThemeMeta(themeId).light));
+    const theme = getThemeMeta(themeId);
+    document.documentElement.setAttribute('data-light', String(theme.light));
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.preview.bg);
     localStorage.setItem(THEME_STORAGE_KEY, themeId);
   }, [themeId]);
 
@@ -1658,73 +1667,51 @@ export function App() {
     );
   }
 
-  const navItems: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { key: 'focus', label: 'Focus', icon: Timer },
-    { key: 'quest', label: 'Quest', icon: Swords },
-    { key: 'rooms', label: 'Rooms', icon: Users },
-    { key: 'compete', label: 'Compete', icon: Trophy },
-    { key: 'feed', label: 'Feed', icon: Flame },
-    { key: 'me', label: 'Me', icon: UserIcon },
+  const navItems: {
+    key: TabKey;
+    label: string;
+    title: string;
+    icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  }[] = [
+    { key: 'focus', label: 'Focus', title: 'Focus studio', icon: Timer },
+    { key: 'quest', label: 'Quest', title: 'Quest', icon: Swords },
+    { key: 'rooms', label: 'Rooms', title: 'Study rooms', icon: Users },
+    { key: 'compete', label: 'Compete', title: 'Competition', icon: Trophy },
+    { key: 'feed', label: 'Feed', title: 'Activity feed', icon: AudioLines },
+    { key: 'me', label: 'Profile', title: 'Your profile', icon: UserIcon },
   ];
 
-  const user = data.user;
+  const { user } = data;
+  const currentPage = navItems.find((item) => item.key === tab)!;
+  const showMiniTimer = tab !== 'focus' && (isRunning || elapsedSec > 0);
+  const miniTimer = formatClock(
+    mode === 'stopwatch' ? elapsedSec : Math.max(0, getTargetSec(mode, customMins, bonusSec) - elapsedSec)
+  );
 
   return (
-    <div className="min-h-[100dvh] w-full relative">
-      {/* Hidden SVG Displacement Filter for Liquid Glass Refraction */}
-      <svg aria-hidden="true" className="hidden" width="0" height="0">
-        <defs>
-          <filter id="liquid-refraction" x="-10%" y="-10%" width="120%" height="120%">
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.012 0.018"
-              numOctaves="2"
-              seed="7"
-              result="noise"
-            />
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale="2"
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-          </filter>
-        </defs>
-      </svg>
-
-      {/* Monochrome Spatial Backdrop */}
-      <div className="aurora-bg">
-        <div className="aurora-orb-a" />
-        <div className="aurora-orb-b" />
-      </div>
-
-      {/* Live Toast Notifications (Mobile Snackbar above fixed dock) */}
-      <div
-        aria-live="polite"
-        className="fixed bottom-24 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[110] w-[calc(100vw-24px)] max-w-[440px] flex flex-col items-center gap-2 pointer-events-none px-2"
-      >
+    <div className="studio-shell">
+      <a className="studio-skip" href="#workspace">Skip to content</a>
+      <div className="studio-toasts" aria-live="polite">
         <AnimatePresence>
-          {toasts.map((t) => (
+          {toasts.map((toast) => (
             <motion.div
-              key={t.id}
-              initial={{ opacity: 0, y: -16, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -12, scale: 0.94 }}
-              className="pointer-events-auto px-4 py-2 rounded-full liquid-dock text-xs font-bold text-white flex items-center gap-3"
+              key={toast.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="studio-toast"
             >
-              <span>{t.text}</span>
-              {t.actionLabel && t.onAction && (
+              <span>{toast.text}</span>
+              {toast.actionLabel && toast.onAction && (
                 <button
                   type="button"
                   onClick={() => {
-                    const fn = t.onAction;
-                    setToasts((prev) => prev.filter((x) => x.id !== t.id));
-                    fn?.();
+                    setToasts((prev) => prev.filter((item) => item.id !== toast.id));
+                    toast.onAction?.();
                   }}
-                  className="px-2.5 py-0.5 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+                  className="sp-btn-primary px-3 py-2 cursor-pointer"
                 >
-                  {t.actionLabel}
+                  {toast.actionLabel}
                 </button>
               )}
             </motion.div>
@@ -1732,174 +1719,118 @@ export function App() {
         </AnimatePresence>
       </div>
 
-      {/* Main Responsive Container (Mobile Single Column -> Desktop Wide Bento Workspace + Companion Panel) */}
-      <div className="max-w-6xl mx-auto lg:grid lg:grid-cols-[minmax(0,560px)_minmax(0,340px)] lg:justify-center lg:gap-6 lg:px-6">
-        {/* Primary Mobile-First & Tablet/Desktop Bento Column */}
-        <div className="w-full max-w-[560px] mx-auto min-h-[100dvh] flex flex-col relative z-10">
-          {/* Floating Shadcn Glass Header + Out-of-Browser Hover Bar */}
-          <header className="sticky top-2 z-30 mx-3 sm:mx-4 mt-2 pt-safe px-3.5 py-2 rounded-xl liquid-dock">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <button
-                  type="button"
-                  onClick={() => setTab('me')}
-                  className="w-9 h-9 rounded-lg sp-inset border flex items-center justify-center text-lg shrink-0 cursor-pointer"
-                  style={{ borderColor: resolveAccent(user.themeColor, themeId) }}
-                >
-                  {user.avatar}
-                </button>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-extrabold text-white truncate">{user.displayName}</span>
-                    <span className="px-1.5 py-0.5 rounded-md sp-badge text-[10px] font-bold">
-                      Lv.{user.level}
-                    </span>
-                  </div>
-                  <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden mt-1">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${user.levelProgressPct}%`, backgroundColor: 'var(--sp-accent)' }}
-                    />
-                  </div>
-                </div>
-              </div>
+      <aside className="studio-sidebar">
+        <button type="button" className="studio-brand studio-desktop-brand" onClick={() => setTab('focus')}>
+          <span className="studio-mark"><AudioLines aria-hidden="true" /></span>
+          <span>StudyPulse</span>
+        </button>
+        <nav className="studio-nav" aria-label="Primary navigation">
+          {navItems.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              aria-current={tab === key ? 'page' : undefined}
+              onClick={() => setTab(key)}
+              className="studio-nav-item"
+            >
+              <Icon aria-hidden={true} />
+              <span>{label}</span>
+              {key === 'rooms' && data.onlineCount > 0 && <i className="studio-online-dot" aria-hidden="true" />}
+            </button>
+          ))}
+        </nav>
+        <button type="button" className="studio-account" onClick={() => setTab('me')} aria-label="Open your profile">
+          <span className="studio-avatar" style={{ borderColor: resolveAccent(user.themeColor, themeId) }}>
+            {user.avatar}
+          </span>
+          <span className="studio-account-text">
+            <strong>{user.displayName}</strong>
+            <small>Level {user.level}</small>
+          </span>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>
+      </aside>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span
-                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1"
-                  title="Study streak"
-                >
-                  <Flame className="w-3.5 h-3.5 opacity-80" />
-                  <span className="font-mono-num">{user.streakDays}</span>
-                </span>
-                <span
-                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1"
-                  title="Focus coins"
-                >
-                  <Coins className="w-3.5 h-3.5 opacity-80" />
-                  <span className="font-mono-num">{user.coins}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setTab('rooms')}
-                  className="px-2 py-1 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                  title="Live online studiers"
-                >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full animate-pulse"
-                    style={{ backgroundColor: 'var(--sp-accent)' }}
-                  />
-                  <span className="font-mono-num">{data.onlineCount}</span>
+      <div className="studio-workspace">
+        <header className="studio-topbar">
+          <button type="button" className="studio-brand studio-mobile-brand" onClick={() => setTab('focus')}>
+            <span className="studio-mark"><AudioLines aria-hidden="true" /></span>
+            <span>StudyPulse</span>
+          </button>
+          <div className="studio-location">
+            <span>Workspace</span>
+            <ChevronRight size={13} aria-hidden="true" />
+            <span>{currentPage.label}</span>
+          </div>
+          <div className="studio-toolbar">
+            {showMiniTimer && (
+              <div className="studio-mini-timer">
+                <button type="button" onClick={() => setTab('focus')} aria-label={`Back to timer, ${miniTimer}`}>
+                  <Timer size={15} aria-hidden="true" />
+                  <span className="font-mono-num">{miniTimer}</span>
+                </button>
+                <button type="button" onClick={handleToggleRun} aria-label={isRunning ? 'Pause timer' : 'Resume timer'}>
+                  {isRunning ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
                 </button>
               </div>
-            </div>
+            )}
+            <button
+              type="button"
+              className="studio-icon-button"
+              onClick={handleTogglePip}
+              aria-label="Floating timer"
+              aria-pressed={pipActive}
+              title="Floating timer"
+            >
+              <PictureInPicture2 size={17} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="studio-icon-button"
+              onClick={handleEnableAlerts}
+              aria-label={pushEnabled ? 'Timer notifications enabled' : 'Enable timer notifications'}
+              title={pushEnabled ? 'Notifications enabled' : 'Enable notifications'}
+            >
+              {pushEnabled ? <BellRing size={17} aria-hidden="true" /> : <Bell size={17} aria-hidden="true" />}
+            </button>
+            <button
+              type="button"
+              className="studio-icon-button"
+              onClick={() => setShowThemeModal(true)}
+              aria-label="Select theme"
+              title="Select theme"
+            >
+              <Palette size={17} aria-hidden="true" />
+            </button>
+            {installPrompt && (
+              <button type="button" className="studio-icon-button" onClick={handleInstallApp} aria-label="Install StudyPulse" title="Install StudyPulse">
+                <Download size={17} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </header>
 
-            {/* Top Hover Navlink & Utility Strip */}
-            <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-between gap-1.5">
-              {tab !== 'focus' && (isRunning || elapsedSec > 0) ? (
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => setTab('focus')}
-                    className="px-2.5 py-1 rounded-full sp-badge hover:opacity-90 text-[10px] font-extrabold flex items-center gap-1.5 truncate cursor-pointer"
-                    title="Jump back to Focus timer"
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRunning ? 'animate-pulse' : 'opacity-50'}`}
-                      style={{ backgroundColor: 'var(--sp-accent)' }}
-                    />
-                    <span className="font-mono-num">
-                      {formatClock(
-                        mode === 'stopwatch'
-                          ? elapsedSec
-                          : Math.max(0, getTargetSec(mode, customMins, bonusSec) - elapsedSec)
-                      )}
-                    </span>
-                    <span className="truncate text-slate-300">• {activeSubject.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleToggleRun}
-                    className="w-6 h-6 rounded-full sp-btn-primary flex items-center justify-center shrink-0 cursor-pointer"
-                    title={isRunning ? 'Pause timer' : 'Resume timer'}
-                  >
-                    {isRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setTab('focus')}
-                  className="text-[10px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 min-w-0 truncate cursor-pointer"
+        <main className="studio-main" id="workspace" tabIndex={-1} data-page={tab}>
+          <div className="studio-page-heading">
+            <h1>{currentPage.title}</h1>
+            {tab === 'focus' && (
+              <button type="button" className="studio-live-link" onClick={() => setTab('rooms')}>
+                <i className="studio-online-dot" aria-hidden="true" />
+                {data.onlineCount} studying now
+                <ArrowRight size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <div className="studio-content">
+            <div className="studio-primary">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={tab}
+                  initial={{ opacity: 0, y: reduceMotion ? 0 : 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.14 }}
                 >
-                  <Zap className="w-3 h-3 shrink-0 opacity-80" />
-                  <span className="truncate">
-                    {pipActive ? 'Floating above apps' : isRunning ? `${getModeLabel(mode)} live` : 'Top Hover HUD Ready'}
-                  </span>
-                </button>
-              )}
-
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleTogglePip}
-                  className={`px-2 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                    pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
-                  }`}
-                  title="Pop out always-on-top mini window (stays visible outside browser)"
-                >
-                  <PictureInPicture2 className="w-3 h-3" />
-                  <span>{pipActive ? 'Floating' : 'Float'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleEnableAlerts}
-                  className={`px-2 py-1 rounded-full border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                    pushEnabled ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
-                  }`}
-                  title="Enable lock-screen & closed-browser Time-Up notifications"
-                >
-                  {pushEnabled ? <BellRing className="w-3 h-3" /> : <Bell className="w-3 h-3" />}
-                  <span>{pushEnabled ? 'Alerts On' : 'Alerts'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowThemeModal(true)}
-                  aria-label="Select theme"
-                  title="Select UI theme"
-                  className="px-2 py-1 rounded-full sp-badge hover:opacity-90 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
-                >
-                  <Palette className="w-3 h-3" />
-                  <span>Theme</span>
-                </button>
-
-                {installPrompt && (
-                  <button
-                    type="button"
-                    onClick={handleInstallApp}
-                    className="px-2 py-1 rounded-full sp-btn-primary text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                    title="Install StudyPulse as standalone app"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>App</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </header>
-
-          {/* Scrollable Active Tab Content */}
-          <main className="flex-1 px-3.5 sm:px-4 pt-3 pb-32">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={tab}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.16 }}
-              >
                 {tab === 'focus' && (
                   <FocusView
                     themeId={themeId}
@@ -2104,199 +2035,87 @@ export function App() {
                     />
                   </Suspense>
                 )}
-              </motion.div>
-            </AnimatePresence>
-          </main>
-        </div>
-
-        {/* Desktop Companion Sidebar (>= 1024px) */}
-        <aside className="hidden lg:flex flex-col gap-4 py-6 sticky top-0 h-[100dvh] overflow-y-auto no-scrollbar z-10">
-          <div className="glass-card rounded-3xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 animate-pulse" /> Live Study Pulse
-              </span>
-              <span className="font-mono-num text-xs font-semibold text-slate-400">
-                {data.onlineCount} studying now
-              </span>
+                </motion.div>
+              </AnimatePresence>
             </div>
-            <div className="space-y-2 max-h-64 overflow-y-auto glass-scroll pr-1">
-              {data.rooms.map((r) => {
-                const selected = r.id === selectedRoomId;
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedRoomId(r.id);
-                      setTab('rooms');
-                    }}
-                    className={`w-full p-2.5 rounded-2xl border flex items-center justify-between text-left cursor-pointer transition ${
-                      selected
-                        ? 'sp-tab-active'
-                        : 'sp-inset hover:border-white/25'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-lg">{r.icon}</span>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate flex items-center gap-1">
-                          {r.isPrivate && <Lock className="w-3 h-3 opacity-75 shrink-0" />}
-                          <span className="truncate">{r.name}</span>
-                        </div>
-                        <div className="text-[10px] text-slate-400 truncate">{r.topic}</div>
-                      </div>
+
+            {tab === 'focus' && (
+              <aside className="studio-companion" aria-label="Study overview">
+                <section className="studio-panel studio-overview">
+                  <h2>Your progress</h2>
+                  <dl>
+                    <div>
+                      <dt><Flame size={15} aria-hidden="true" /> Streak</dt>
+                      <dd>{user.streakDays} <span>{user.streakDays === 1 ? 'day' : 'days'}</span></dd>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full sp-badge font-mono-num text-[11px] font-bold shrink-0">
-                      {r.activeCount} live
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                    <div>
+                      <dt><Coins size={15} aria-hidden="true" /> Focus coins</dt>
+                      <dd>{user.coins.toLocaleString()}</dd>
+                    </div>
+                  </dl>
+                </section>
 
-          <div className="glass-card rounded-3xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5" /> Weekly Top 5
-                <span className="text-[9px] font-bold text-slate-400 normal-case tracking-normal">(Mon–Sun)</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setTab('compete')}
-                className="text-[11px] font-semibold text-slate-300 hover:text-white hover:underline cursor-pointer"
-              >
-                Full Standings
-              </button>
-            </div>
-            <div className="space-y-2">
-              {data.leaderboards.week.slice(0, 5).map((e) => (
-                <div
-                  key={e.id}
-                  className={`flex items-center justify-between p-2 rounded-xl border ${
-                    e.isSelf ? 'sp-tab-active' : 'sp-inset border-white/5'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-5 text-[11px] font-mono-num font-bold text-slate-400">#{e.rank}</span>
-                    <span className="text-base">{e.avatar}</span>
-                    <span className="text-xs font-bold text-white truncate">{e.displayName}</span>
+                <section className="studio-panel studio-rooms">
+                  <div className="studio-panel-heading">
+                    <h2>Study rooms</h2>
+                    <button type="button" onClick={() => setTab('rooms')} className="studio-text-button">View all <ArrowRight size={13} aria-hidden="true" /></button>
                   </div>
-                  <span className="font-mono-num text-xs font-bold text-white">
-                    {(e.minutes / 60).toFixed(1)}h
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+                  <div className="studio-room-list">
+                    {data.rooms.slice(0, 3).map((room) => (
+                      <button
+                        key={room.id}
+                        type="button"
+                        className="studio-room"
+                        onClick={() => {
+                          if (!room.locked) setSelectedRoomId(room.id);
+                          setTab('rooms');
+                        }}
+                      >
+                        <span className="studio-room-icon" aria-hidden="true">{room.icon}</span>
+                        <span className="studio-room-name">
+                          <strong>{room.isPrivate && <Lock size={12} aria-hidden="true" />}{room.name}</strong>
+                          <small>{room.topic}</small>
+                        </span>
+                        <span className="studio-room-count">{room.activeCount} live</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
 
-          <div className="glass-card rounded-3xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <span>{data.game.shadowSlave?.aspect.icon || '🌑'}</span>
-                <span>{data.game.shadowSlave ? `[${data.game.shadowSlave.aspect.name}]` : 'Nightmare Vessel'}</span>
-              </span>
-              <span className="font-mono-num text-[11px] font-bold text-slate-300">
-                {data.game.shadowSlave
-                  ? `${data.game.shadowSlave.rank} ${data.game.shadowSlave.coreClass.name}`
-                  : `Act ${data.game.story.chapter}`}
-              </span>
-            </div>
-            {data.game.shadowSlave && (
-              <div className="text-[10px] font-bold text-amber-200 mb-2 truncate">
-                [{data.game.shadowSlave.trueName}] • {data.game.shadowSlave.currentAct.title}
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-1.5 text-center mb-2.5">
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-white">
-                  ✦ {data.game.profile.shards}
-                </div>
-                <div className="text-[9px] text-slate-400">Shards</div>
-              </div>
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-sky-300">
-                  ⚡ {data.game.shadowSlave?.soulEssence ?? 75}
-                </div>
-                <div className="text-[9px] text-slate-400">Essence</div>
-              </div>
-              <div className="p-2 rounded-xl sp-inset">
-                <div className="font-mono-num text-xs font-extrabold text-purple-300">
-                  💎 {data.game.shadowSlave?.soulFragments ?? 0}
-                </div>
-                <div className="text-[9px] text-slate-400">Fragments</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setTab('quest')}
-              className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer"
-            >
-              Enter 3D Nightmare Realm ⚔️
-            </button>
-          </div>
+                <section className="studio-quest">
+                  <Swords size={19} aria-hidden="true" />
+                  <h2>Quest</h2>
+                  <p>{data.game.shadowSlave?.currentAct.title ?? `Act ${data.game.story.chapter}`}</p>
+                  <button type="button" onClick={() => setTab('quest')}>
+                    Enter quest <ArrowRight size={15} aria-hidden="true" />
+                  </button>
+                </section>
 
-          {isRunning && (
-            <div className="glass-card rounded-3xl p-4 border sp-tab-active">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Active Focus Session
-              </div>
-              <div className="font-mono-num text-2xl font-extrabold text-white mt-1">
-                {formatClock(elapsedSec)} • {activeSubject.name}
-              </div>
-            </div>
-          )}
-        </aside>
-      </div>
-
-      {/* Soft Bottom Vignette Scrim behind Fixed Dock */}
-      <div
-        aria-hidden="true"
-        className="fixed bottom-0 inset-x-0 h-24 sp-scrim-bottom pointer-events-none z-[90]"
-      />
-
-      {/* True Viewport-Locked Fixed Shadcn Glass Bottom Dock */}
-      <nav
-        aria-label="Primary Navigation"
-        className="fixed bottom-3 left-1/2 lg:left-[calc(50%-182px)] -translate-x-1/2 z-[100] w-[calc(100vw-24px)] max-w-[480px]"
-      >
-        <div className="liquid-dock liquid-dock-lens rounded-xl p-1 grid grid-cols-6 gap-0.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = tab === item.key;
-            const hasLiveRooms = item.key === 'rooms' && data.onlineCount > 0;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setTab(item.key)}
-                className={`relative py-2 px-0.5 rounded-lg flex flex-col items-center justify-center gap-0.5 cursor-pointer transition ${
-                  active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {active && (
-                  <motion.div
-                    layoutId="navActivePill"
-                    transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                    className="absolute inset-0 rounded-lg sp-tab-active"
-                  />
-                )}
-                <div className="relative z-10">
-                  <Icon className="w-4 h-4" />
-                  {hasLiveRooms && (
-                    <span
-                      className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full"
-                      style={{ backgroundColor: 'var(--sp-accent)' }}
-                    />
+                <section className="studio-panel studio-standings">
+                  <div className="studio-panel-heading">
+                    <h2>Weekly standings</h2>
+                    <button type="button" onClick={() => setTab('compete')} className="studio-text-button">View all <ArrowRight size={13} aria-hidden="true" /></button>
+                  </div>
+                  {data.leaderboards.week.length === 0 ? (
+                    <p className="studio-empty">No study time logged this week.</p>
+                  ) : (
+                    <ol>
+                      {data.leaderboards.week.slice(0, 5).map((entry) => (
+                        <li key={entry.id}>
+                          <span>{entry.rank}</span>
+                          <span aria-hidden="true">{entry.avatar}</span>
+                          <strong>{entry.displayName}</strong>
+                          <span>{(entry.minutes / 60).toFixed(1)}h</span>
+                        </li>
+                      ))}
+                    </ol>
                   )}
-                </div>
-                <span className="text-[9.5px] font-bold relative z-10 truncate max-w-full">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+                </section>
+              </aside>
+            )}
+          </div>
+        </main>
+      </div>
 
       {/* Session Completion Celebration Modal */}
       <AnimatePresence>

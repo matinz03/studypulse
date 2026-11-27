@@ -380,7 +380,7 @@ export function ProfileView({
   return (
     <div className="space-y-3">
       {/* 1. COMPACT IDENTITY & 4-TILE KPI BENTO HERO */}
-      <div className="glass-card rounded-3xl p-4 relative overflow-hidden space-y-3">
+      <div className="glass-card studio-profile-summary relative space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div
@@ -391,7 +391,7 @@ export function ProfileView({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-sm sm:text-base font-extrabold text-white truncate">{user.displayName}</h2>
+                <h2 className="studio-profile-name text-white truncate">{user.displayName}</h2>
                 <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">Lv.{user.level}</span>
               </div>
               <div className="text-[11px] text-slate-400 truncate">
@@ -622,23 +622,23 @@ export function ProfileView({
         )}
 
         {/* Unified 4-Tile KPI Bento Strip (Total Hours, Streak, Purity, Today's Goal Progress) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="studio-profile-metrics">
           <div className="p-2.5 rounded-2xl sp-inset text-center">
-            <div className="font-mono-num text-sm sm:text-base font-extrabold text-white">
+            <div className="studio-profile-stat text-white">
               {(user.totalMins / 60).toFixed(1)}h
             </div>
             <div className="text-[10px] text-slate-400">Total Focus</div>
           </div>
 
           <div className="p-2.5 rounded-2xl sp-inset text-center">
-            <div className="font-mono-num text-sm sm:text-base font-extrabold text-white flex items-center justify-center gap-1">
+            <div className="studio-profile-stat text-white flex items-center justify-center gap-1">
               <Flame className="w-3.5 h-3.5" /> {user.streakDays}d
             </div>
             <div className="text-[10px] text-slate-400">Current Streak</div>
           </div>
 
           <div className="p-2.5 rounded-2xl sp-inset text-center">
-            <div className="font-mono-num text-sm sm:text-base font-extrabold text-white">{user.avgPurity}%</div>
+            <div className="studio-profile-stat text-white">{user.avgPurity}%</div>
             <div className="text-[10px] text-slate-400">Avg Purity</div>
           </div>
 
@@ -666,25 +666,24 @@ export function ProfileView({
       </div>
 
       {/* 2. ME WORKSPACE SECTION FILTER BAR (All Bento | Analytics | Receipt & Data | Shop & Badges) */}
-      <div className="p-1 rounded-2xl glass-card grid grid-cols-4 gap-1">
+      <div className="studio-segments studio-profile-segments" role="group" aria-label="Profile sections">
         {(
           [
-            ['all', 'All Bento', LayoutGrid],
+            ['all', 'Overview', LayoutGrid],
             ['analytics', 'Analytics', BarChart3],
-            ['receipt', 'Receipt & Data', Receipt],
-            ['shop', 'Shop & Badges', ShoppingBag],
+            ['receipt', 'Study logs', Receipt],
+            ['shop', 'Rewards', ShoppingBag],
           ] as const
         ).map(([key, label, Icon]) => (
           <button
             key={key}
             type="button"
             onClick={() => setSection(key)}
-            className={`py-1.5 px-1.5 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition min-w-0 ${
-              section === key ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
-            }`}
+            aria-pressed={section === key}
+            className="focus-mode"
           >
-            <Icon className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{label}</span>
+            <Icon className="size-4 shrink-0" aria-hidden="true" />
+            <span>{label}</span>
           </button>
         ))}
       </div>

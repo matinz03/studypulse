@@ -119,14 +119,14 @@ export function CompeteView({
     <div className="space-y-4">
       {/* Weekly Tiered League Banner */}
       {league && (
-        <div className="glass-card rounded-3xl p-4 space-y-2">
+        <div className="studio-panel studio-league space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-10 h-10 rounded-2xl sp-inset flex items-center justify-center text-2xl shrink-0">
                 {league.tierIcon}
               </span>
               <div className="min-w-0">
-                <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                <div className="studio-league-title">
                   <span>{league.tierName} Sleeper Division</span>
                   <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-mono-num">
                     #{league.rankInLeague}
@@ -159,7 +159,7 @@ export function CompeteView({
 
       {/* Timeframe & Scope Header */}
       <div className="flex items-center justify-between gap-2">
-        <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl glass-card flex-1">
+        <div className="studio-segments studio-league-filters" role="group" aria-label="Leaderboard period">
           {(
             [
               ['today', 'Today'],
@@ -171,18 +171,10 @@ export function CompeteView({
               key={k}
               type="button"
               onClick={() => setTimeframe(k)}
-              className={`relative py-2 rounded-xl text-xs font-bold cursor-pointer transition ${
-                timeframe === k ? 'text-white' : 'text-slate-400'
-              }`}
+              aria-pressed={timeframe === k}
+              className="focus-mode"
             >
-              {timeframe === k && (
-                <motion.div
-                  layoutId="boardTimePill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-0 rounded-xl sp-tab-active"
-                />
-              )}
-              <span className="relative z-10">{label}</span>
+              {label}
             </button>
           ))}
         </div>
@@ -190,6 +182,7 @@ export function CompeteView({
         <button
           type="button"
           onClick={() => setScope((s) => (s === 'all' ? 'friends' : 'all'))}
+          aria-pressed={scope === 'friends'}
           className={`shrink-0 px-3 py-2.5 rounded-2xl text-xs font-bold border cursor-pointer transition ${
             scope === 'friends' ? 'sp-btn-primary' : 'glass-card hover:border-white/25'
           }`}

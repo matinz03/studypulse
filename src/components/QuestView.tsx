@@ -194,15 +194,15 @@ export function QuestView({
   return (
     <div className="space-y-3.5 pb-6">
       {/* Main Shadow Slave 3D Nightmare Realm & Soul Sea Cockpit */}
-      <div className="glass-card rounded-3xl p-4 space-y-3">
+      <div className="studio-panel studio-quest-world space-y-4">
         {/* Nightmare Spell Runes & Mode Toggle Header */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-200 flex items-center gap-1">
-                <span>{ss?.aspect.icon || '🌑'}</span>
+              <h2 className="studio-world-title">
+                <span aria-hidden="true">{ss?.aspect.icon || '🌑'}</span>
                 <span>Shadow Slave: The Forgotten Shore</span>
-              </span>
+              </h2>
               {overdriveActive && (
                 <span className="px-2 py-0.5 rounded-full bg-sky-500/25 border border-sky-400/60 text-sky-200 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
                   <Flame className="w-3 h-3 text-amber-300" />
@@ -222,24 +222,22 @@ export function QuestView({
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            <div className="p-0.5 rounded-xl sp-inset flex items-center gap-1">
+            <div className="studio-segments studio-world-modes" role="group" aria-label="Quest view">
               <button
                 type="button"
                 onClick={() => setView3dMode('dream_realm')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition ${
-                  view3dMode === 'dream_realm' ? 'sp-btn-primary text-white' : 'text-slate-300 hover:text-white'
-                }`}
+                aria-pressed={view3dMode === 'dream_realm'}
+                className="focus-mode"
               >
-                🌍 3D Dream Realm
+                Dream Realm
               </button>
               <button
                 type="button"
                 onClick={() => setView3dMode('soul_sea')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition ${
-                  view3dMode === 'soul_sea' ? 'sp-btn-primary text-white' : 'text-slate-300 hover:text-white'
-                }`}
+                aria-pressed={view3dMode === 'soul_sea'}
+                className="focus-mode"
               >
-                🌊 Dive into Soul Sea
+                Soul Sea
               </button>
             </div>
             <button
@@ -249,7 +247,8 @@ export function QuestView({
                 soundEngine.setSfxMuted(next);
                 setSfxMuted(next);
               }}
-              className="p-1.5 rounded-lg sp-badge cursor-pointer"
+              className="studio-icon-button"
+              aria-label={sfxMuted ? 'Unmute quest sounds' : 'Mute quest sounds'}
               title={sfxMuted ? 'Unmute RPG SFX' : 'Mute RPG SFX'}
             >
               {sfxMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -257,9 +256,9 @@ export function QuestView({
             <button
               type="button"
               onClick={onGoToFocus}
-              className="px-2.5 py-1 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+              className="focus-action-secondary"
             >
-              ⚡ Study for Essence
+              Study for essence
             </button>
           </div>
         </div>

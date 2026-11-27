@@ -88,7 +88,7 @@ export function RoomsView({
 }: RoomsViewProps) {
   const [nowMs, setNowMs] = useState(Date.now());
   const [creating, setCreating] = useState(false);
-  const [showAllGrid, setShowAllGrid] = useState(false);
+  const [showAllGrid, setShowAllGrid] = useState(() => window.matchMedia('(min-width: 960px)').matches);
   const [name, setName] = useState('');
   const [topic, setTopic] = useState('');
   const [icon, setIcon] = useState('🚀');
@@ -260,11 +260,8 @@ export function RoomsView({
   return (
     <div className="space-y-4">
       {/* Room Selector Rail Header & Desktop Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
-        <div>
-          <h2 className="text-base font-extrabold text-white tracking-tight">Dream Realm Citadels</h2>
-          <p className="text-xs text-slate-400">Anchor a Gateway & defend the Sanctuary together in real time</p>
-        </div>
+      <div className="studio-section-heading">
+        <h2>Browse rooms</h2>
         <div className="flex items-center gap-1.5">
           {!showAllGrid && (
             <>
@@ -289,12 +286,13 @@ export function RoomsView({
           <button
             type="button"
             onClick={() => setShowAllGrid((v) => !v)}
+            aria-pressed={showAllGrid}
             className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 cursor-pointer border transition ${
               showAllGrid ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
             }`}
           >
             <LayoutGrid className="w-3 h-3" />
-            <span>{showAllGrid ? 'Rail' : `All (${rooms.length})`}</span>
+            <span>Grid view</span>
           </button>
           <button
             type="button"
@@ -468,7 +466,7 @@ export function RoomsView({
         }}
         className={
           showAllGrid
-            ? 'grid grid-cols-2 gap-2.5'
+            ? 'studio-room-grid'
             : 'flex gap-2.5 overflow-x-auto glass-scroll pb-2 cursor-grab active:cursor-grabbing select-none'
         }
       >
@@ -478,26 +476,21 @@ export function RoomsView({
             <motion.div
               key={room.id}
               data-room-id={room.id}
-              role="button"
-              tabIndex={0}
-              whileTap={{ scale: 0.96 }}
-              onClick={() => {
-                if (dragRef.current.dragged) {
-                  dragRef.current.dragged = false;
-                  return;
-                }
-                handleRoomCardSelect(room);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleRoomCardSelect(room);
-                }
-              }}
-              className={`${showAllGrid ? 'w-full' : 'shrink-0 w-48'} text-left rounded-2xl p-3.5 transition cursor-pointer border relative group ${
-                active ? 'sp-tab-active' : 'glass-card hover:border-white/25'
-              }`}
+              className={`studio-room-card ${showAllGrid ? '' : 'studio-room-card-rail'} glass-card ${active ? 'studio-room-card-active' : ''}`}
             >
+              <button
+                type="button"
+                className="studio-room-select"
+                aria-label={`${room.name}, ${room.locked ? 'passcode protected, ' : ''}${room.activeCount} live`}
+                aria-pressed={active}
+                onClick={() => {
+                  if (dragRef.current.dragged) {
+                    dragRef.current.dragged = false;
+                    return;
+                  }
+                  handleRoomCardSelect(room);
+                }}
+              />
               <div className="flex items-center justify-between gap-1.5 mb-2">
                 <span className="w-8 h-8 rounded-xl sp-inset flex items-center justify-center text-base shrink-0">
                   {room.icon}
@@ -528,14 +521,14 @@ export function RoomsView({
                         e.stopPropagation();
                         handleDelete(room.id);
                       }}
-                      className="w-8 h-8 rounded-full sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
+                      className="relative z-[1] w-9 h-9 rounded-full sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               </div>
-              <div className="text-xs font-bold text-white truncate flex items-center gap-1">
+              <div className="text-sm font-bold text-white truncate flex items-center gap-1">
                 <span className="truncate">{room.name}</span>
                 {room.quietMode && <BellOff className="w-3 h-3 text-slate-400 shrink-0" />}
               </div>
@@ -574,12 +567,12 @@ export function RoomsView({
             </AnimatePresence>
           </div>
 
-          <div className="flex items-center justify-between gap-2 mb-4 relative z-10">
+          <div className="studio-current-room-header relative z-10">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="text-xl">{currentRoom.icon}</span>
               <div className="min-w-0">
-                <h3 className="text-sm font-extrabold text-white truncate">{currentRoom.name}</h3>
-                <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <h2>{currentRoom.name}</h2>
+                <p className="text-xs text-slate-400 flex flex-wrap items-center gap-1.5">
                   <Users className="w-3 h-3" />
                   <span>{currentRoom.totalCount} seated</span>
                   <span>•</span>
@@ -588,7 +581,7 @@ export function RoomsView({
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+            <div className="studio-current-room-actions">
               {currentRoom.inviteCode && (
                 <button
                   type="button"
@@ -604,7 +597,9 @@ export function RoomsView({
                 <button
                   type="button"
                   onClick={() => onToggleQuietMode(currentRoom.id, !currentRoom.quietMode)}
-                  title="Toggle Quiet Mode during 25m focus blocks"
+                  aria-label="Quiet mode"
+                  aria-pressed={currentRoom.quietMode}
+                  title="Toggle quiet mode during focus blocks"
                   className={`h-9 px-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer border transition ${
                     currentRoom.quietMode ? 'sp-tab-active text-white' : 'sp-badge text-slate-300 hover:text-white'
                   }`}
@@ -630,9 +625,9 @@ export function RoomsView({
                   whileTap={{ scale: 0.94 }}
                   type="button"
                   onClick={onJumpToFocus}
-                  className="shrink-0 h-9 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center gap-1 cursor-pointer"
+                  className="focus-action-primary"
                 >
-                  <Flame className="w-3.5 h-3.5" /> Lock In
+                  <Flame className="w-3.5 h-3.5" aria-hidden="true" /> Open timer
                 </motion.button>
               )}
             </div>

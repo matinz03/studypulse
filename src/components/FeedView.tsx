@@ -135,37 +135,27 @@ export function FeedView({
   ];
 
   return (
-    <div className="space-y-3.5">
+    <div className="studio-feed space-y-3.5">
       {/* Header Controls: 3-Way Scope Segmented Filter + Log Session CTA */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div
-          role="tablist"
+          role="group"
           aria-label="Study log scope"
-          className="grid grid-cols-3 p-1 rounded-2xl glass-card flex-1 max-w-[300px]"
+          className="studio-segments studio-feed-filters"
         >
           {filterTabs.map(({ key, label, Icon }) => (
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={filter === key}
+              aria-pressed={filter === key}
               onClick={() => {
                 setFilter(key);
                 setSubjectFilter('all');
               }}
-              className={`relative py-2 px-2 rounded-xl text-xs font-bold cursor-pointer flex items-center justify-center gap-1 transition ${
-                filter === key ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className="focus-mode"
             >
-              {filter === key && (
-                <motion.div
-                  layoutId="feedFilterPill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-0 rounded-xl sp-tab-active"
-                />
-              )}
-              <Icon className="w-3.5 h-3.5 relative z-10 shrink-0" />
-              <span className="relative z-10">{label}</span>
+              <Icon className="size-4 shrink-0" aria-hidden="true" />
+              <span>{label}</span>
             </button>
           ))}
         </div>
@@ -174,7 +164,7 @@ export function FeedView({
           whileTap={{ scale: 0.94 }}
           type="button"
           onClick={onJumpToFocus}
-          className="px-3.5 py-2.5 rounded-2xl sp-btn-primary text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+          className="focus-action-primary"
         >
           <Flame className="w-3.5 h-3.5" />
           <span>Log Session</span>

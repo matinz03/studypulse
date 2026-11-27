@@ -327,16 +327,25 @@ export function FocusView({
   const hiddenSubjectCount = Math.max(0, subjects.length - visibleSubjects.length);
 
   return (
-    <div className="space-y-3">
-      {/* 1. UNIFIED CHRONOMETER COCKPIT HERO (Above-the-Fold Primary Focus Surface) */}
-      <div className="glass-card rounded-3xl p-4 space-y-3 relative overflow-hidden">
-        {/* Top Row: Daily Goal Progress Ribbon + Seated Room Pill + Offline Log */}
-        <div className="space-y-2 pb-2.5 border-b border-white/10">
+    <div className="focus-workspace">
+      <section className="studio-panel focus-timer" aria-labelledby="focus-timer-heading">
+        <div className="focus-timer-heading">
+          <h2 id="focus-timer-heading">Focus timer</h2>
+          <button
+            type="button"
+            onClick={() => setLoggingManual((value) => !value)}
+            className="studio-text-button"
+            aria-expanded={loggingManual}
+          >
+            <Clock size={15} aria-hidden="true" /> Log time
+          </button>
+        </div>
+        <div className="focus-goal">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-200">
                 <Target className="w-3.5 h-3.5 opacity-80" />
-                <span>Goal</span>
+                <span>Daily goal</span>
               </span>
               <span className="font-mono-num text-[11px] font-extrabold text-white">
                 {todayMins}m<span className="text-slate-400 font-normal">/{dailyGoalMins}m</span>
@@ -346,7 +355,7 @@ export function FocusView({
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span
                 title={
                   timerSyncStatus === 'synced'
@@ -382,23 +391,10 @@ export function FocusView({
                   <span className="font-mono-num">{currentRoom.activeCount}</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setLoggingManual((v) => !v)}
-                className="sp-badge px-2.5 py-1 rounded-full text-[10px] font-bold hover:opacity-90 flex items-center gap-1 cursor-pointer"
-                title="Log offline study session"
-              >
-                <Clock className="w-2.5 h-2.5" /> +Log
-              </button>
             </div>
           </div>
 
-          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${goalPct}%`, backgroundColor: themeMeta.colors.accent }}
-            />
-          </div>
+          <progress className="focus-progress" max={100} value={goalPct} aria-label="Daily study goal" />
         </div>
 
         {/* Collapsible Manual Offline Session Drawer */}
@@ -417,6 +413,7 @@ export function FocusView({
               </div>
               <input
                 type="range"
+                aria-label="Minutes to log"
                 min={5}
                 max={180}
                 step={5}
@@ -428,10 +425,11 @@ export function FocusView({
                 <input
                   type="text"
                   maxLength={120}
+                  aria-label="Study log note"
                   placeholder="Optional note (e.g. textbook reading)"
                   value={manualNote}
                   onChange={(e) => setManualNote(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                  className="min-w-0 flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
                 />
                 <button
                   type="submit"
@@ -492,7 +490,7 @@ export function FocusView({
         </AnimatePresence>
 
         {/* Single-Row Segmented Timer Mode Bar */}
-        <div className="grid grid-cols-6 gap-1 p-1 rounded-2xl sp-inset">
+        <div className="focus-modes" aria-label="Timer mode" role="group">
           {MODES.map((m) => {
             const active = mode === m.key;
             const subLabel = m.key === 'custom' ? `${customMins}m` : m.sub;
@@ -501,19 +499,11 @@ export function FocusView({
                 key={m.key}
                 type="button"
                 onClick={() => onChangeMode(m.key)}
-                className={`relative py-1.5 px-1 rounded-xl text-center transition cursor-pointer min-w-0 ${
-                  active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-                }`}
+                aria-pressed={active}
+                className="focus-mode"
               >
-                {active && (
-                  <motion.div
-                    layoutId="focusModePill"
-                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                    className="absolute inset-0 rounded-xl sp-tab-active"
-                  />
-                )}
-                <div className="relative z-10 text-[11px] font-bold leading-tight truncate">{m.label}</div>
-                <div className="relative z-10 text-[9.5px] text-slate-400 font-mono-num">{subLabel}</div>
+                <span>{m.label}</span>
+                <small>{subLabel}</small>
               </button>
             );
           })}
@@ -528,6 +518,7 @@ export function FocusView({
             </div>
             <input
               type="range"
+              aria-label="Custom timer duration in minutes"
               min={5}
               max={180}
               step={5}
@@ -552,427 +543,154 @@ export function FocusView({
           </div>
         )}
 
-        {/* Compact Subject Selector Row (Progressive Disclosure for >4 subjects) */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {visibleSubjects.map((sub) => {
-            const selected = activeSubject?.id === sub.id;
+        <div className="focus-stage">
+          {/* Aspect-Themed Chronometer SVG Timer Ring */}
+          {(() => {
+            const asp = shadowSlave?.aspect;
+            const ringAccent = asp?.primaryColor || 'var(--studio-accent)';
+            const ringAccent2 = asp?.secondaryColor || 'var(--studio-accent)';
+            const ringStyle = asp?.ringStyle || 'default';
+            const gradId = `ringGrad-${themeId}-${asp?.id || 'base'}`;
+
             return (
-              <motion.button
-                key={sub.id}
-                whileTap={{ scale: 0.95 }}
-                type="button"
-                onClick={() => onSelectSubject(sub)}
-                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer border ${
-                  selected ? 'sp-tab-active font-bold' : 'sp-inset text-slate-300 hover:border-white/25'
-                }`}
-              >
-                <span>{sub.icon}</span>
-                <span className="max-w-[130px] truncate">{sub.name}</span>
-              </motion.button>
-            );
-          })}
-          {subjects.length > 4 && (
-            <button
-              type="button"
-              onClick={() => setShowAllSubjects((v) => !v)}
-              className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold sp-badge text-slate-300 hover:text-white flex items-center gap-0.5 cursor-pointer"
-            >
-              <span>{showAllSubjects ? 'Less' : `+${hiddenSubjectCount} more`}</span>
-              <ChevronDown className={`w-3 h-3 transition-transform ${showAllSubjects ? 'rotate-180' : ''}`} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setAddingSubject((v) => !v)}
-            className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
-          >
-            {addingSubject ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-            <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
-          </button>
-          {onDeleteSubject && (
-            <button
-              type="button"
-              onClick={() => setManageSubjects(true)}
-              className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
-              title="Rename, recolor, reorder, or merge subjects"
-            >
-              <SlidersHorizontal className="w-3 h-3" />
-              <span>Manage</span>
-            </button>
-          )}
-        </div>
+              <div className="focus-dial-wrap">
+                <div className="focus-dial">
+                  <svg viewBox="0 0 248 248" aria-hidden="true" className="focus-dial-face">
+                    <defs>
+                      <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={ringAccent} />
+                        <stop offset="55%" stopColor={ringAccent2} />
+                        <stop offset="100%" stopColor={ringAccent} />
+                      </linearGradient>
+                      <filter id="glowRing" x="-25%" y="-25%" width="150%" height="150%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feMerge>
+                          <feMergeNode in="blur" />
+                          <feMergeNode in="SourceGraphic" />
+                        </feMerge>
+                      </filter>
+                    </defs>
 
-        {/* Inline Subject Creator */}
-        <AnimatePresence>
-          {addingSubject && (
-            <motion.form
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              onSubmit={submitSubject}
-              className="p-3 rounded-2xl sp-inset space-y-2 overflow-hidden"
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  required
-                  maxLength={28}
-                  placeholder="New subject (e.g. Organic Chem)"
-                  value={newSubName}
-                  onChange={(e) => setNewSubName(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
-                />
-                <button
-                  type="submit"
-                  disabled={savingSub}
-                  className="px-3.5 py-1.5 rounded-xl sp-btn-primary text-xs font-bold cursor-pointer"
-                >
-                  Add
-                </button>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1">
-                  {SUBJECT_EMOJIS.map((em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      onClick={() => setNewSubIcon(em)}
-                      className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${
-                        newSubIcon === em ? 'sp-tab-active' : 'opacity-65'
-                      }`}
-                    >
-                      {em}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {SUBJECT_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setNewSubColor(c)}
-                      className={`w-5 h-5 rounded-full border border-white/25 cursor-pointer ${
-                        newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'
-                      }`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
-
-        {/* Balanced Dial Telemetry Strip */}
-        <div className="w-full flex flex-wrap items-center justify-between gap-1.5 text-[11px] pt-0.5">
-          <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full sp-badge font-semibold">
-              <ShieldCheck className="w-3.5 h-3.5 opacity-80" />
-              Purity {purityPct}%
-            </span>
-            <button
-              type="button"
-              onClick={onToggleStrictMode}
-              title={
-                strictMode
-                  ? 'Strict Lock: 1.25x XP boost, penalizes app-switching even with PiP'
-                  : 'Multi-App PiP: Use external apps freely with PiP without Purity penalty'
-              }
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold cursor-pointer border transition ${
-                strictMode ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
-              }`}
-            >
-              {strictMode ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-              <span>{strictMode ? 'Strict 1.25x' : 'Multi-App'}</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
-              <Clock className="w-3 h-3 opacity-80" /> {(pomoCycleCount % 4) + 1}/4
-            </span>
-            {mode === 'stopwatch' && (
-              <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
-                <Coffee className="w-3 h-3 opacity-80" /> +{Math.max(1, Math.floor(elapsedSec / 300))}m
-              </span>
-            )}
-            {onChangeWagerCoins && (
-              <button
-                type="button"
-                disabled={isRunning || elapsedSec > 0}
-                onClick={() => {
-                  const next = wagerCoins === 0 ? 15 : wagerCoins === 15 ? 30 : 0;
-                  if (next <= userCoins || next === 0) onChangeWagerCoins(next);
-                  else onChangeWagerCoins(0);
-                }}
-                title="High-Stakes Focus Wager: earn 2x Coins + 15 Shards at >=90% Purity"
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition disabled:opacity-50 ${
-                  wagerCoins > 0 ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
-                }`}
-              >
-                <Coins className="w-3 h-3" />
-                <span>{wagerCoins > 0 ? `Wager ${wagerCoins}` : 'Wager'}</span>
-              </button>
-            )}
-            {pipSupported && (
-              <button
-                type="button"
-                onClick={onTogglePip}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
-                  pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
-                }`}
-              >
-                <PictureInPicture2 className="w-3 h-3" />
-                <span>{pipActive ? 'Floating' : 'Float'}</span>
-              </button>
-            )}
-            {wakeLocked ? (
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge font-medium">
-                <Sun className="w-3 h-3" /> Awake
-              </span>
-            ) : (
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge text-slate-400">
-                <Sparkles className="w-3 h-3" /> {stage.label}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Aspect-Themed Chronometer SVG Timer Ring */}
-        {(() => {
-          const asp = shadowSlave?.aspect;
-          const ringAccent = asp?.primaryColor || themeMeta.colors.accent;
-          const ringAccent2 = asp?.secondaryColor || themeMeta.colors.accent2;
-          const ringStyle = asp?.ringStyle || 'default';
-          const gradId = `ringGrad-${themeId}-${asp?.id || 'base'}`;
-
-          return (
-            <div className="flex flex-col items-center space-y-2">
-              <div className="relative w-[248px] h-[248px] flex items-center justify-center">
-                <svg width="248" height="248" viewBox="0 0 248 248" className="transform">
-                  <defs>
-                    <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor={ringAccent} />
-                      <stop offset="55%" stopColor={ringAccent2} />
-                      <stop offset="100%" stopColor={ringAccent} />
-                    </linearGradient>
-                    <filter id="glowRing" x="-25%" y="-25%" width="150%" height="150%">
-                      <feGaussianBlur stdDeviation="3" result="blur" />
-                      <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-
-                  {/* Outer Aspect Ring Motif */}
-                  <circle
-                    cx="124"
-                    cy="124"
-                    r="119"
-                    stroke={ringAccent}
-                    strokeOpacity={isRunning ? 0.55 : 0.25}
-                    strokeWidth={ringStyle === 'black_sun' || ringStyle === 'fate_strings' ? '1.5' : '1'}
-                    strokeDasharray={ringStyle === 'fate_strings' ? '6 4' : ringStyle === 'mirror_shards' ? '3 6' : undefined}
-                    fill="none"
-                  />
-                  <circle cx="124" cy="124" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
-
-                  {/* Aspect Signature Inner Geometry */}
-                  {ringStyle === 'black_sun' && (
+                    {/* Outer Aspect Ring Motif */}
                     <circle
                       cx="124"
                       cy="124"
-                      r="94"
+                      r="119"
                       stroke={ringAccent}
-                      strokeOpacity="0.45"
-                      strokeWidth="1.5"
-                      strokeDasharray="4 5"
+                      strokeOpacity={isRunning ? 0.55 : 0.25}
+                      strokeWidth={ringStyle === 'black_sun' || ringStyle === 'fate_strings' ? '1.5' : '1'}
+                      strokeDasharray={ringStyle === 'fate_strings' ? '6 4' : ringStyle === 'mirror_shards' ? '3 6' : undefined}
                       fill="none"
                     />
-                  )}
-                  {(ringStyle === 'fate_strings' || ringStyle === 'mirror_shards') && (
-                    <polygon
-                      points="124,18 230,124 124,230 18,124"
-                      stroke={ringAccent}
-                      strokeOpacity="0.24"
-                      strokeWidth="1"
-                      fill="none"
-                    />
-                  )}
+                    <circle cx="124" cy="124" r={radius} stroke={themeMeta.colors.track} strokeWidth="10" fill="none" />
 
-                  {Array.from({ length: 60 }).map((_, idx) => {
-                    const major = idx % 5 === 0;
-                    const deg = idx * 6;
-                    return (
-                      <line
-                        key={idx}
-                        x1="124"
-                        y1={major ? 14 : 17}
-                        x2="124"
-                        y2={21}
-                        stroke={major ? ringAccent : themeMeta.colors.track}
-                        strokeOpacity={major ? 0.65 : 0.75}
-                        strokeWidth={major ? 1.5 : 1}
-                        transform={`rotate(${deg} 124 124)`}
+                    {/* Aspect Signature Inner Geometry */}
+                    {ringStyle === 'black_sun' && (
+                      <circle
+                        cx="124"
+                        cy="124"
+                        r="94"
+                        stroke={ringAccent}
+                        strokeOpacity="0.45"
+                        strokeWidth="1.5"
+                        strokeDasharray="4 5"
+                        fill="none"
                       />
-                    );
-                  })}
+                    )}
+                    {(ringStyle === 'fate_strings' || ringStyle === 'mirror_shards') && (
+                      <polygon
+                        points="124,18 230,124 124,230 18,124"
+                        stroke={ringAccent}
+                        strokeOpacity="0.24"
+                        strokeWidth="1"
+                        fill="none"
+                      />
+                    )}
 
-                  <circle
-                    cx="124"
-                    cy="124"
-                    r={radius}
-                    stroke={`url(#${gradId})`}
-                    strokeWidth="9"
-                    strokeLinecap="round"
-                    fill="none"
-                    filter="url(#glowRing)"
-                    strokeDasharray={circumference}
-                    strokeDashoffset={dashOffset}
-                    transform="rotate(-90 124 124)"
-                    style={{ transition: 'stroke-dashoffset 0.35s linear' }}
-                  />
+                    {Array.from({ length: 60 }).map((_, idx) => {
+                      const major = idx % 5 === 0;
+                      const deg = idx * 6;
+                      return (
+                        <line
+                          key={idx}
+                          x1="124"
+                          y1={major ? 14 : 17}
+                          x2="124"
+                          y2={21}
+                          stroke={major ? ringAccent : themeMeta.colors.track}
+                          strokeOpacity={major ? 0.65 : 0.75}
+                          strokeWidth={major ? 1.5 : 1}
+                          transform={`rotate(${deg} 124 124)`}
+                        />
+                      );
+                    })}
 
-                  {progress > 0.005 && (
                     <circle
-                      cx={dotX}
-                      cy={dotY}
-                      r="6"
-                      fill={themeMeta.light ? '#ffffff' : '#09090b'}
-                      stroke={ringAccent}
-                      strokeWidth="3"
+                      cx="124"
+                      cy="124"
+                      r={radius}
+                      stroke={`url(#${gradId})`}
+                      strokeWidth="9"
+                      strokeLinecap="round"
+                      fill="none"
                       filter="url(#glowRing)"
+                      strokeDasharray={circumference}
+                      strokeDashoffset={dashOffset}
+                      transform="rotate(-90 124 124)"
+                      style={{ transition: 'stroke-dashoffset 0.35s linear' }}
                     />
-                  )}
-                </svg>
 
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div
-                    className="w-[174px] h-[174px] sp-dial-core flex flex-col items-center justify-center p-2"
-                    style={
-                      asp
-                        ? {
-                            boxShadow: `inset 0 0 28px ${ringAccent}28, 0 0 18px ${ringAccent}22`,
-                            borderColor: `${ringAccent}44`,
-                          }
-                        : undefined
-                    }
-                  >
-                    <FocusSpirit
-                      elapsedSec={elapsedSec}
-                      isRunning={isRunning}
-                      accentColor={asp ? ringAccent : resolvedSubAccent}
-                      spiritSkin={spiritSkin}
-                      themeId={themeId}
-                    />
-                    <div className="font-mono-num text-[34px] leading-none font-extrabold tracking-tighter text-white mt-1">
-                      {formatClock(displayedSeconds)}
-                    </div>
-                    <div className="text-[11px] font-semibold text-slate-300 mt-1 flex items-center gap-1.5 max-w-[144px] truncate">
-                      <span>{asp?.icon || '⚡'}</span>
-                      <span className="truncate">{activeSubject?.name || 'Focus'}</span>
+                    {progress > 0.005 && (
+                      <circle
+                        cx={dotX}
+                        cy={dotY}
+                        r="6"
+                        fill={themeMeta.light ? '#ffffff' : '#09090b'}
+                        stroke={ringAccent}
+                        strokeWidth="3"
+                        filter="url(#glowRing)"
+                      />
+                    )}
+                  </svg>
+
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div
+                      className="focus-dial-core"
+                      style={
+                        asp
+                          ? {
+                              boxShadow: `inset 0 0 28px ${ringAccent}28, 0 0 18px ${ringAccent}22`,
+                              borderColor: `${ringAccent}44`,
+                            }
+                          : undefined
+                      }
+                    >
+                      <FocusSpirit
+                        elapsedSec={elapsedSec}
+                        isRunning={isRunning}
+                        accentColor={asp ? ringAccent : resolvedSubAccent}
+                        spiritSkin={spiritSkin}
+                        themeId={themeId}
+                      />
+                      <div className="focus-dial-count" data-long={displayedSeconds >= 3600} role="timer">
+                        {formatClock(displayedSeconds)}
+                      </div>
+                      <span className="focus-dial-state">
+                        {isRunning ? 'In progress' : elapsedSec > 0 ? 'Paused' : 'Ready to start'}
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
-
-              {/* Awakened Soul Runes Strip inside Focus Tab */}
-              {shadowSlave && (
-                <div
-                  className="w-full p-3 rounded-2xl sp-inset runic-card space-y-2 text-[10px]"
-                  style={{ borderColor: `${shadowSlave.aspect.primaryColor}45` }}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    <span className="font-extrabold text-white flex items-center gap-1.5">
-                      <span>{shadowSlave.aspect.icon}</span>
-                      <span style={{ color: shadowSlave.aspect.primaryColor }}>[{shadowSlave.aspect.name}]</span>
-                      <span className="text-slate-400 font-semibold">
-                        • {shadowSlave.rank} {shadowSlave.coreClass.name}
-                      </span>
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full spell-shimmer border border-amber-400/35 font-mono-num font-bold text-amber-200">
-                      [{shadowSlave.trueName}]
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 items-center">
-                    <div>
-                      <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
-                        <span>Core Fragments</span>
-                        <span className="font-mono-num text-white font-bold">
-                          {shadowSlave.soulFragments}/1,000
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.min(100, (shadowSlave.soulFragments / 1000) * 100)}%`,
-                            backgroundColor: shadowSlave.aspect.primaryColor,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
-                        <span>Soul Essence</span>
-                        <span className="font-mono-num text-sky-300 font-bold">
-                          ⚡ {shadowSlave.soulEssence}/{shadowSlave.maxSoulEssence}
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-sky-400 transition-all"
-                          style={{
-                            width: `${Math.min(100, (shadowSlave.soulEssence / Math.max(1, shadowSlave.maxSoulEssence)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    {shadowSlave.attributes.map((attr) => (
-                      <span
-                        key={attr.id}
-                        title={`${attr.desc} (×${attr.studyFragmentMult} Study Frags)`}
-                        className="px-1.5 py-0.5 rounded bg-white/5 border border-white/15 text-slate-200 font-bold"
-                      >
-                        [{attr.name}]
-                      </span>
-                    ))}
-                    <span
-                      title={`${shadowSlave.flaw.desc} — ${shadowSlave.flaw.studyRule}`}
-                      className="px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-400/40 text-rose-200 font-bold"
-                    >
-                      Flaw: [{shadowSlave.flaw.name}]
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Integrated Focus Intention Input + Primary Action Controls */}
-        <div className="space-y-2.5 pt-1">
-          <input
-            type="text"
-            maxLength={100}
-            placeholder="What are you focusing on?"
-            value={focusTask}
-            onChange={(e) => onChangeFocusTask(e.target.value)}
-            className="w-full px-3.5 py-2 rounded-2xl sp-input text-xs font-medium transition"
-          />
-
-          <div className="w-full flex items-center justify-center gap-2.5">
+            );
+          })()}
+          <div className="focus-actions">
             <motion.button
               whileTap={{ scale: 0.93 }}
               type="button"
               onClick={onBoost5m}
               title="Add +5m focus boost"
-              className="whitespace-nowrap shrink-0 px-3.5 py-3 rounded-2xl sp-badge text-xs font-bold hover:opacity-90 cursor-pointer"
+              className="focus-action-secondary"
             >
               +5m
             </motion.button>
@@ -982,9 +700,7 @@ export function FocusView({
               whileHover={{ scale: 1.01 }}
               type="button"
               onClick={onToggleRun}
-              className={`flex-1 max-w-[220px] py-3 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer transition ${
-                isRunning ? 'sp-tab-active ring-1 ring-current' : 'sp-btn-primary'
-              }`}
+              className="focus-action-primary"
             >
               {isRunning ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
               <span>{isRunning ? 'Pause' : elapsedSec > 0 ? 'Resume' : 'Start Focus'}</span>
@@ -995,27 +711,304 @@ export function FocusView({
               type="button"
               disabled={elapsedSec < 5}
               onClick={onFinishSession}
-              className={`px-3.5 py-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                elapsedSec >= 5
-                  ? 'sp-btn-primary'
-                  : 'sp-badge text-slate-500 opacity-50 cursor-not-allowed'
-              }`}
+              className="focus-action-secondary"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>Finish</span>
             </motion.button>
           </div>
+          <div className="focus-details">
+            <h3>Session details</h3>
+            <label className="focus-field-label" htmlFor="focus-intention">Intention</label>
+            <input
+              type="text"
+              maxLength={100}
+              id="focus-intention"
+              name="focus-intention"
+              autoComplete="off"
+              placeholder="What are you focusing on?"
+              value={focusTask}
+              onChange={(e) => onChangeFocusTask(e.target.value)}
+              className="focus-intention sp-input"
+            />
+            <div className="focus-field-label">Subject</div>
+            {/* Compact Subject Selector Row (Progressive Disclosure for >4 subjects) */}
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Subject">
+              {visibleSubjects.map((sub) => {
+                const selected = activeSubject?.id === sub.id;
+                return (
+                  <motion.button
+                    key={sub.id}
+                    whileTap={{ scale: 0.95 }}
+                    type="button"
+                    onClick={() => onSelectSubject(sub)}
+                    aria-pressed={selected}
+                    className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer border ${
+                      selected ? 'sp-tab-active font-bold' : 'sp-inset text-slate-300 hover:border-white/25'
+                    }`}
+                  >
+                    <span>{sub.icon}</span>
+                    <span className="max-w-[130px] truncate">{sub.name}</span>
+                  </motion.button>
+                );
+              })}
+              {subjects.length > 4 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllSubjects((v) => !v)}
+                  className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold sp-badge text-slate-300 hover:text-white flex items-center gap-0.5 cursor-pointer"
+                >
+                  <span>{showAllSubjects ? 'Less' : `+${hiddenSubjectCount} more`}</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showAllSubjects ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setAddingSubject((v) => !v)}
+                className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+              >
+                {addingSubject ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
+              </button>
+              {onDeleteSubject && (
+                <button
+                  type="button"
+                  onClick={() => setManageSubjects(true)}
+                  className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                  title="Rename, recolor, reorder, or merge subjects"
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>Manage</span>
+                </button>
+              )}
+            </div>
+
+            {/* Inline Subject Creator */}
+            <AnimatePresence>
+              {addingSubject && (
+                <motion.form
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  onSubmit={submitSubject}
+                  className="p-3 rounded-2xl sp-inset space-y-2 overflow-hidden"
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      maxLength={28}
+                      aria-label="New subject name"
+                      placeholder="New subject (e.g. Organic Chem)"
+                      value={newSubName}
+                      onChange={(e) => setNewSubName(e.target.value)}
+                      className="min-w-0 flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingSub}
+                      className="px-3.5 py-1.5 rounded-xl sp-btn-primary text-xs font-bold cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {SUBJECT_EMOJIS.map((em) => (
+                        <button
+                          key={em}
+                          type="button"
+                          onClick={() => setNewSubIcon(em)}
+                          aria-label={`Subject icon ${em}`}
+                          aria-pressed={newSubIcon === em}
+                          className={`w-7 h-7 rounded-lg text-sm cursor-pointer ${
+                            newSubIcon === em ? 'sp-tab-active' : 'opacity-65'
+                          }`}
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {SUBJECT_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setNewSubColor(c)}
+                          aria-label={`Subject color ${c}`}
+                          aria-pressed={newSubColor === c}
+                          className={`w-5 h-5 rounded-full border border-white/25 cursor-pointer ${
+                            newSubColor === c ? 'ring-2 ring-white scale-110' : 'opacity-70'
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </motion.form>
+              )}
+            </AnimatePresence>
+
+            {/* Balanced Dial Telemetry Strip */}
+            <div className="focus-options">
+              <div className="flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full sp-badge font-semibold">
+                  <ShieldCheck className="w-3.5 h-3.5 opacity-80" />
+                  Purity {purityPct}%
+                </span>
+                <button
+                  type="button"
+                  onClick={onToggleStrictMode}
+                  aria-pressed={strictMode}
+                  title={
+                    strictMode
+                      ? 'Strict Lock: 1.25x XP boost, penalizes app-switching even with PiP'
+                      : 'Multi-App PiP: Use external apps freely with PiP without Purity penalty'
+                  }
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold cursor-pointer border transition ${
+                    strictMode ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
+                  }`}
+                >
+                  {strictMode ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                  <span>{strictMode ? 'Strict 1.25x' : 'Multi-App'}</span>
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
+                  <Clock className="w-3 h-3 opacity-80" /> {(pomoCycleCount % 4) + 1}/4
+                </span>
+                {mode === 'stopwatch' && (
+                  <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
+                    <Coffee className="w-3 h-3 opacity-80" /> +{Math.max(1, Math.floor(elapsedSec / 300))}m
+                  </span>
+                )}
+                {onChangeWagerCoins && (
+                  <button
+                    type="button"
+                    disabled={isRunning || elapsedSec > 0}
+                    onClick={() => {
+                      const next = wagerCoins === 0 ? 15 : wagerCoins === 15 ? 30 : 0;
+                      if (next <= userCoins || next === 0) onChangeWagerCoins(next);
+                      else onChangeWagerCoins(0);
+                    }}
+                    title="High-Stakes Focus Wager: earn 2x Coins + 15 Shards at >=90% Purity"
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition disabled:opacity-50 ${
+                      wagerCoins > 0 ? 'sp-btn-primary' : 'sp-badge hover:opacity-90'
+                    }`}
+                  >
+                    <Coins className="w-3 h-3" />
+                    <span>{wagerCoins > 0 ? `Wager ${wagerCoins}` : 'Wager'}</span>
+                  </button>
+                )}
+                {pipSupported && (
+                  <button
+                    type="button"
+                    onClick={onTogglePip}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                      pipActive ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
+                    }`}
+                  >
+                    <PictureInPicture2 className="w-3 h-3" />
+                    <span>{pipActive ? 'Floating' : 'Float'}</span>
+                  </button>
+                )}
+                {wakeLocked ? (
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge font-medium">
+                    <Sun className="w-3 h-3" /> Awake
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-full sp-badge text-slate-400">
+                    <Sparkles className="w-3 h-3" /> {stage.label}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+        {shadowSlave && (
+          <details className="focus-runes">
+            <summary>Quest progress <ChevronDown size={14} aria-hidden="true" /></summary>
+            <div
+              className="w-full p-3 rounded-2xl sp-inset runic-card space-y-2 text-[10px]"
+              style={{ borderColor: `${shadowSlave.aspect.primaryColor}45` }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="font-extrabold text-white flex items-center gap-1.5">
+                  <span>{shadowSlave.aspect.icon}</span>
+                  <span style={{ color: shadowSlave.aspect.primaryColor }}>[{shadowSlave.aspect.name}]</span>
+                  <span className="text-slate-400 font-semibold">
+                    • {shadowSlave.rank} {shadowSlave.coreClass.name}
+                  </span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full spell-shimmer border border-amber-400/35 font-mono-num font-bold text-amber-200">
+                  [{shadowSlave.trueName}]
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 items-center">
+                <div>
+                  <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
+                    <span>Core Fragments</span>
+                    <span className="font-mono-num text-white font-bold">
+                      {shadowSlave.soulFragments}/1,000
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(100, (shadowSlave.soulFragments / 1000) * 100)}%`,
+                        backgroundColor: shadowSlave.aspect.primaryColor,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[9px] text-slate-400 mb-0.5">
+                    <span>Soul Essence</span>
+                    <span className="font-mono-num text-sky-300 font-bold">
+                      ⚡ {shadowSlave.soulEssence}/{shadowSlave.maxSoulEssence}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-sky-400 transition-all"
+                      style={{
+                        width: `${Math.min(100, (shadowSlave.soulEssence / Math.max(1, shadowSlave.maxSoulEssence)) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                {shadowSlave.attributes.map((attr) => (
+                  <span
+                    key={attr.id}
+                    title={`${attr.desc} (×${attr.studyFragmentMult} Study Frags)`}
+                    className="px-1.5 py-0.5 rounded bg-white/5 border border-white/15 text-slate-200 font-bold"
+                  >
+                    [{attr.name}]
+                  </span>
+                ))}
+                <span
+                  title={`${shadowSlave.flaw.desc} — ${shadowSlave.flaw.studyRule}`}
+                  className="px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-400/40 text-rose-200 font-bold"
+                >
+                  Flaw: [{shadowSlave.flaw.name}]
+                </span>
+              </div>
+            </div>
+          </details>
+        )}
+      </section>
 
       {/* 2. COMPACT FOCUS SOUNDSCAPE BAR + COLLAPSIBLE 6-TRACK MIXER */}
-      <div className="glass-card rounded-2xl p-3 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
+      <div className="studio-panel focus-sounds">
+        <div className="focus-sounds-heading">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <Volume2 className="w-3.5 h-3.5" />
-              Focus Soundscape
-            </span>
+            <h2><Volume2 size={16} aria-hidden="true" /> Soundscape</h2>
             {soundPreset !== 'off' && (
               <div className="flex items-end gap-0.5 h-3">
                 {[0, 1, 2, 3].map((bar) => (
@@ -1060,7 +1053,7 @@ export function FocusView({
           </div>
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        <div className="focus-sound-grid">
           {SOUNDS.map((s) => {
             const active = soundPreset === s.key;
             const SIcon = s.Icon;
@@ -1070,6 +1063,7 @@ export function FocusView({
                 whileTap={{ scale: 0.94 }}
                 type="button"
                 onClick={() => onChangeSound(s.key)}
+                aria-pressed={active}
                 className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition cursor-pointer border min-w-0 ${
                   active ? 'sp-tab-active font-bold' : 'sp-inset text-slate-400 hover:text-slate-200'
                 }`}
@@ -1129,16 +1123,17 @@ export function FocusView({
       </div>
 
       {/* 3. SEGMENTED FOCUS WORKBENCH (University Vault vs. Study Task Queue) */}
-      <div className="p-1 rounded-2xl glass-card grid grid-cols-3 gap-1">
+      <div className="studio-panel focus-workbench-tabs" role="group" aria-label="Study tools">
         <button
           type="button"
           onClick={() => setWorkbenchTab('vault')}
+          aria-pressed={workbenchTab === 'vault'}
           className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
             workbenchTab === 'vault' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
           }`}
         >
           <BookOpen className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Uni Vault</span>
+          <span className="truncate">University vault</span>
           {university && (
             <span className="px-1.5 py-0.5 rounded-full sp-badge text-[9.5px] font-mono-num">
               {university.dueCount}
@@ -1149,12 +1144,13 @@ export function FocusView({
         <button
           type="button"
           onClick={() => setWorkbenchTab('tasks')}
+          aria-pressed={workbenchTab === 'tasks'}
           className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
             workbenchTab === 'tasks' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
           }`}
         >
           <ListTodo className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Task Queue</span>
+          <span className="truncate">Tasks</span>
           <span className="px-1.5 py-0.5 rounded-full sp-badge text-[9.5px] font-mono-num">
             {pendingTaskCount}
           </span>
@@ -1163,12 +1159,13 @@ export function FocusView({
         <button
           type="button"
           onClick={() => setWorkbenchTab('both')}
+          aria-pressed={workbenchTab === 'both'}
           className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition ${
             workbenchTab === 'both' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
           }`}
         >
           <Layers className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">Split View</span>
+          <span className="truncate">Both</span>
         </button>
       </div>
 

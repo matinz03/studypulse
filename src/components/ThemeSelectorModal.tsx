@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Moon, Palette, Sparkles, Sun, X } from 'lucide-react';
 import { ThemeId, UI_THEMES, getThemeMeta } from '../themes';
@@ -12,6 +12,22 @@ interface ThemeSelectorModalProps {
 type ThemeFilter = 'all' | 'light' | 'dark' | 'study';
 
 export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSelectorModalProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    const trigger = document.activeElement;
+    if (!dialog) return;
+
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) {
+        trigger.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
   const [filter, setFilter] = useState<ThemeFilter>('all');
   const currentMeta = getThemeMeta(themeId);
 
@@ -29,19 +45,24 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
   }, [filter]);
 
   return (
-    <div
-      className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-md"
-      onClick={onClose}
+    <dialog
+      ref={dialogRef}
+      className="studio-theme-dialog"
+      aria-label="Select UI Theme"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
       <motion.div
         initial={{ opacity: 0, y: 24, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 20, scale: 0.96 }}
         transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Select UI Theme"
-        className="w-full max-w-lg liquid-dock p-5 space-y-3.5"
+        className="studio-panel studio-theme-content space-y-3.5"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
@@ -50,10 +71,7 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
               <Palette className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-extrabold tracking-tight">Select UI Theme</h2>
-              <p className="text-[11px] opacity-70">
-                Design systems (Dark &amp; Light) + Top 3 Study Psychology Palettes
-              </p>
+              <h2>Choose a theme</h2>
             </div>
           </div>
 
@@ -71,7 +89,7 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
               type="button"
               onClick={onClose}
               aria-label="Close theme picker"
-              className="w-8 h-8 sp-badge flex items-center justify-center cursor-pointer"
+              className="studio-icon-button"
             >
               <X className="w-4 h-4" />
             </button>
@@ -79,13 +97,13 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
         </div>
 
         {/* Category / Mode Filter Tabs */}
-        <div className="grid grid-cols-4 gap-1 p-1 sp-inset">
+        <div className="studio-segments studio-profile-segments" role="group" aria-label="Theme category">
           {(
             [
               ['all', `All (${UI_THEMES.length})`],
               ['light', 'Light (8)'],
               ['dark', 'Dark (8)'],
-              ['study', 'Study Top 3'],
+              ['study', 'Study'],
             ] as const
           ).map(([k, label]) => {
             const active = filter === k;
@@ -94,9 +112,8 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
                 key={k}
                 type="button"
                 onClick={() => setFilter(k)}
-                className={`py-1.5 text-[11px] font-bold cursor-pointer transition ${
-                  active ? 'sp-tab-active' : 'opacity-70 hover:opacity-100'
-                }`}
+                aria-pressed={active}
+                className="focus-mode"
               >
                 {label}
               </button>
@@ -113,6 +130,7 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
                 key={t.id}
                 type="button"
                 onClick={() => onSelectTheme(t.id)}
+                aria-pressed={active}
                 className={`text-left p-3 border transition cursor-pointer relative overflow-hidden ${
                   active ? 'sp-tab-active ring-1 ring-current' : 'sp-inset hover:opacity-95'
                 }`}
@@ -185,6 +203,6 @@ export function ThemeSelectorModal({ themeId, onSelectTheme, onClose }: ThemeSel
           })}
         </div>
       </motion.div>
-    </div>
+    </dialog>
   );
 }
