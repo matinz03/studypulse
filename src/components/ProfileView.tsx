@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Award,
@@ -163,12 +163,15 @@ export function ProfileView({
   const [loadingWeek, setLoadingWeek] = useState(false);
   const [selectedDayIdx, setSelectedDayIdx] = useState<number | null>(null);
   const [selectedHourIdx, setSelectedHourIdx] = useState<number | null>(null);
+  const fetchWeekRef = useRef(onFetchWeeklyAnalytics);
+  fetchWeekRef.current = onFetchWeeklyAnalytics;
 
   useEffect(() => {
-    if (!onFetchWeeklyAnalytics) return;
+    const fetchWeek = fetchWeekRef.current;
+    if (!fetchWeek) return;
     let cancelled = false;
     setLoadingWeek(true);
-    onFetchWeeklyAnalytics(weekOffset)
+    fetchWeek(weekOffset)
       .then((res) => {
         if (!cancelled) {
           setWeeklyData(res);
@@ -182,7 +185,7 @@ export function ProfileView({
     return () => {
       cancelled = true;
     };
-  }, [weekOffset, user.sessionsCount, user.totalMins, onFetchWeeklyAnalytics]);
+  }, [weekOffset, user.sessionsCount, user.totalMins]);
 
   const allLogs = studyLogs.length > 0 ? studyLogs : [...todayTimeline].reverse();
   const visibleLogs = logScope === 'today' ? todayTimeline : allLogs;

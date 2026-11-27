@@ -260,11 +260,18 @@ export function App() {
 
   const apiFetch = useCallback(
     async (url: string, init?: RequestInit) => {
+      const activeToken = localStorage.getItem(TOKEN_KEY) || token;
       const headers = new Headers(init?.headers || {});
-      if (token) headers.set('Authorization', `Bearer ${token}`);
+      if (activeToken) headers.set('Authorization', `Bearer ${activeToken}`);
       if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
       const res = await fetch(url, { ...init, headers });
       if (res.status === 401) {
+        const currentStored = localStorage.getItem(TOKEN_KEY);
+        if (currentStored && currentStored !== activeToken) {
+          headers.set('Authorization', `Bearer ${currentStored}`);
+          const retryRes = await fetch(url, { ...init, headers });
+          if (retryRes.ok) return retryRes.json();
+        }
         localStorage.removeItem(TOKEN_KEY);
         setToken(null);
         setData(null);
