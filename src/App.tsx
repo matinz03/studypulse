@@ -306,7 +306,6 @@ export function App() {
 
   useEffect(() => {
     if (token) {
-      setLoading(true);
       refreshBootstrap();
     } else {
       setLoading(false);
