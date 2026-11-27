@@ -1824,6 +1824,7 @@ export function App() {
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5" /> Weekly Top 5
+                <span className="text-[9px] font-bold text-slate-400 normal-case tracking-normal">(Mon–Sun)</span>
               </span>
               <button
                 type="button"

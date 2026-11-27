@@ -86,12 +86,21 @@ if (fs.existsSync(VAPID_FILE)) {
 }
 webpush.setVapidDetails('mailto:focus@study.matinz03.tech', vapidKeys.publicKey, vapidKeys.privateKey);
 
+/**
+ * Returns the Monday 00:00:00.000 UTC timestamp for the calendar week containing `ts`.
+ */
+function getCalendarWeekStartMs(ts = Date.now()) {
+  const d = new Date(ts);
+  const diffToMonday = (d.getUTCDay() + 6) % 7;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diffToMonday, 0, 0, 0, 0);
+}
+
 function getUserStudyStats(userId) {
   const now = Date.now();
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
   const todayStartMs = startOfToday.getTime();
-  const weekStartMs = now - 7 * 86400_000;
+  const weekStartMs = getCalendarWeekStartMs(now);
 
   return db.prepare(`
     SELECT
@@ -629,8 +638,8 @@ function buildBootstrap(userId) {
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
   const todayStartMs = startOfToday.getTime();
-  const weekStartMs = now - 7 * 86400_000;
-  const prevWeekStartMs = now - 14 * 86400_000;
+  const weekStartMs = getCalendarWeekStartMs(now);
+  const prevWeekStartMs = weekStartMs - 7 * 86400_000;
 
   const userStats = getUserStudyStats(userId);
 
@@ -1865,7 +1874,7 @@ app.post('/api/rooms/:id/raid-strike', authMiddleware, (req, res) => {
 app.post('/api/compete/duel', authMiddleware, (req, res) => {
   const action = String(req.body?.action || 'create');
   const now = Date.now();
-  const weekStartMs = now - 7 * 86400_000;
+  const weekStartMs = getCalendarWeekStartMs(now);
   const weekSec = db.prepare('SELECT COALESCE(SUM(duration_sec), 0) AS s FROM study_sessions WHERE user_id = ? AND created_at >= ?').get(req.user.id, weekStartMs).s;
   const weekMins = Math.round((weekSec || 0) / 60);
 
