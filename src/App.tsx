@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Timer,
@@ -17,17 +17,38 @@ import {
   Download,
   Palette,
   Swords,
+  Lock,
 } from 'lucide-react';
 import { AuthScreen } from './components/AuthScreen';
 import { FocusView, formatClock } from './components/FocusView';
-import { QuestView } from './components/QuestView';
-import { RoomsView } from './components/RoomsView';
-import { CompeteView } from './components/CompeteView';
-import { FeedView } from './components/FeedView';
-import { ProfileView } from './components/ProfileView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
+
+const QuestView = lazy(() => import('./components/QuestView').then((m) => ({ default: m.QuestView })));
+const RoomsView = lazy(() => import('./components/RoomsView').then((m) => ({ default: m.RoomsView })));
+const CompeteView = lazy(() => import('./components/CompeteView').then((m) => ({ default: m.CompeteView })));
+const FeedView = lazy(() => import('./components/FeedView').then((m) => ({ default: m.FeedView })));
+const ProfileView = lazy(() => import('./components/ProfileView').then((m) => ({ default: m.ProfileView })));
+
+function TabSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Loading view">
+      <div className="glass-card rounded-3xl p-4 space-y-3">
+        <div className="h-5 w-44 rounded-lg sp-skeleton" />
+        <div className="h-24 w-full rounded-2xl sp-skeleton" />
+      </div>
+      <div className="glass-card rounded-3xl p-4 space-y-2.5">
+        <div className="h-4 w-32 rounded-lg sp-skeleton" />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="h-20 rounded-2xl sp-skeleton" />
+          <div className="h-20 rounded-2xl sp-skeleton" />
+        </div>
+      </div>
+    </div>
+  );
+}
 import {
+  ActiveTimerState,
   BootstrapData,
   FloatingEmoji,
   GameActionResponse,
@@ -41,6 +62,7 @@ import {
   TabKey,
   TimerMode,
   User,
+  WeeklyAnalyticsResponse,
 } from './types';
 import { ThemeId, THEME_STORAGE_KEY, getThemeMeta, isValidThemeId, resolveAccent } from './themes';
 import { soundEngine, SoundPreset, TrackKey } from './utils/soundEngine';
@@ -48,6 +70,20 @@ import { pipEngine } from './utils/pipEngine';
 
 const TOKEN_KEY = 'studypulse_token';
 const TIMER_STATE_KEY = 'studypulse_timer_state';
+const DEVICE_ID_KEY = 'studypulse_device_id';
+
+function getOrCreateDeviceId(): string {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'dev_default';
+  }
+}
 
 function getTargetSec(mode: TimerMode, customMins: number, bonusSec = 0) {
   switch (mode) {
@@ -140,6 +176,8 @@ function loadPersistedTimer(): Partial<PersistedTimerState> & { initialElapsed: 
 interface ToastMsg {
   id: number;
   text: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 export function App() {
@@ -193,6 +231,9 @@ export function App() {
   // Realtime UI state
   const [floatingEmojis, setFloatingEmojis] = useState<FloatingEmoji[]>([]);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
+  const [deviceId] = useState<string>(() => getOrCreateDeviceId());
+  const [timerSyncStatus, setTimerSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('synced');
+  const [remoteTimer, setRemoteTimer] = useState<ActiveTimerState | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const startedAtMsRef = useRef<number>(restored.isRunning && restored.startedAtMs ? restored.startedAtMs : Date.now());
@@ -200,12 +241,12 @@ export function App() {
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const lastAlertKeyRef = useRef<string>('');
 
-  const pushToast = useCallback((text: string) => {
+  const pushToast = useCallback((text: string, opts?: { actionLabel?: string; onAction?: () => void; durationMs?: number }) => {
     const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev.slice(-2), { id, text }]);
+    setToasts((prev) => [...prev.slice(-2), { id, text, actionLabel: opts?.actionLabel, onAction: opts?.onAction }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    }, opts?.durationMs ?? (opts?.actionLabel ? 5500 : 3200));
   }, []);
 
   const spawnEmoji = useCallback((emoji: string, sender: string) => {
@@ -251,12 +292,17 @@ export function App() {
           boot.rooms.some((r) => r.id === prev) ? prev : boot.rooms[0].id
         );
       }
+      if (boot.activeTimer && boot.activeTimer.deviceId !== deviceId) {
+        setRemoteTimer(boot.activeTimer);
+      } else if (!boot.activeTimer) {
+        setRemoteTimer(null);
+      }
     } catch {
       // handled cleanly in apiFetch
     } finally {
       setLoading(false);
     }
-  }, [token, apiFetch]);
+  }, [token, apiFetch, deviceId]);
 
   useEffect(() => {
     if (token) {
@@ -405,7 +451,30 @@ export function App() {
   const syncServerSchedule = useCallback(
     async (running: boolean, curMode: TimerMode, curElapsed: number, targetSecVal: number, subName: string, task: string) => {
       if (!token) return;
+      setTimerSyncStatus('syncing');
       try {
+        if (running || curElapsed > 0) {
+          await apiFetch('/api/timer/active', {
+            method: 'PUT',
+            body: JSON.stringify({
+              mode: curMode,
+              subjectId: selectedSubjectId,
+              subjectName: subName,
+              subjectColor: activeSubject.color,
+              taskId: activeTaskId,
+              taskTitle: task,
+              targetSec: targetSecVal,
+              startedAtMs: startedAtMsRef.current,
+              accumulatedSec: curElapsed,
+              isRunning: running,
+              strictMode,
+              deviceId,
+            }),
+          });
+        } else {
+          await apiFetch('/api/timer/active', { method: 'DELETE' });
+        }
+
         if (running && curMode !== 'stopwatch' && targetSecVal > curElapsed) {
           const targetEndMs = Date.now() + (targetSecVal - curElapsed) * 1000;
           await apiFetch('/api/timer/schedule', {
@@ -421,12 +490,36 @@ export function App() {
         } else {
           await apiFetch('/api/timer/cancel', { method: 'POST' });
         }
+        setTimerSyncStatus('synced');
       } catch {
-        // offline resilience
+        setTimerSyncStatus('offline');
       }
     },
-    [token, apiFetch]
+    [token, apiFetch, selectedSubjectId, activeSubject.color, activeTaskId, strictMode, deviceId]
   );
+
+  // Auto-join room from ?invite=<code> deep-link once authenticated
+  useEffect(() => {
+    if (!token || !data?.user) return;
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get('invite');
+    if (!inviteCode) return;
+    apiFetch('/api/rooms/join-invite', {
+      method: 'POST',
+      body: JSON.stringify({ inviteCode }),
+    })
+      .then(async (res) => {
+        window.history.replaceState({}, '', window.location.pathname);
+        await refreshBootstrap();
+        if (res.roomId) setSelectedRoomId(res.roomId);
+        setTab('rooms');
+        pushToast(`Joined Sanctuary "${res.roomName || 'Study Room'}" via invite`);
+      })
+      .catch((err) => {
+        window.history.replaceState({}, '', window.location.pathname);
+        pushToast(err instanceof Error ? err.message : 'Invalid invite link');
+      });
+  }, [token, data?.user?.id, apiFetch, refreshBootstrap, pushToast]);
 
   // WebSocket Connection
   useEffect(() => {
@@ -466,6 +559,17 @@ export function App() {
             pushToast(`${msg.displayName} just logged ${Math.max(1, Math.round(msg.durationSec / 60))}m on ${msg.subjectName}!`);
           } else if (msg.type === 'timer_expired' && msg.userId === data?.user.id) {
             triggerCompletionAlert(msg.mode, msg.durationSec, msg.subjectName);
+          } else if (msg.type === 'timer_state_sync') {
+            const incoming: ActiveTimerState | null = msg.activeTimer || null;
+            if (!incoming) {
+              setRemoteTimer(null);
+            } else if (incoming.deviceId !== deviceId) {
+              setRemoteTimer(incoming);
+              if (incoming.isRunning && isRunning) {
+                setIsRunning(false);
+                pushToast('Timer continued on another device — paused locally');
+              }
+            }
           }
         } catch {
           // ignore malformed ws message
@@ -1008,6 +1112,45 @@ export function App() {
     await refreshBootstrap();
   }
 
+  async function handleResumeRemoteTimer() {
+    if (!remoteTimer) return;
+    const elapsedNow = remoteTimer.isRunning
+      ? remoteTimer.accumulatedSec + Math.max(0, Math.floor((Date.now() - remoteTimer.startedAtMs) / 1000))
+      : remoteTimer.accumulatedSec;
+    setMode(remoteTimer.mode || 'pomodoro');
+    setBonusSec(0);
+    if (remoteTimer.subjectId && data?.subjects.some((s) => s.id === remoteTimer.subjectId)) {
+      setSelectedSubjectId(remoteTimer.subjectId);
+    }
+    setActiveTaskId(remoteTimer.taskId ?? null);
+    setFocusTask(remoteTimer.taskTitle || '');
+    baseElapsedRef.current = elapsedNow;
+    startedAtMsRef.current = Date.now();
+    setElapsedSec(elapsedNow);
+    setStrictMode(Boolean(remoteTimer.strictMode));
+    setIsRunning(remoteTimer.isRunning);
+    setRemoteTimer(null);
+    await syncServerSchedule(
+      remoteTimer.isRunning,
+      remoteTimer.mode,
+      elapsedNow,
+      remoteTimer.targetSec || getTargetSec(remoteTimer.mode, customMins),
+      remoteTimer.subjectName,
+      remoteTimer.taskTitle
+    );
+    pushToast('Resumed synced session on this device');
+  }
+
+  async function handleDiscardRemoteTimer() {
+    setRemoteTimer(null);
+    try {
+      await apiFetch('/api/timer/active', { method: 'DELETE' });
+      await apiFetch('/api/timer/cancel', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  }
+
   async function handleCreateSubject(name: string, color: string, icon: string) {
     const created: Subject = await apiFetch('/api/subjects', {
       method: 'POST',
@@ -1016,6 +1159,44 @@ export function App() {
     await refreshBootstrap();
     setSelectedSubjectId(created.id);
     pushToast(`Added subject "${created.name}"`);
+  }
+
+  async function handleUpdateSubject(
+    subjectId: number,
+    payload: { name?: string; color?: string; icon?: string; cascadeSessions?: boolean }
+  ) {
+    await apiFetch(`/api/subjects/${subjectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    await refreshBootstrap();
+    pushToast('Subject updated');
+  }
+
+  async function handleReorderSubjects(orderedIds: number[]) {
+    setData((prev) => {
+      if (!prev) return prev;
+      const byId = new Map(prev.subjects.map((s) => [s.id, s]));
+      const nextSubs = orderedIds.map((id) => byId.get(id)).filter((s): s is Subject => Boolean(s));
+      const extras = prev.subjects.filter((s) => !orderedIds.includes(s.id));
+      return { ...prev, subjects: [...nextSubs, ...extras] };
+    });
+    await apiFetch('/api/subjects/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ orderedIds }),
+    });
+  }
+
+  async function handleMergeSubjects(sourceId: number, targetId: number) {
+    const res = await apiFetch('/api/subjects/merge', {
+      method: 'POST',
+      body: JSON.stringify({ sourceId, targetId }),
+    });
+    if (selectedSubjectId === sourceId) {
+      setSelectedSubjectId(targetId);
+    }
+    await refreshBootstrap();
+    pushToast(`Merged ${res.movedSessions || 0} session(s) into ${res.target?.name || 'target'}`);
   }
 
   async function handleDeleteSubject(subjectId: number) {
@@ -1249,14 +1430,39 @@ export function App() {
     }
   }
 
-  async function handleCreateRoom(name: string, topic: string, icon: string, accent: string) {
+  async function handleCreateRoom(
+    name: string,
+    topic: string,
+    icon: string,
+    accent: string,
+    opts?: { isPrivate?: boolean; passcode?: string; quietMode?: boolean }
+  ) {
     const created = await apiFetch('/api/rooms', {
       method: 'POST',
-      body: JSON.stringify({ name, topic, icon, accent }),
+      body: JSON.stringify({ name, topic, icon, accent, ...(opts || {}) }),
     });
     await refreshBootstrap();
     setSelectedRoomId(created.id);
     pushToast(`Opened room "${created.name}"`);
+  }
+
+  async function handleUnlockRoom(roomId: number, payload: { passcode?: string; inviteCode?: string }) {
+    await apiFetch(`/api/rooms/${roomId}/unlock`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await refreshBootstrap();
+    setSelectedRoomId(roomId);
+    pushToast('Room unlocked');
+  }
+
+  async function handleToggleQuietMode(roomId: number, quietMode: boolean) {
+    await apiFetch(`/api/rooms/${roomId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ quietMode }),
+    });
+    await refreshBootstrap();
+    pushToast(quietMode ? 'Quiet Mode enabled during focus blocks' : 'Quiet Mode turned off');
   }
 
   async function handleDeleteRoom(roomId: number) {
@@ -1300,11 +1506,27 @@ export function App() {
   }
 
   async function handleReactFeed(sessionId: number, emoji: string) {
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        feed: prev.feed.map((post) => {
+          if (post.id !== sessionId) return post;
+          return {
+            ...post,
+            reactions: post.reactions.map((r) =>
+              r.emoji === emoji
+                ? { ...r, reacted: !r.reacted, count: Math.max(0, r.count + (r.reacted ? -1 : 1)) }
+                : r
+            ),
+          };
+        }),
+      };
+    });
     await apiFetch(`/api/feed/${sessionId}/react`, {
       method: 'POST',
       body: JSON.stringify({ emoji }),
     });
-    await refreshBootstrap();
   }
 
   async function handleCommentFeed(sessionId: number, content: string) {
@@ -1315,13 +1537,75 @@ export function App() {
     await refreshBootstrap();
   }
 
-  async function handleUpdateSessionTopic(sessionId: number, subjectName: string, subjectColor?: string) {
+  async function handleUpdateSession(
+    sessionId: number,
+    payload: { subjectName?: string; subjectColor?: string; durationSec?: number; note?: string; createdAt?: number }
+  ) {
     await apiFetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ subjectName, subjectColor }),
+      body: JSON.stringify(payload),
     });
     await refreshBootstrap();
-    pushToast(`Updated topic to "${subjectName}" ✨`);
+    pushToast('Study log updated');
+  }
+
+  async function handleDeleteSession(sessionId: number) {
+    const prevSnapshot = data;
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        todayTimeline: (prev.todayTimeline || []).filter((s) => s.id !== sessionId),
+        studyLogs: (prev.studyLogs || []).filter((s) => s.id !== sessionId),
+        feed: prev.feed.filter((f) => f.id !== sessionId),
+      };
+    });
+    try {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+      await refreshBootstrap();
+      if (res.deletedSession) {
+        pushToast('Session deleted', {
+          actionLabel: 'Undo',
+          durationMs: 5500,
+          onAction: async () => {
+            await apiFetch('/api/sessions/restore', {
+              method: 'POST',
+              body: JSON.stringify({ session: res.deletedSession }),
+            });
+            await refreshBootstrap();
+            pushToast('Session restored');
+          },
+        });
+      }
+    } catch (err) {
+      if (prevSnapshot) setData(prevSnapshot);
+      pushToast(err instanceof Error ? err.message : 'Failed to delete session');
+    }
+  }
+
+  async function handleChangePassword(currentPassword: string, newPassword: string) {
+    const res = await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    if (res.token) {
+      localStorage.setItem(TOKEN_KEY, res.token);
+      setToken(res.token);
+    }
+    pushToast('Password updated and other sessions signed out');
+  }
+
+  async function handleLogoutAllDevices() {
+    const res = await apiFetch('/api/auth/logout-all', { method: 'POST' });
+    if (res.token) {
+      localStorage.setItem(TOKEN_KEY, res.token);
+      setToken(res.token);
+    }
+    pushToast('Signed out all other devices');
+  }
+
+  async function handleFetchWeeklyAnalytics(offset: number): Promise<WeeklyAnalyticsResponse> {
+    return apiFetch(`/api/analytics/week?offset=${offset}`);
   }
 
   async function handleUpdateProfile(payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) {
@@ -1330,7 +1614,7 @@ export function App() {
       body: JSON.stringify(payload),
     });
     await refreshBootstrap();
-    pushToast('Profile updated ✨');
+    pushToast('Profile updated');
   }
 
   if (!token) {
@@ -1410,7 +1694,10 @@ export function App() {
       </div>
 
       {/* Live Toast Notifications (Mobile Snackbar above fixed dock) */}
-      <div className="fixed bottom-24 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[110] w-[calc(100vw-24px)] max-w-[440px] flex flex-col items-center gap-2 pointer-events-none px-2">
+      <div
+        aria-live="polite"
+        className="fixed bottom-24 left-1/2 lg:left-[calc(50%-192px)] -translate-x-1/2 z-[110] w-[calc(100vw-24px)] max-w-[440px] flex flex-col items-center gap-2 pointer-events-none px-2"
+      >
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
@@ -1418,9 +1705,22 @@ export function App() {
               initial={{ opacity: 0, y: -16, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -12, scale: 0.94 }}
-              className="px-4 py-2 rounded-full liquid-dock text-xs font-bold text-white"
+              className="pointer-events-auto px-4 py-2 rounded-full liquid-dock text-xs font-bold text-white flex items-center gap-3"
             >
-              {t.text}
+              <span>{t.text}</span>
+              {t.actionLabel && t.onAction && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fn = t.onAction;
+                    setToasts((prev) => prev.filter((x) => x.id !== t.id));
+                    fn?.();
+                  }}
+                  className="px-2.5 py-0.5 rounded-full sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+                >
+                  {t.actionLabel}
+                </button>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -1656,120 +1956,147 @@ export function App() {
                     onToggleTaskDone={handleToggleTaskDone}
                     onDeleteTask={handleDeleteTask}
                     onLogManual={handleLogManual}
+                    timerSyncStatus={timerSyncStatus}
+                    remoteTimer={remoteTimer}
+                    onResumeRemoteTimer={handleResumeRemoteTimer}
+                    onDiscardRemoteTimer={handleDiscardRemoteTimer}
+                    onUpdateSubject={handleUpdateSubject}
+                    onReorderSubjects={handleReorderSubjects}
+                    onMergeSubjects={handleMergeSubjects}
+                    onDeleteSubject={handleDeleteSubject}
                   />
                 )}
 
                 {tab === 'quest' && (
-                  <QuestView
-                    user={user}
-                    game={data.game}
-                    shop={data.shop}
-                    isStudying={isRunning && mode !== 'break'}
-                    onIdleTick={handleIdleTick}
-                    onIdleClaimAfk={handleIdleClaimAfk}
-                    onIdleConfig={handleIdleConfig}
-                    onIdleUpgradeProf={handleIdleUpgradeProf}
-                    onIdleAscend={handleIdleAscend}
-                    onIdleUpgradeRelic={handleIdleUpgradeRelic}
-                    onIdleForgeMythic={handleIdleForgeMythic}
-                    onEquipItem={handleGameEquip}
-                    onUpgradeItem={handleGameUpgradeItem}
-                    onSalvageItem={handleGameSalvage}
-                    onUpgradeStat={handleGameUpgradeStat}
-                    onSelectSpecialization={handleSelectSpecialization}
-                    onStudyCast={handleStudyCast}
-                    flashcards={data.university?.flashcards}
-                    onBuyShopItem={handleBuyShopItem}
-                    onRerollDailyShop={handleRerollDailyShop}
-                    onGoToFocus={() => setTab('focus')}
-                  />
+                  <Suspense fallback={<TabSkeleton />}>
+                    <QuestView
+                      user={user}
+                      game={data.game}
+                      shop={data.shop}
+                      isStudying={isRunning && mode !== 'break'}
+                      onIdleTick={handleIdleTick}
+                      onIdleClaimAfk={handleIdleClaimAfk}
+                      onIdleConfig={handleIdleConfig}
+                      onIdleUpgradeProf={handleIdleUpgradeProf}
+                      onIdleAscend={handleIdleAscend}
+                      onIdleUpgradeRelic={handleIdleUpgradeRelic}
+                      onIdleForgeMythic={handleIdleForgeMythic}
+                      onEquipItem={handleGameEquip}
+                      onUpgradeItem={handleGameUpgradeItem}
+                      onSalvageItem={handleGameSalvage}
+                      onUpgradeStat={handleGameUpgradeStat}
+                      onSelectSpecialization={handleSelectSpecialization}
+                      onStudyCast={handleStudyCast}
+                      flashcards={data.university?.flashcards}
+                      onBuyShopItem={handleBuyShopItem}
+                      onRerollDailyShop={handleRerollDailyShop}
+                      onGoToFocus={() => setTab('focus')}
+                    />
+                  </Suspense>
                 )}
 
                 {tab === 'rooms' && (
-                  <RoomsView
-                    themeId={themeId}
-                    rooms={data.rooms}
-                    selectedRoomId={selectedRoomId}
-                    onSelectRoom={(id) => {
-                      setSelectedRoomId(id);
-                      pushToast('Switched desk seat! 🪑');
-                    }}
-                    onCreateRoom={handleCreateRoom}
-                    onDeleteRoom={handleDeleteRoom}
-                    floatingEmojis={floatingEmojis}
-                    onSendCheer={handleSendCheer}
-                    currentUserId={user.id}
-                    isRunning={isRunning}
-                    heroEnergy={data.game.profile.energy}
-                    onJumpToFocus={() => setTab('focus')}
-                    onRaidStrike={handleRaidStrike}
-                    onSendRoomChat={handleSendRoomChat}
-                    onSyncRoomTimer={handleSyncRoomTimer}
-                    onMatchSubject={(subName) => {
-                      const match = data.subjects.find(
-                        (s) => s.name.toLowerCase() === subName.toLowerCase()
-                      );
-                      if (match) {
-                        setSelectedSubjectId(match.id);
-                      }
-                      setTab('focus');
-                      pushToast(`Matched "${subName}" — hit Start Focus! ⚡`);
-                    }}
-                  />
+                  <Suspense fallback={<TabSkeleton />}>
+                    <RoomsView
+                      themeId={themeId}
+                      rooms={data.rooms}
+                      selectedRoomId={selectedRoomId}
+                      onSelectRoom={(id) => {
+                        setSelectedRoomId(id);
+                        pushToast('Switched desk seat');
+                      }}
+                      onCreateRoom={handleCreateRoom}
+                      onDeleteRoom={handleDeleteRoom}
+                      onUnlockRoom={handleUnlockRoom}
+                      onToggleQuietMode={handleToggleQuietMode}
+                      floatingEmojis={floatingEmojis}
+                      onSendCheer={handleSendCheer}
+                      currentUserId={user.id}
+                      isRunning={isRunning}
+                      heroEnergy={data.game.profile.energy}
+                      onJumpToFocus={() => setTab('focus')}
+                      onRaidStrike={handleRaidStrike}
+                      onSendRoomChat={handleSendRoomChat}
+                      onSyncRoomTimer={handleSyncRoomTimer}
+                      onMatchSubject={(subName) => {
+                        const match = data.subjects.find(
+                          (s) => s.name.toLowerCase() === subName.toLowerCase()
+                        );
+                        if (match) {
+                          setSelectedSubjectId(match.id);
+                        }
+                        setTab('focus');
+                        pushToast(`Matched "${subName}" — hit Start Focus!`);
+                      }}
+                    />
+                  </Suspense>
                 )}
 
                 {tab === 'compete' && (
-                  <CompeteView
-                    user={user}
-                    leaderboards={data.leaderboards}
-                    directory={data.directory}
-                    league={data.league}
-                    activeDuel={data.activeDuel}
-                    onStartDuel={handleStartDuel}
-                    onClaimDuel={handleClaimDuel}
-                    onToggleFriend={handleToggleFriend}
-                    onNudgeFriend={handleNudgeFriend}
-                  />
+                  <Suspense fallback={<TabSkeleton />}>
+                    <CompeteView
+                      user={user}
+                      leaderboards={data.leaderboards}
+                      directory={data.directory}
+                      league={data.league}
+                      activeDuel={data.activeDuel}
+                      onStartDuel={handleStartDuel}
+                      onClaimDuel={handleClaimDuel}
+                      onToggleFriend={handleToggleFriend}
+                      onNudgeFriend={handleNudgeFriend}
+                    />
+                  </Suspense>
                 )}
 
                 {tab === 'feed' && (
-                  <FeedView
-                    themeId={themeId}
-                    feed={data.feed}
-                    currentUserId={user.id}
-                    subjects={data.subjects}
-                    onUpdateSessionTopic={handleUpdateSessionTopic}
-                    onReact={handleReactFeed}
-                    onComment={handleCommentFeed}
-                    onJumpToFocus={() => setTab('focus')}
-                  />
+                  <Suspense fallback={<TabSkeleton />}>
+                    <FeedView
+                      themeId={themeId}
+                      feed={data.feed}
+                      currentUserId={user.id}
+                      subjects={data.subjects}
+                      onUpdateSession={(id, payload) => handleUpdateSession(id, payload)}
+                      onReact={handleReactFeed}
+                      onComment={handleCommentFeed}
+                      onJumpToFocus={() => setTab('focus')}
+                    />
+                  </Suspense>
                 )}
 
                 {tab === 'me' && (
-                  <ProfileView
-                    themeId={themeId}
-                    user={user}
-                    heatmap={data.heatmap}
-                    heatmap365={data.heatmap365}
-                    prevWeekMins={data.prevWeekMins}
-                    todayTimeline={data.todayTimeline}
-                    studyLogs={data.studyLogs}
-                    onUpdateSessionTopic={handleUpdateSessionTopic}
-                    weekTrend={data.weekTrend}
-                    subjectBreakdown={data.subjectBreakdown}
-                    hourlyDistribution={data.hourlyDistribution}
-                    peakWindowLabel={data.peakWindowLabel}
-                    achievements={data.achievements}
-                    subjects={data.subjects}
-                    shop={data.shop}
-                    game={data.game}
-                    onBuyShopItem={handleBuyShopItem}
-                    onRerollDailyShop={handleRerollDailyShop}
-                    onEquipGameItem={(id) => handleGameEquip(id).then(() => undefined)}
-                    onDeleteSubject={handleDeleteSubject}
-                    onUpdateProfile={handleUpdateProfile}
-                    onLogout={handleLogout}
-                  />
+                  <Suspense fallback={<TabSkeleton />}>
+                    <ProfileView
+                      themeId={themeId}
+                      user={user}
+                      heatmap={data.heatmap}
+                      heatmap365={data.heatmap365}
+                      prevWeekMins={data.prevWeekMins}
+                      todayTimeline={data.todayTimeline}
+                      studyLogs={data.studyLogs}
+                      onUpdateSession={handleUpdateSession}
+                      onDeleteSession={handleDeleteSession}
+                      onFetchWeeklyAnalytics={handleFetchWeeklyAnalytics}
+                      weekTrend={data.weekTrend}
+                      subjectBreakdown={data.subjectBreakdown}
+                      hourlyDistribution={data.hourlyDistribution}
+                      peakWindowLabel={data.peakWindowLabel}
+                      achievements={data.achievements}
+                      subjects={data.subjects}
+                      onUpdateSubject={handleUpdateSubject}
+                      onReorderSubjects={handleReorderSubjects}
+                      onMergeSubjects={handleMergeSubjects}
+                      onDeleteSubject={handleDeleteSubject}
+                      onChangePassword={handleChangePassword}
+                      onLogoutAllDevices={handleLogoutAllDevices}
+                      shop={data.shop}
+                      game={data.game}
+                      onBuyShopItem={handleBuyShopItem}
+                      onRerollDailyShop={handleRerollDailyShop}
+                      onEquipGameItem={(id) => handleGameEquip(id).then(() => undefined)}
+                      onUpdateProfile={handleUpdateProfile}
+                      onLogout={handleLogout}
+                    />
+                  </Suspense>
                 )}
               </motion.div>
             </AnimatePresence>
@@ -1807,7 +2134,10 @@ export function App() {
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span className="text-lg">{r.icon}</span>
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">{r.name}</div>
+                        <div className="text-xs font-bold text-white truncate flex items-center gap-1">
+                          {r.isPrivate && <Lock className="w-3 h-3 opacity-75 shrink-0" />}
+                          <span className="truncate">{r.name}</span>
+                        </div>
                         <div className="text-[10px] text-slate-400 truncate">{r.topic}</div>
                       </div>
                     </div>
@@ -1983,6 +2313,7 @@ export function App() {
               setBonusSec(0);
               setPurityPct(100);
               setFocusTask('');
+              syncServerSchedule(false, mode, 0, 0, activeSubject.name, '');
             }}
           />
         )}

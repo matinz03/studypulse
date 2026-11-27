@@ -291,6 +291,30 @@ db.exec(`
     claimed INTEGER NOT NULL DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS room_members (
+    room_id INTEGER NOT NULL REFERENCES study_rooms(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS active_timers (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL DEFAULT 'pomodoro',
+    subject_id INTEGER,
+    subject_name TEXT NOT NULL DEFAULT 'Focus',
+    subject_color TEXT NOT NULL DEFAULT '#10B981',
+    task_id INTEGER,
+    task_title TEXT NOT NULL DEFAULT '',
+    target_sec INTEGER NOT NULL DEFAULT 1500,
+    started_at_ms INTEGER NOT NULL,
+    accumulated_sec INTEGER NOT NULL DEFAULT 0,
+    is_running INTEGER NOT NULL DEFAULT 1,
+    strict_mode INTEGER NOT NULL DEFAULT 0,
+    device_id TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sessions_user_time ON study_sessions(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON study_sessions(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_game_items_user ON game_items(user_id, equipped DESC, created_at DESC);
@@ -308,6 +332,33 @@ if (!userCols.has('equipped_spirit')) {
 }
 if (!userCols.has('tasks_seeded')) {
   db.exec('ALTER TABLE users ADD COLUMN tasks_seeded INTEGER NOT NULL DEFAULT 0');
+}
+if (!userCols.has('token_version')) {
+  db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1');
+}
+
+const subCols = new Set(db.prepare('PRAGMA table_info(subjects)').all().map((c) => c.name));
+if (!subCols.has('sort_order')) {
+  db.exec('ALTER TABLE subjects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+  db.exec('UPDATE subjects SET sort_order = id');
+}
+
+const roomCols = new Set(db.prepare('PRAGMA table_info(study_rooms)').all().map((c) => c.name));
+if (!roomCols.has('is_private')) {
+  db.exec('ALTER TABLE study_rooms ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0');
+}
+if (!roomCols.has('passcode_hash')) {
+  db.exec("ALTER TABLE study_rooms ADD COLUMN passcode_hash TEXT NOT NULL DEFAULT ''");
+}
+if (!roomCols.has('invite_code')) {
+  db.exec("ALTER TABLE study_rooms ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''");
+}
+if (!roomCols.has('quiet_mode')) {
+  db.exec('ALTER TABLE study_rooms ADD COLUMN quiet_mode INTEGER NOT NULL DEFAULT 0');
+}
+const emptyInvites = db.prepare("SELECT id FROM study_rooms WHERE invite_code = '' OR invite_code IS NULL").all();
+for (const r of emptyInvites) {
+  db.prepare('UPDATE study_rooms SET invite_code = ? WHERE id = ?').run(crypto.randomBytes(4).toString('hex'), r.id);
 }
 
 const gpCols = new Set(db.prepare('PRAGMA table_info(game_profiles)').all().map((c) => c.name));

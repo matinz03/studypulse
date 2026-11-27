@@ -167,7 +167,23 @@ function sanitizeUser(u) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
+
+// Sliding-window auth rate limiter (20 attempts per 15 min per IP)
+const authRateMap = new Map();
+function authRateLimit(req, res, next) {
+  const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
+  const now = Date.now();
+  const windowMs = 15 * 60_000;
+  const recent = (authRateMap.get(ip) || []).filter((t) => now - t < windowMs);
+  if (recent.length >= 20) {
+    return res.status(429).json({ error: 'Too many authentication attempts. Please wait a few minutes.' });
+  }
+  recent.push(now);
+  authRateMap.set(ip, recent);
+  next();
+}
 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
@@ -176,6 +192,9 @@ function authMiddleware(req, res, next) {
   if (!decoded) return res.status(401).json({ error: 'Authentication required' });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.uid);
   if (!user) return res.status(401).json({ error: 'User not found' });
+  if (decoded.tv !== undefined && decoded.tv !== (user.token_version || 1)) {
+    return res.status(401).json({ error: 'Session expired. Please sign in again.' });
+  }
   req.user = user;
   next();
 }
@@ -306,7 +325,7 @@ function getHeroMetaMap() {
   return map;
 }
 
-function buildRoomOccupants(rooms) {
+function buildRoomOccupants(rooms, viewerUserId = null) {
   const byRoom = new Map();
   for (const r of rooms) byRoom.set(r.id, []);
   const heroMap = getHeroMetaMap();
@@ -324,6 +343,12 @@ function buildRoomOccupants(rooms) {
     });
   }
 
+  const memberRoomIds = new Set();
+  if (viewerUserId) {
+    const rows = db.prepare('SELECT room_id FROM room_members WHERE user_id = ?').all(viewerUserId);
+    for (const m of rows) memberRoomIds.add(m.room_id);
+  }
+
   const syncTimer = getSyncedRoomTimer();
   const msgStmt = db.prepare(`
     SELECT id, room_id AS roomId, user_id AS userId, username, display_name AS displayName, avatar, content, created_at AS createdAt
@@ -334,9 +359,14 @@ function buildRoomOccupants(rooms) {
   `);
 
   return rooms.map((r) => {
+    const isPrivate = Boolean(r.is_private);
+    const hasAccess =
+      !isPrivate ||
+      (viewerUserId && (r.created_by === viewerUserId || memberRoomIds.has(r.id)));
+    const locked = isPrivate && !hasAccess;
     const occupants = byRoom.get(r.id) || [];
     const raid = ensureRoomRaid(r.id);
-    const messages = msgStmt.all(r.id).reverse();
+    const messages = locked ? [] : msgStmt.all(r.id).reverse();
     return {
       id: r.id,
       name: r.name,
@@ -344,6 +374,10 @@ function buildRoomOccupants(rooms) {
       icon: r.icon,
       accent: r.accent,
       createdBy: r.created_by,
+      isPrivate,
+      locked,
+      inviteCode: locked ? undefined : r.invite_code || '',
+      quietMode: Boolean(r.quiet_mode),
       occupants,
       activeCount: occupants.filter((o) => o.status === 'studying').length,
       totalCount: occupants.length,
@@ -363,7 +397,11 @@ function broadcast(payload) {
 
 function broadcastPresence() {
   const rooms = db.prepare('SELECT * FROM study_rooms ORDER BY id ASC').all();
-  broadcast({ type: 'presence_snapshot', rooms: buildRoomOccupants(rooms) });
+  for (const ws of wsSockets) {
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'presence_snapshot', rooms: buildRoomOccupants(rooms, ws.userId || null) }));
+    }
+  }
 }
 
 async function sendPushToUser(userId, payloadObj) {
@@ -427,7 +465,7 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', authRateLimit, (req, res) => {
   const usernameRaw = String(req.body?.username || '').trim().toLowerCase();
   const displayName = String(req.body?.displayName || '').trim() || usernameRaw;
   const password = String(req.body?.password || '');
@@ -465,19 +503,45 @@ app.post('/api/auth/register', (req, res) => {
   createStarterSubjects(uid);
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
-  const token = signToken({ uid, username: user.username, exp: now + 30 * 86400_000 });
+  const token = signToken({ uid, username: user.username, tv: user.token_version || 1, exp: now + 30 * 86400_000 });
   res.status(201).json({ token, user: sanitizeUser(user) });
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authRateLimit, (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid username or password.' });
   }
-  const token = signToken({ uid: user.id, username: user.username, exp: Date.now() + 30 * 86400_000 });
+  const token = signToken({ uid: user.id, username: user.username, tv: user.token_version || 1, exp: Date.now() + 30 * 86400_000 });
   res.json({ token, user: sanitizeUser(user) });
+});
+
+app.post('/api/auth/change-password', authMiddleware, (req, res) => {
+  const currentPassword = String(req.body?.currentPassword || '');
+  const newPassword = String(req.body?.newPassword || '');
+  if (!verifyPassword(currentPassword, req.user.password_hash)) {
+    return res.status(400).json({ error: 'Current password is incorrect.' });
+  }
+  if (newPassword.length < 4) {
+    return res.status(400).json({ error: 'New password must be at least 4 characters.' });
+  }
+  const nextVersion = (req.user.token_version || 1) + 1;
+  db.prepare('UPDATE users SET password_hash = ?, token_version = ? WHERE id = ?').run(
+    hashPassword(newPassword),
+    nextVersion,
+    req.user.id
+  );
+  const token = signToken({ uid: req.user.id, username: req.user.username, tv: nextVersion, exp: Date.now() + 30 * 86400_000 });
+  res.json({ ok: true, token });
+});
+
+app.post('/api/auth/logout-all', authMiddleware, (req, res) => {
+  const nextVersion = (req.user.token_version || 1) + 1;
+  db.prepare('UPDATE users SET token_version = ? WHERE id = ?').run(nextVersion, req.user.id);
+  const token = signToken({ uid: req.user.id, username: req.user.username, tv: nextVersion, exp: Date.now() + 30 * 86400_000 });
+  res.json({ ok: true, token });
 });
 
 function buildFullUser(userId) {
@@ -643,7 +707,7 @@ function buildBootstrap(userId) {
 
   const userStats = getUserStudyStats(userId);
 
-  const subjects = db.prepare('SELECT id, name, color, icon FROM subjects WHERE user_id = ? ORDER BY id ASC').all(userId);
+  const subjects = db.prepare('SELECT id, name, color, icon FROM subjects WHERE user_id = ? ORDER BY sort_order ASC, id ASC').all(userId);
   const friendRows = db.prepare('SELECT friend_id FROM friendships WHERE user_id = ?').all(userId);
   const friendSet = new Set(friendRows.map((r) => r.friend_id));
 
@@ -743,7 +807,7 @@ function buildBootstrap(userId) {
 
   // Rooms with live presence
   const rawRooms = db.prepare('SELECT * FROM study_rooms ORDER BY id ASC').all();
-  const rooms = buildRoomOccupants(rawRooms);
+  const rooms = buildRoomOccupants(rawRooms, userId);
 
   // Feed items (shared sessions)
   const feedRows = db.prepare(`
@@ -802,7 +866,7 @@ function buildBootstrap(userId) {
       themeColor: row.theme_color,
       streakDays: row.streak_days,
       level: levelFromXp(row.xp).level,
-      isFriend: row.user_id === userId || friendSet.has(row.user_id),
+      isFriend: friendSet.has(row.user_id),
       subjectName: row.subject_name,
       subjectColor: row.subject_color,
       mode: row.mode,
@@ -977,6 +1041,25 @@ function buildBootstrap(userId) {
   const league = computeLeagueState(weekMins, weekBoard);
   const activeDuel = buildDuelState(userId, weekMins, weekBoard, directory);
 
+  const activeTimerRow = db.prepare('SELECT * FROM active_timers WHERE user_id = ?').get(userId);
+  const activeTimer = activeTimerRow
+    ? {
+        mode: activeTimerRow.mode,
+        subjectId: activeTimerRow.subject_id,
+        subjectName: activeTimerRow.subject_name,
+        subjectColor: activeTimerRow.subject_color,
+        taskId: activeTimerRow.task_id,
+        taskTitle: activeTimerRow.task_title,
+        targetSec: activeTimerRow.target_sec,
+        startedAtMs: activeTimerRow.started_at_ms,
+        accumulatedSec: activeTimerRow.accumulated_sec,
+        isRunning: Boolean(activeTimerRow.is_running),
+        strictMode: Boolean(activeTimerRow.strict_mode),
+        deviceId: activeTimerRow.device_id,
+        updatedAt: activeTimerRow.updated_at,
+      }
+    : null;
+
   return {
     user: {
       ...sanitizeUser(user),
@@ -1004,6 +1087,7 @@ function buildBootstrap(userId) {
     prevWeekMins: Math.round(prevWeekSec / 60),
     todayTimeline,
     studyLogs,
+    activeTimer,
     vapidPublicKey: vapidKeys.publicKey,
     directory,
     leaderboards: {
@@ -1088,14 +1172,267 @@ app.post('/api/timer/cancel', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+app.put('/api/timer/active', authMiddleware, (req, res) => {
+  const mode = String(req.body?.mode || 'pomodoro').slice(0, 20);
+  const subjectId = req.body?.subjectId ? Number(req.body.subjectId) : null;
+  const subjectName = String(req.body?.subjectName || 'Focus').trim().slice(0, 40);
+  const subjectColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '') ? req.body.subjectColor : '#10B981';
+  const taskId = req.body?.taskId ? Number(req.body.taskId) : null;
+  const taskTitle = String(req.body?.taskTitle || '').slice(0, 100);
+  const targetSec = Math.max(0, Math.min(43200, Math.round(Number(req.body?.targetSec || 0))));
+  const startedAtMs = Math.max(0, Math.round(Number(req.body?.startedAtMs || Date.now())));
+  const accumulatedSec = Math.max(0, Math.min(43200, Math.round(Number(req.body?.accumulatedSec || 0))));
+  const isRunning = req.body?.isRunning ? 1 : 0;
+  const strictMode = req.body?.strictMode ? 1 : 0;
+  const deviceId = String(req.body?.deviceId || '').slice(0, 64);
+  const now = Date.now();
+
+  db.prepare(`
+    INSERT INTO active_timers (user_id, mode, subject_id, subject_name, subject_color, task_id, task_title, target_sec, started_at_ms, accumulated_sec, is_running, strict_mode, device_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      mode = excluded.mode,
+      subject_id = excluded.subject_id,
+      subject_name = excluded.subject_name,
+      subject_color = excluded.subject_color,
+      task_id = excluded.task_id,
+      task_title = excluded.task_title,
+      target_sec = excluded.target_sec,
+      started_at_ms = excluded.started_at_ms,
+      accumulated_sec = excluded.accumulated_sec,
+      is_running = excluded.is_running,
+      strict_mode = excluded.strict_mode,
+      device_id = excluded.device_id,
+      updated_at = excluded.updated_at
+  `).run(req.user.id, mode, subjectId, subjectName, subjectColor, taskId, taskTitle, targetSec, startedAtMs, accumulatedSec, isRunning, strictMode, deviceId, now);
+
+  const activeTimer = {
+    mode,
+    subjectId,
+    subjectName,
+    subjectColor,
+    taskId,
+    taskTitle,
+    targetSec,
+    startedAtMs,
+    accumulatedSec,
+    isRunning: Boolean(isRunning),
+    strictMode: Boolean(strictMode),
+    deviceId,
+    updatedAt: now,
+  };
+
+  for (const ws of wsSockets) {
+    if (ws.readyState === 1 && ws.userId === req.user.id) {
+      ws.send(JSON.stringify({ type: 'timer_state_sync', activeTimer }));
+    }
+  }
+  res.json({ ok: true, activeTimer });
+});
+
+app.delete('/api/timer/active', authMiddleware, (req, res) => {
+  db.prepare('DELETE FROM active_timers WHERE user_id = ?').run(req.user.id);
+  for (const ws of wsSockets) {
+    if (ws.readyState === 1 && ws.userId === req.user.id) {
+      ws.send(JSON.stringify({ type: 'timer_state_sync', activeTimer: null }));
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.get('/api/analytics/week', authMiddleware, (req, res) => {
+  const offset = Math.max(-52, Math.min(0, Math.round(Number(req.query?.offset || 0))));
+  const baseWeekStart = getCalendarWeekStartMs(Date.now());
+  const weekStartMs = baseWeekStart + offset * 7 * 86400_000;
+  const weekEndMs = weekStartMs + 7 * 86400_000;
+  const prevWeekStartMs = weekStartMs - 7 * 86400_000;
+
+  const sessions = db.prepare(`
+    SELECT subject_name, subject_color, duration_sec, purity_pct, created_at
+    FROM study_sessions
+    WHERE user_id = ? AND created_at >= ? AND created_at < ?
+  `).all(req.user.id, prevWeekStartMs, weekEndMs);
+
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const curDays = Array.from({ length: 7 }, (_, i) => {
+    const dt = new Date(weekStartMs + i * 86400_000);
+    return { date: dt.toISOString().slice(0, 10), label: dayLabels[i], sec: 0, prevSec: 0, puritySum: 0, count: 0 };
+  });
+
+  const curSubjSec = new Map();
+  const prevSubjSec = new Map();
+  const hourSec = new Array(24).fill(0);
+  let totalSec = 0;
+  let prevTotalSec = 0;
+  let purityWeighted = 0;
+
+  for (const s of sessions) {
+    if (s.created_at >= weekStartMs && s.created_at < weekEndMs) {
+      const idx = Math.max(0, Math.min(6, Math.floor((s.created_at - weekStartMs) / 86400_000)));
+      curDays[idx].sec += s.duration_sec;
+      curDays[idx].puritySum += s.purity_pct * s.duration_sec;
+      curDays[idx].count += 1;
+      totalSec += s.duration_sec;
+      purityWeighted += s.purity_pct * s.duration_sec;
+      const hr = new Date(s.created_at).getHours();
+      hourSec[hr] += s.duration_sec;
+      const prevEntry = curSubjSec.get(s.subject_name) || { name: s.subject_name, color: s.subject_color, sec: 0 };
+      prevEntry.sec += s.duration_sec;
+      curSubjSec.set(s.subject_name, prevEntry);
+    } else if (s.created_at >= prevWeekStartMs && s.created_at < weekStartMs) {
+      const idx = Math.max(0, Math.min(6, Math.floor((s.created_at - prevWeekStartMs) / 86400_000)));
+      curDays[idx].prevSec += s.duration_sec;
+      prevTotalSec += s.duration_sec;
+      prevSubjSec.set(s.subject_name, (prevSubjSec.get(s.subject_name) || 0) + s.duration_sec);
+    }
+  }
+
+  let peakHour = 0;
+  let peakSec = 0;
+  for (let h = 0; h < 24; h++) {
+    if (hourSec[h] > peakSec) {
+      peakSec = hourSec[h];
+      peakHour = h;
+    }
+  }
+  const fmtHr = (h) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'AM' : 'PM'}`;
+  const peakWindowLabel = peakSec <= 0 ? 'No sessions' : `${fmtHr(peakHour)}–${fmtHr((peakHour + 2) % 24)}`;
+
+  const totalMins = Math.round(totalSec / 60);
+  const prevTotalMins = Math.round(prevTotalSec / 60);
+  const wowDeltaPct = prevTotalMins > 0 ? Math.round(((totalMins - prevTotalMins) / prevTotalMins) * 100) : totalMins > 0 ? 100 : 0;
+
+  let topSubject = null;
+  const sortedSubj = [...curSubjSec.values()].sort((a, b) => b.sec - a.sec);
+  if (sortedSubj.length > 0) {
+    const top = sortedSubj[0];
+    const topMins = Math.round(top.sec / 60);
+    const prevTopMins = Math.round((prevSubjSec.get(top.name) || 0) / 60);
+    const subjDelta = prevTopMins > 0 ? Math.round(((topMins - prevTopMins) / prevTopMins) * 100) : topMins > 0 ? 100 : 0;
+    topSubject = { name: top.name, color: top.color, minutes: topMins, wowDeltaPct: subjDelta };
+  }
+
+  const dailyGoal = req.user.daily_goal_mins || 120;
+  const days = curDays.map((d) => ({
+    date: d.date,
+    label: d.label,
+    minutes: Math.round(d.sec / 60),
+    prevMinutes: Math.round(d.prevSec / 60),
+    avgPurity: d.sec > 0 ? Math.round(d.puritySum / d.sec) : 100,
+    sessions: d.count,
+  }));
+  const goalDaysHit = days.filter((d) => d.minutes >= dailyGoal).length;
+
+  const sDate = new Date(weekStartMs);
+  const eDate = new Date(weekEndMs - 1);
+  const fmtShort = (dt) => dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+  res.json({
+    offset,
+    weekStartIso: sDate.toISOString().slice(0, 10),
+    weekEndIso: eDate.toISOString().slice(0, 10),
+    label: `${fmtShort(sDate)} – ${fmtShort(eDate)}`,
+    days,
+    totalMins,
+    prevTotalMins,
+    wowDeltaPct,
+    topSubject,
+    avgPurity: totalSec > 0 ? Math.round(purityWeighted / totalSec) : 100,
+    peakWindowLabel,
+    goalDaysHit,
+  });
+});
+
 app.post('/api/subjects', authMiddleware, (req, res) => {
   const name = String(req.body?.name || '').trim().slice(0, 32);
   const color = /^#[0-9a-fA-F]{6}$/.test(req.body?.color || '') ? req.body.color : '#FAFAFA';
   const icon = String(req.body?.icon || '📘').slice(0, 8);
   if (!name) return res.status(400).json({ error: 'Subject name is required' });
 
-  const info = db.prepare('INSERT INTO subjects (user_id, name, color, icon) VALUES (?, ?, ?, ?)').run(req.user.id, name, color, icon);
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM subjects WHERE user_id = ?').get(req.user.id).m;
+  const info = db.prepare('INSERT INTO subjects (user_id, name, color, icon, sort_order) VALUES (?, ?, ?, ?, ?)').run(
+    req.user.id,
+    name,
+    color,
+    icon,
+    maxSort + 1
+  );
   res.status(201).json({ id: Number(info.lastInsertRowid), name, color, icon });
+});
+
+app.patch('/api/subjects/:id', authMiddleware, (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM subjects WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  if (!existing) return res.status(404).json({ error: 'Subject not found' });
+
+  const nextName = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 32) : existing.name;
+  if (!nextName) return res.status(400).json({ error: 'Subject name cannot be empty' });
+  const nextColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.color || '') ? req.body.color : existing.color;
+  const nextIcon = req.body?.icon ? String(req.body.icon).slice(0, 8) : existing.icon;
+  const cascade = req.body?.cascadeSessions !== false;
+
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE subjects SET name = ?, color = ?, icon = ? WHERE id = ? AND user_id = ?').run(
+      nextName,
+      nextColor,
+      nextIcon,
+      id,
+      req.user.id
+    );
+    if (cascade) {
+      db.prepare('UPDATE study_sessions SET subject_name = ?, subject_color = ? WHERE user_id = ? AND LOWER(subject_name) = LOWER(?)').run(
+        nextName,
+        nextColor,
+        req.user.id,
+        existing.name
+      );
+      db.prepare('UPDATE study_tasks SET subject_name = ? WHERE user_id = ? AND LOWER(subject_name) = LOWER(?)').run(
+        nextName,
+        req.user.id,
+        existing.name
+      );
+    }
+  });
+  tx();
+  res.json({ ok: true, subject: { id, name: nextName, color: nextColor, icon: nextIcon } });
+});
+
+app.post('/api/subjects/reorder', authMiddleware, (req, res) => {
+  const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds.map(Number).filter((n) => n > 0) : [];
+  if (!orderedIds.length) return res.status(400).json({ error: 'orderedIds array required' });
+  const tx = db.transaction(() => {
+    const upd = db.prepare('UPDATE subjects SET sort_order = ? WHERE id = ? AND user_id = ?');
+    orderedIds.forEach((sid, idx) => upd.run(idx + 1, sid, req.user.id));
+  });
+  tx();
+  res.json({ ok: true });
+});
+
+app.post('/api/subjects/merge', authMiddleware, (req, res) => {
+  const sourceId = Number(req.body?.sourceId);
+  const targetId = Number(req.body?.targetId);
+  if (!sourceId || !targetId || sourceId === targetId) {
+    return res.status(400).json({ error: 'Pick two distinct subjects to merge' });
+  }
+  const source = db.prepare('SELECT * FROM subjects WHERE id = ? AND user_id = ?').get(sourceId, req.user.id);
+  const target = db.prepare('SELECT * FROM subjects WHERE id = ? AND user_id = ?').get(targetId, req.user.id);
+  if (!source || !target) return res.status(404).json({ error: 'Subject not found' });
+
+  let movedSessions = 0;
+  const tx = db.transaction(() => {
+    const info = db
+      .prepare('UPDATE study_sessions SET subject_name = ?, subject_color = ? WHERE user_id = ? AND LOWER(subject_name) = LOWER(?)')
+      .run(target.name, target.color, req.user.id, source.name);
+    movedSessions = info.changes;
+    db.prepare('UPDATE study_tasks SET subject_name = ? WHERE user_id = ? AND LOWER(subject_name) = LOWER(?)').run(
+      target.name,
+      req.user.id,
+      source.name
+    );
+    db.prepare('DELETE FROM subjects WHERE id = ? AND user_id = ?').run(sourceId, req.user.id);
+  });
+  tx();
+  res.json({ ok: true, movedSessions, target });
 });
 
 app.delete('/api/subjects/:id', authMiddleware, (req, res) => {
@@ -1665,7 +2002,7 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const existing = db.prepare('SELECT id, user_id, subject_color FROM study_sessions WHERE id = ?').get(sessionId);
+  const existing = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(sessionId);
   if (!existing) {
     return res.status(404).json({ error: 'Study session not found' });
   }
@@ -1673,27 +2010,56 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
     return res.status(403).json({ error: 'You can only edit your own study logs' });
   }
 
-  const subjectName = String(req.body?.subjectName || '').trim().slice(0, 40);
+  const subjectName =
+    req.body?.subjectName !== undefined
+      ? String(req.body.subjectName || '').trim().slice(0, 40)
+      : existing.subject_name;
   if (!subjectName) {
     return res.status(400).json({ error: 'Topic cannot be empty' });
   }
 
-  let subjectColor = '';
+  let subjectColor = existing.subject_color || '#10B981';
   if (/^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '')) {
     subjectColor = req.body.subjectColor;
-  } else {
+  } else if (req.body?.subjectName !== undefined) {
     const matchedSubject = db
       .prepare('SELECT color FROM subjects WHERE user_id = ? AND LOWER(name) = LOWER(?) LIMIT 1')
       .get(req.user.id, subjectName);
-    subjectColor = matchedSubject?.color || existing.subject_color || '#10B981';
+    if (matchedSubject?.color) subjectColor = matchedSubject.color;
   }
 
-  db.prepare('UPDATE study_sessions SET subject_name = ?, subject_color = ? WHERE id = ? AND user_id = ?').run(
-    subjectName,
-    subjectColor,
-    sessionId,
-    req.user.id
-  );
+  const nextDurationSec =
+    req.body?.durationSec !== undefined
+      ? Math.max(60, Math.min(43200, Math.round(Number(req.body.durationSec))))
+      : existing.duration_sec;
+  const nextNote =
+    req.body?.note !== undefined ? String(req.body.note || '').trim().slice(0, 280) : existing.note;
+  let nextCreatedAt = existing.created_at;
+  if (req.body?.createdAt !== undefined) {
+    const parsedTs = Number(req.body.createdAt);
+    if (!Number.isFinite(parsedTs) || parsedTs <= 0 || parsedTs > Date.now() + 60_000) {
+      return res.status(400).json({ error: 'Invalid timestamp (cannot be in the future)' });
+    }
+    nextCreatedAt = Math.round(parsedTs);
+  }
+
+  let nextXp = existing.xp_earned;
+  if (nextDurationSec !== existing.duration_sec) {
+    const mins = Math.max(1, Math.round(nextDurationSec / 60));
+    const purityBonus = existing.purity_pct >= 95 ? 35 : existing.purity_pct >= 80 ? 15 : 0;
+    nextXp = Math.max(20, mins * 12 + purityBonus);
+  }
+  const xpDelta = nextXp - existing.xp_earned;
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      'UPDATE study_sessions SET subject_name = ?, subject_color = ?, duration_sec = ?, note = ?, created_at = ?, xp_earned = ? WHERE id = ? AND user_id = ?'
+    ).run(subjectName, subjectColor, nextDurationSec, nextNote, nextCreatedAt, nextXp, sessionId, req.user.id);
+    if (xpDelta !== 0) {
+      db.prepare('UPDATE users SET xp = MAX(0, xp + ?) WHERE id = ?').run(xpDelta, req.user.id);
+    }
+  });
+  tx();
 
   res.json({
     ok: true,
@@ -1701,8 +2067,76 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
       id: sessionId,
       subjectName,
       subjectColor,
+      durationSec: nextDurationSec,
+      note: nextNote,
+      createdAt: nextCreatedAt,
+      xpEarned: nextXp,
     },
   });
+});
+
+app.delete('/api/sessions/:id', authMiddleware, (req, res) => {
+  const sessionId = Number(req.params.id);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+  const existing = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(sessionId);
+  if (!existing) return res.status(404).json({ error: 'Study session not found' });
+  if (existing.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'You can only delete your own study logs' });
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM study_sessions WHERE id = ? AND user_id = ?').run(sessionId, req.user.id);
+    if (existing.xp_earned > 0) {
+      db.prepare('UPDATE users SET xp = MAX(0, xp - ?) WHERE id = ?').run(existing.xp_earned, req.user.id);
+    }
+  });
+  tx();
+
+  res.json({
+    ok: true,
+    deletedId: sessionId,
+    deletedSession: {
+      subjectName: existing.subject_name,
+      subjectColor: existing.subject_color,
+      mode: existing.mode,
+      durationSec: existing.duration_sec,
+      purityPct: existing.purity_pct,
+      xpEarned: existing.xp_earned,
+      note: existing.note,
+      sharedToFeed: existing.shared_to_feed,
+      createdAt: existing.created_at,
+    },
+  });
+});
+
+app.post('/api/sessions/restore', authMiddleware, (req, res) => {
+  const s = req.body?.session || req.body || {};
+  const subjectName = String(s.subjectName || 'Focus Block').trim().slice(0, 40);
+  const subjectColor = /^#[0-9a-fA-F]{6}$/.test(s.subjectColor || '') ? s.subjectColor : '#10B981';
+  const mode = String(s.mode || 'pomodoro').slice(0, 20);
+  const durationSec = Math.max(5, Math.min(43200, Math.round(Number(s.durationSec || 60))));
+  const purityPct = Math.max(10, Math.min(100, Math.round(Number(s.purityPct ?? 100))));
+  const xpEarned = Math.max(0, Math.round(Number(s.xpEarned || 0)));
+  const note = String(s.note || '').trim().slice(0, 280);
+  const sharedToFeed = s.sharedToFeed === 0 || s.sharedToFeed === false ? 0 : 1;
+  const createdAt = Math.max(1, Math.round(Number(s.createdAt || Date.now())));
+
+  let restoredId = 0;
+  const tx = db.transaction(() => {
+    const info = db.prepare(`
+      INSERT INTO study_sessions (user_id, subject_name, subject_color, mode, duration_sec, purity_pct, xp_earned, note, shared_to_feed, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, subjectName, subjectColor, mode, durationSec, purityPct, xpEarned, note, sharedToFeed, createdAt);
+    restoredId = Number(info.lastInsertRowid);
+    if (xpEarned > 0) {
+      db.prepare('UPDATE users SET xp = xp + ? WHERE id = ?').run(xpEarned, req.user.id);
+    }
+  });
+  tx();
+
+  res.status(201).json({ ok: true, id: restoredId });
 });
 
 app.post('/api/friends/toggle', authMiddleware, (req, res) => {
@@ -1779,18 +2213,66 @@ app.post('/api/rooms', authMiddleware, (req, res) => {
   const topic = String(req.body?.topic || 'Open co-study room').trim().slice(0, 60);
   const icon = String(req.body?.icon || '✨').slice(0, 8);
   const accent = /^#[0-9a-fA-F]{6}$/.test(req.body?.accent || '') ? req.body.accent : '#10B981';
+  const isPrivate = req.body?.isPrivate ? 1 : 0;
+  const passcode = String(req.body?.passcode || '').trim();
+  const quietMode = req.body?.quietMode ? 1 : 0;
   if (!name) return res.status(400).json({ error: 'Room name required' });
+  if (isPrivate && passcode.length < 3) {
+    return res.status(400).json({ error: 'Private rooms require a passcode of at least 3 characters' });
+  }
 
-  const info = db.prepare('INSERT INTO study_rooms (name, topic, icon, accent, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-    name,
-    topic,
-    icon,
-    accent,
-    req.user.id,
-    Date.now()
-  );
+  const passcodeHash = isPrivate ? hashPassword(passcode) : '';
+  const inviteCode = crypto.randomBytes(4).toString('hex');
+  const now = Date.now();
+  const info = db.prepare(
+    'INSERT INTO study_rooms (name, topic, icon, accent, created_by, is_private, passcode_hash, invite_code, quiet_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(name, topic, icon, accent, req.user.id, isPrivate, passcodeHash, inviteCode, quietMode, now);
+  const newId = Number(info.lastInsertRowid);
+  db.prepare('INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)').run(newId, req.user.id, now);
   broadcastPresence();
-  res.status(201).json({ id: Number(info.lastInsertRowid), name, topic, icon, accent });
+  res.status(201).json({ id: newId, name, topic, icon, accent, isPrivate: Boolean(isPrivate), inviteCode, quietMode: Boolean(quietMode) });
+});
+
+app.post('/api/rooms/:id/unlock', authMiddleware, (req, res) => {
+  const roomId = Number(req.params.id);
+  const room = db.prepare('SELECT * FROM study_rooms WHERE id = ?').get(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!room.is_private || room.created_by === req.user.id) {
+    return res.json({ ok: true, roomId });
+  }
+
+  const inviteCode = String(req.body?.inviteCode || '').trim();
+  const passcode = String(req.body?.passcode || '').trim();
+  const validInvite = inviteCode && room.invite_code && inviteCode === room.invite_code;
+  const validPasscode = passcode && room.passcode_hash && verifyPassword(passcode, room.passcode_hash);
+  if (!validInvite && !validPasscode) {
+    return res.status(403).json({ error: 'Incorrect room passcode' });
+  }
+
+  db.prepare('INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)').run(roomId, req.user.id, Date.now());
+  res.json({ ok: true, roomId });
+});
+
+app.post('/api/rooms/join-invite', authMiddleware, (req, res) => {
+  const inviteCode = String(req.body?.inviteCode || '').trim();
+  if (!inviteCode) return res.status(400).json({ error: 'Invite code required' });
+  const room = db.prepare('SELECT * FROM study_rooms WHERE invite_code = ?').get(inviteCode);
+  if (!room) return res.status(404).json({ error: 'Invalid or expired invite link' });
+  db.prepare('INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)').run(room.id, req.user.id, Date.now());
+  res.json({ ok: true, roomId: room.id, roomName: room.name });
+});
+
+app.patch('/api/rooms/:id', authMiddleware, (req, res) => {
+  const roomId = Number(req.params.id);
+  const room = db.prepare('SELECT * FROM study_rooms WHERE id = ?').get(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.created_by && room.created_by !== req.user.id) {
+    return res.status(403).json({ error: 'Only the room creator can change Sanctuary settings' });
+  }
+  const nextQuiet = req.body?.quietMode !== undefined ? (req.body.quietMode ? 1 : 0) : room.quiet_mode;
+  db.prepare('UPDATE study_rooms SET quiet_mode = ? WHERE id = ?').run(nextQuiet, roomId);
+  broadcastPresence();
+  res.json({ ok: true, quietMode: Boolean(nextQuiet) });
 });
 
 app.delete('/api/rooms/:id', authMiddleware, (req, res) => {
@@ -1818,8 +2300,16 @@ app.delete('/api/rooms/:id', authMiddleware, (req, res) => {
 
 app.post('/api/rooms/:id/chat', authMiddleware, (req, res) => {
   const roomId = Number(req.params.id);
-  const room = db.prepare('SELECT id FROM study_rooms WHERE id = ?').get(roomId);
+  const room = db.prepare('SELECT * FROM study_rooms WHERE id = ?').get(roomId);
   if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.is_private && room.created_by !== req.user.id) {
+    const member = db.prepare('SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?').get(roomId, req.user.id);
+    if (!member) return res.status(403).json({ error: 'Unlock this private room first' });
+  }
+  const syncTimer = getSyncedRoomTimer();
+  if (room.quiet_mode && syncTimer.phase === 'focus') {
+    return res.status(403).json({ error: 'Quiet Mode active — chat pauses until the 5m break!' });
+  }
   const content = String(req.body?.content || '').trim().slice(0, 240);
   if (!content) return res.status(400).json({ error: 'Message cannot be empty' });
 
@@ -1984,7 +2474,7 @@ wss.on('connection', (ws) => {
   ws.userId = null;
 
   const rooms = db.prepare('SELECT * FROM study_rooms ORDER BY id ASC').all();
-  ws.send(JSON.stringify({ type: 'presence_snapshot', rooms: buildRoomOccupants(rooms) }));
+  ws.send(JSON.stringify({ type: 'presence_snapshot', rooms: buildRoomOccupants(rooms, null) }));
 
   ws.on('message', (raw) => {
     let msg;
@@ -1999,6 +2489,7 @@ wss.on('connection', (ws) => {
       if (!decoded) return;
       const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.uid);
       if (!user) return;
+      if (decoded.tv !== undefined && decoded.tv !== (user.token_version || 1)) return;
       ws.userId = user.id;
       ws.userMeta = user;
       const requestedRoomId = Number(msg.roomId);

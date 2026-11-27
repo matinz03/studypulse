@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Award,
   Calendar,
@@ -17,6 +17,14 @@ import {
   LayoutGrid,
   Pencil,
   X,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+  TrendingDown,
+  Shield,
+  Eye,
+  EyeOff,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   Achievement,
@@ -29,9 +37,17 @@ import {
   TodayTimelineItem,
   User,
   WeekDay,
+  WeeklyAnalyticsResponse,
 } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { StorePanel } from './StorePanel';
+import { SubjectManagerModal } from './SubjectManagerModal';
+
+function toLocalDateTimeValue(ts: number) {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 interface ProfileViewProps {
   themeId?: ThemeId;
@@ -50,7 +66,20 @@ interface ProfileViewProps {
   game: GameState;
   achievements: Achievement[];
   onUpdateProfile: (payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) => Promise<void>;
-  onUpdateSessionTopic?: (sessionId: number, subjectName: string, subjectColor?: string) => Promise<void>;
+  onUpdateSession?: (
+    sessionId: number,
+    payload: { subjectName?: string; subjectColor?: string; durationSec?: number; note?: string; createdAt?: number }
+  ) => Promise<void>;
+  onDeleteSession?: (sessionId: number) => Promise<void>;
+  onFetchWeeklyAnalytics?: (offset: number) => Promise<WeeklyAnalyticsResponse>;
+  onUpdateSubject?: (
+    subjectId: number,
+    payload: { name?: string; color?: string; icon?: string; cascadeSessions?: boolean }
+  ) => Promise<void>;
+  onReorderSubjects?: (orderedIds: number[]) => Promise<void>;
+  onMergeSubjects?: (sourceId: number, targetId: number) => Promise<void>;
+  onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
+  onLogoutAllDevices?: () => Promise<void>;
   onBuyShopItem: (itemKey: string) => Promise<ShopBuyResponse | void>;
   onRerollDailyShop: () => Promise<void>;
   onEquipGameItem: (itemId: number) => Promise<void>;
@@ -85,7 +114,14 @@ export function ProfileView({
   game,
   achievements,
   onUpdateProfile,
-  onUpdateSessionTopic,
+  onUpdateSession,
+  onDeleteSession,
+  onFetchWeeklyAnalytics,
+  onUpdateSubject,
+  onReorderSubjects,
+  onMergeSubjects,
+  onChangePassword,
+  onLogoutAllDevices,
   onBuyShopItem,
   onRerollDailyShop,
   onEquipGameItem,
@@ -93,31 +129,132 @@ export function ProfileView({
   onLogout,
 }: ProfileViewProps) {
   const [editing, setEditing] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'security'>('profile');
   const [displayName, setDisplayName] = useState(user.displayName);
   const [bio, setBio] = useState(user.bio);
   const [dailyGoalMins, setDailyGoalMins] = useState(user.dailyGoalMins);
   const [saving, setSaving] = useState(false);
+
+  // Security drawer state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [secError, setSecError] = useState<string | null>(null);
+  const [secBusy, setSecBusy] = useState(false);
+
   const [heatRange, setHeatRange] = useState<'90' | '365'>('90');
   const [section, setSection] = useState<MeSection>('all');
   const [logScope, setLogScope] = useState<'today' | 'all'>(() => (todayTimeline.length > 0 ? 'today' : 'all'));
   const [editingLogId, setEditingLogId] = useState<number | null>(null);
   const [logTopicInput, setLogTopicInput] = useState('');
   const [logTopicColor, setLogTopicColor] = useState<string | undefined>(undefined);
+  const [logDurationMins, setLogDurationMins] = useState<number>(25);
+  const [logNoteInput, setLogNoteInput] = useState<string>('');
+  const [logDateInput, setLogDateInput] = useState<string>('');
   const [savingLogId, setSavingLogId] = useState<number | null>(null);
+
+  // Subject Manager modal
+  const [showManageSubjects, setShowManageSubjects] = useState(false);
+
+  // Week-by-Week Analytics (#9)
+  const [weekOffset, setWeekOffset] = useState<number>(0);
+  const [weeklyData, setWeeklyData] = useState<WeeklyAnalyticsResponse | null>(null);
+  const [loadingWeek, setLoadingWeek] = useState(false);
+  const [selectedDayIdx, setSelectedDayIdx] = useState<number | null>(null);
+  const [selectedHourIdx, setSelectedHourIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!onFetchWeeklyAnalytics) return;
+    let cancelled = false;
+    setLoadingWeek(true);
+    onFetchWeeklyAnalytics(weekOffset)
+      .then((res) => {
+        if (!cancelled) {
+          setWeeklyData(res);
+          setSelectedDayIdx(null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingWeek(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [weekOffset, user.sessionsCount, user.totalMins, onFetchWeeklyAnalytics]);
 
   const allLogs = studyLogs.length > 0 ? studyLogs : [...todayTimeline].reverse();
   const visibleLogs = logScope === 'today' ? todayTimeline : allLogs;
 
-  async function saveLogTopic(sessionId: number, customName?: string, customColor?: string) {
-    if (!onUpdateSessionTopic) return;
-    const nextName = (customName ?? logTopicInput).trim().slice(0, 40);
+  function openLogEditor(item: TodayTimelineItem) {
+    if (editingLogId === item.id) {
+      setEditingLogId(null);
+      return;
+    }
+    setEditingLogId(item.id);
+    setLogTopicInput(item.subjectName);
+    setLogTopicColor(item.subjectColor);
+    setLogDurationMins(Math.max(1, Math.round(item.durationSec / 60)));
+    setLogNoteInput(item.note || '');
+    setLogDateInput(toLocalDateTimeValue(item.createdAt));
+  }
+
+  async function saveLogEdit(sessionId: number, quickSubject?: { name: string; color: string }) {
+    if (!onUpdateSession) return;
+    const nextName = (quickSubject?.name ?? logTopicInput).trim().slice(0, 40);
     if (!nextName || savingLogId === sessionId) return;
     setSavingLogId(sessionId);
     try {
-      await onUpdateSessionTopic(sessionId, nextName, customColor ?? logTopicColor);
+      const payload: {
+        subjectName?: string;
+        subjectColor?: string;
+        durationSec?: number;
+        note?: string;
+        createdAt?: number;
+      } = {
+        subjectName: nextName,
+        subjectColor: quickSubject?.color ?? logTopicColor,
+      };
+      if (!quickSubject) {
+        payload.durationSec = Math.max(60, Math.min(43200, Math.round((logDurationMins || 1) * 60)));
+        payload.note = logNoteInput;
+        if (logDateInput) {
+          const parsed = new Date(logDateInput).getTime();
+          if (Number.isFinite(parsed) && parsed > 0 && parsed <= Date.now() + 60_000) {
+            payload.createdAt = parsed;
+          }
+        }
+      }
+      await onUpdateSession(sessionId, payload);
       setEditingLogId(null);
     } finally {
       setSavingLogId(null);
+    }
+  }
+
+  async function submitPasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    if (!onChangePassword || secBusy) return;
+    setSecError(null);
+    if (newPassword.length < 4) {
+      setSecError('New password must be at least 4 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setSecError('New password and confirmation do not match.');
+      return;
+    }
+    setSecBusy(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : 'Unable to change password.');
+    } finally {
+      setSecBusy(false);
     }
   }
 
@@ -265,16 +402,18 @@ export function ProfileView({
             <button
               type="button"
               onClick={() => setEditing((v) => !v)}
-              className="p-2 rounded-xl sp-badge text-slate-300 hover:text-white cursor-pointer"
-              aria-label="Edit profile"
+              className="w-9 h-9 rounded-xl sp-badge text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+              aria-label="Account and profile settings"
+              title="Profile & Security Settings"
             >
               <Settings2 className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={onLogout}
-              className="p-2 rounded-xl sp-badge hover:border-rose-400/50 hover:text-rose-400 cursor-pointer"
+              className="w-9 h-9 rounded-xl sp-badge hover:border-rose-400/50 hover:text-rose-400 flex items-center justify-center cursor-pointer"
               aria-label="Sign out"
+              title="Sign out"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -311,52 +450,172 @@ export function ProfileView({
           </div>
         )}
 
-        {/* Inline Edit Drawer */}
+        {/* Inline Account Settings & Security 2-Tab Drawer */}
         {editing && (
-          <form onSubmit={saveProfile} className="pt-3 border-t border-white/10 space-y-2.5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[10px] text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-400 mb-1">Bio</label>
-                <input
-                  type="text"
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
-                />
-              </div>
+          <div className="pt-3 border-t border-white/10 space-y-3">
+            <div className="grid grid-cols-2 p-1 rounded-xl sp-inset max-w-[240px]">
+              <button
+                type="button"
+                onClick={() => setSettingsTab('profile')}
+                className={`py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${
+                  settingsTab === 'profile' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsTab('security')}
+                className={`py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                  settingsTab === 'security' ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Shield className="w-3 h-3" /> Security
+              </button>
             </div>
-            <div>
-              <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                <span>Daily Study Goal</span>
-                <span className="font-mono-num text-white font-bold">{dailyGoalMins} mins / day</span>
+
+            {settingsTab === 'profile' ? (
+              <form onSubmit={saveProfile} className="space-y-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Display Name</label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Bio</label>
+                    <input
+                      type="text"
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                    <span>Daily Study Goal</span>
+                    <span className="font-mono-num text-white font-bold">{dailyGoalMins} mins / day</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={30}
+                    max={360}
+                    step={15}
+                    value={dailyGoalMins}
+                    onChange={(e) => setDailyGoalMins(Number(e.target.value))}
+                    className="w-full accent-current"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" /> Save Changes
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-3">
+                {onChangePassword && (
+                  <form onSubmit={submitPasswordChange} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-200">Change Password</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((v) => !v)}
+                        className="text-[10px] font-bold text-slate-400 hover:text-white inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        {showPw ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        <span>{showPw ? 'Hide' : 'Show'}</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label htmlFor="sp-cur-pw" className="block text-[10px] text-slate-400 mb-1">
+                          Current Password
+                        </label>
+                        <input
+                          id="sp-cur-pw"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="current-password"
+                          required
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="sp-new-pw" className="block text-[10px] text-slate-400 mb-1">
+                          New Password (4+ chars)
+                        </label>
+                        <input
+                          id="sp-new-pw"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          required
+                          minLength={4}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="sp-conf-pw" className="block text-[10px] text-slate-400 mb-1">
+                          Confirm Password
+                        </label>
+                        <input
+                          id="sp-conf-pw"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          required
+                          minLength={4}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                        />
+                      </div>
+                    </div>
+                    {secError && (
+                      <p role="alert" className="text-[11px] font-bold px-2.5 py-1.5 rounded-xl sp-danger-pill">
+                        {secError}
+                      </p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={secBusy}
+                      className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer disabled:opacity-45"
+                    >
+                      {secBusy ? 'Updating Password...' : 'Update Password'}
+                    </button>
+                  </form>
+                )}
+
+                <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                  {onLogoutAllDevices && (
+                    <button
+                      type="button"
+                      onClick={onLogoutAllDevices}
+                      className="px-3 py-1.5 rounded-xl sp-badge text-[11px] font-bold hover:text-white cursor-pointer"
+                    >
+                      Sign Out Other Devices
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="px-3 py-1.5 rounded-xl sp-danger-pill text-[11px] font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" /> Sign Out This Device
+                  </button>
+                </div>
               </div>
-              <input
-                type="range"
-                min={30}
-                max={360}
-                step={15}
-                value={dailyGoalMins}
-                onChange={(e) => setDailyGoalMins(Number(e.target.value))}
-                className="w-full accent-current"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full py-2 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Check className="w-4 h-4" /> Save Changes
-            </button>
-          </form>
+            )}
+          </div>
         )}
 
         {/* Unified 4-Tile KPI Bento Strip (Total Hours, Streak, Purity, Today's Goal Progress) */}
@@ -427,88 +686,191 @@ export function ProfileView({
         ))}
       </div>
 
-      {/* 3. ANALYTICS BENTO GRID (Side-by-Side 7-Day Trend + 24h Rhythm, Unified Heatmap & Subject Breakdown) */}
-      {(section === 'all' || section === 'analytics') && (
-        <div className="space-y-3">
-          {/* 2-Column Bento Row: Last 7 Days Focus + 24h Focus Rhythm */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Last 7 Days Focus Bar Chart */}
-            <div className="glass-card rounded-3xl p-3.5 flex flex-col justify-between">
-              <div className="flex items-center justify-between gap-1 mb-2">
-                <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300 truncate">
-                  Last 7 Days Focus
-                </h3>
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="px-1.5 py-0.5 rounded-full sp-badge font-mono-num text-[9.5px] font-bold">
-                    {weekDeltaPct >= 0 ? `+${weekDeltaPct}%` : `${weekDeltaPct}%`}
-                  </span>
-                  <span className="font-mono-num text-[11px] font-bold text-white">{user.weekMins}m</span>
+      {/* 3. ANALYTICS BENTO GRID (Week-by-Week Calendar Bars + Ghost Comparison + Tap Tooltips + 3-Tile Insights) */}
+      {(section === 'all' || section === 'analytics') && (() => {
+        const activeDays = weeklyData?.days || weekTrend.map((d) => ({ ...d, prevMinutes: 0, avgPurity: 100, sessions: 0 }));
+        const maxBar = Math.max(
+          30,
+          ...activeDays.map((d) => Math.max(d.minutes, d.prevMinutes || 0))
+        );
+        const curDelta = weeklyData ? weeklyData.wowDeltaPct : weekDeltaPct;
+        const curWeekTotal = weeklyData ? weeklyData.totalMins : user.weekMins;
+        const selectedDay = selectedDayIdx !== null ? activeDays[selectedDayIdx] : null;
+        const hourArr = hourlyDistribution.length === 24 ? hourlyDistribution : new Array(24).fill(0);
+
+        return (
+          <div className="space-y-3">
+            {/* 2-Column Bento Row: Calendar Week Focus + 24h Focus Rhythm */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="glass-card rounded-3xl p-3.5 flex flex-col justify-between space-y-2">
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setWeekOffset((w) => w - 1)}
+                      aria-label="Previous week"
+                      className="w-7 h-7 rounded-lg sp-badge flex items-center justify-center text-slate-300 hover:text-white cursor-pointer shrink-0"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[11px] font-extrabold text-white truncate px-1">
+                      {weeklyData ? weeklyData.label : 'This Week'}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={weekOffset >= 0}
+                      onClick={() => setWeekOffset((w) => Math.min(0, w + 1))}
+                      aria-label="Next week"
+                      className="w-7 h-7 rounded-lg sp-badge flex items-center justify-center text-slate-300 hover:text-white disabled:opacity-35 cursor-pointer shrink-0"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    {weekOffset !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setWeekOffset(0)}
+                        className="px-2 py-0.5 rounded-full sp-badge text-[9.5px] font-bold cursor-pointer shrink-0"
+                      >
+                        Today
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full font-mono-num text-[9.5px] font-bold inline-flex items-center gap-0.5 ${
+                        curDelta >= 0 ? 'sp-success-pill' : 'sp-danger-pill'
+                      }`}
+                    >
+                      {curDelta >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                      {curDelta >= 0 ? `+${curDelta}%` : `${curDelta}%`}
+                    </span>
+                    <span className="font-mono-num text-[11px] font-bold text-white">{curWeekTotal}m</span>
+                  </div>
+                </div>
+
+                {selectedDay && (
+                  <div className="px-2.5 py-1 rounded-xl sp-inset text-[10px] font-mono-num text-slate-200 flex items-center justify-between">
+                    <span>{selectedDay.date}</span>
+                    <span>
+                      {selectedDay.minutes}m (prev {selectedDay.prevMinutes}m) • {selectedDay.avgPurity}% purity
+                    </span>
+                  </div>
+                )}
+
+                <div className={`grid grid-cols-7 gap-1.5 items-end h-24 pt-1 transition-opacity ${loadingWeek ? 'opacity-50' : ''}`}>
+                  {activeDays.map((d, idx) => {
+                    const pct = Math.max(8, Math.round((d.minutes / maxBar) * 100));
+                    const prevPct = d.prevMinutes > 0 ? Math.max(6, Math.round((d.prevMinutes / maxBar) * 100)) : 0;
+                    const isSelected = selectedDayIdx === idx;
+                    return (
+                      <button
+                        key={d.date}
+                        type="button"
+                        onClick={() => setSelectedDayIdx(isSelected ? null : idx)}
+                        className="flex flex-col items-center h-full justify-end gap-1 cursor-pointer focus-visible:outline-none"
+                        title={`${d.date}: ${d.minutes}m (prev week: ${d.prevMinutes}m)`}
+                      >
+                        <span className="font-mono-num text-[9px] text-slate-400">{d.minutes}m</span>
+                        <div className="w-full flex-1 flex items-end justify-center relative">
+                          {prevPct > 0 && (
+                            <div
+                              className="absolute bottom-0 w-full max-w-[22px] rounded-t-md border border-dashed border-white/25 bg-white/5"
+                              style={{ height: `${prevPct}%` }}
+                            />
+                          )}
+                          <motion.div
+                            initial={{ height: 0 }}
+                            animate={{ height: `${pct}%` }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+                            className={`relative z-10 w-full max-w-[18px] rounded-t-md ${isSelected ? 'ring-2 ring-white' : ''}`}
+                            style={{
+                              backgroundColor: themeMeta.colors.accent,
+                              opacity: d.minutes > 0 ? 0.92 : 0.25,
+                            }}
+                          />
+                        </div>
+                        <span className="text-[9.5px] font-semibold text-slate-400 truncate">{d.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="grid grid-cols-7 gap-1.5 items-end h-24 pt-2">
-                {weekTrend.map((d) => {
-                  const pct = Math.max(8, Math.round((d.minutes / maxTrend) * 100));
-                  return (
-                    <div key={d.date} className="flex flex-col items-center h-full justify-end gap-1">
-                      <span className="font-mono-num text-[9px] text-slate-400">{d.minutes}m</span>
-                      <div className="w-full flex-1 flex items-end justify-center">
-                        <motion.div
-                          initial={{ height: 0 }}
-                          animate={{ height: `${pct}%` }}
-                          transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-                          className="w-full max-w-[22px] rounded-t-md"
+              {/* 24-Hour Focus Rhythm Histogram with Tap Tooltip */}
+              <div className="glass-card rounded-3xl p-3.5 flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-2">
+                  <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1 truncate">
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span>24h Focus Rhythm</span>
+                  </h3>
+                  <span className="sp-badge px-2 py-0.5 rounded-full text-[9.5px] font-bold truncate">
+                    {selectedHourIdx !== null
+                      ? `${selectedHourIdx}:00 • ${hourArr[selectedHourIdx]}m`
+                      : peakWindowLabel}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-24 gap-0.5 items-end h-20 pt-1">
+                  {hourArr.map((mins, hr) => {
+                    const pct = Math.max(10, Math.round((mins / maxHour) * 100));
+                    return (
+                      <button
+                        key={hr}
+                        type="button"
+                        onClick={() => setSelectedHourIdx(selectedHourIdx === hr ? null : hr)}
+                        title={`${hr}:00 — ${mins}m`}
+                        aria-label={`${hr}:00 focus ${mins} minutes`}
+                        className="h-full flex items-end cursor-pointer"
+                      >
+                        <div
+                          className={`w-full rounded-t-sm transition-all ${selectedHourIdx === hr ? 'ring-1 ring-white' : ''}`}
                           style={{
-                            backgroundColor: d.label === 'Today' ? themeMeta.colors.accent : themeMeta.colors.accent2,
-                            opacity: d.label === 'Today' ? 1 : 0.65,
+                            height: `${pct}%`,
+                            backgroundColor: mins > 0 ? themeMeta.colors.accent : themeMeta.colors.track,
                           }}
                         />
-                      </div>
-                      <span className="text-[9.5px] font-semibold text-slate-400 truncate">{d.label}</span>
-                    </div>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-between text-[9px] font-mono-num text-slate-500 mt-1.5">
+                  <span>12a</span>
+                  <span>6a</span>
+                  <span>12p</span>
+                  <span>6p</span>
+                  <span>11p</span>
+                </div>
               </div>
             </div>
 
-            {/* 24-Hour Focus Rhythm Histogram */}
-            <div className="glass-card rounded-3xl p-3.5 flex flex-col justify-between">
-              <div className="flex items-center justify-between gap-1.5 mb-2">
-                <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1 truncate">
-                  <Clock className="w-3.5 h-3.5 shrink-0" />
-                  <span>24h Focus Rhythm</span>
-                </h3>
-                <span className="sp-badge px-2 py-0.5 rounded-full text-[9.5px] font-bold truncate">
-                  {peakWindowLabel}
-                </span>
+            {/* 3-Tile Weekly Insights Bento */}
+            {weeklyData && (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="glass-card rounded-2xl p-3 space-y-0.5">
+                  <div className="text-[9.5px] uppercase tracking-wider text-slate-400 font-bold">Top Subject</div>
+                  <div className="text-xs font-extrabold text-white truncate">
+                    {weeklyData.topSubject ? weeklyData.topSubject.name : 'No sessions'}
+                  </div>
+                  <div className="text-[10px] font-mono-num text-slate-400">
+                    {weeklyData.topSubject
+                      ? `${weeklyData.topSubject.minutes}m (${weeklyData.topSubject.wowDeltaPct >= 0 ? '+' : ''}${weeklyData.topSubject.wowDeltaPct}%)`
+                      : '—'}
+                  </div>
+                </div>
+                <div className="glass-card rounded-2xl p-3 space-y-0.5">
+                  <div className="text-[9.5px] uppercase tracking-wider text-slate-400 font-bold">Week Purity &amp; Peak</div>
+                  <div className="text-xs font-mono-num font-extrabold text-white">{weeklyData.avgPurity}% avg</div>
+                  <div className="text-[10px] text-slate-400 truncate">{weeklyData.peakWindowLabel}</div>
+                </div>
+                <div className="glass-card rounded-2xl p-3 space-y-0.5">
+                  <div className="text-[9.5px] uppercase tracking-wider text-slate-400 font-bold">Goal Consistency</div>
+                  <div className="text-xs font-mono-num font-extrabold text-white">{weeklyData.goalDaysHit} / 7 days</div>
+                  <div className="text-[10px] text-slate-400 truncate">Daily {user.dailyGoalMins}m target</div>
+                </div>
               </div>
-
-              <div className="grid grid-cols-24 gap-0.5 items-end h-20 pt-1">
-                {(hourlyDistribution.length === 24 ? hourlyDistribution : new Array(24).fill(0)).map((mins, hr) => {
-                  const pct = Math.max(10, Math.round((mins / maxHour) * 100));
-                  return (
-                    <div key={hr} title={`${hr}:00 — ${mins}m`} className="h-full flex items-end">
-                      <div
-                        className="w-full rounded-t-sm transition-all"
-                        style={{
-                          height: `${pct}%`,
-                          backgroundColor: mins > 0 ? themeMeta.colors.accent : themeMeta.colors.track,
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="flex justify-between text-[9px] font-mono-num text-slate-500 mt-1.5">
-                <span>12a</span>
-                <span>6a</span>
-                <span>12p</span>
-                <span>6p</span>
-                <span>11p</span>
-              </div>
-            </div>
-          </div>
+            )}
 
           {/* Unified Study Consistency Heatmap + Subject Breakdown Card */}
           <div className="glass-card rounded-3xl p-4 space-y-3">
@@ -574,51 +936,38 @@ export function ProfileView({
               </div>
             </div>
 
-            {/* Integrated 2-Column Subject Breakdown & Tag Manager */}
-            {subjectBreakdown.length > 0 && (
+            {/* Integrated 2-Column Subject Breakdown & Manage Subjects CTA */}
+            {(subjectBreakdown.length > 0 || subjects.length > 0) && (
               <div className="pt-3 border-t border-white/10 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
-                    Subject Breakdown
+                    Subject Breakdown ({subjects.length})
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono-num">{subjects.length} active subjects</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowManageSubjects(true)}
+                    className="px-2.5 py-1 rounded-xl sp-badge text-[10px] font-bold inline-flex items-center gap-1 hover:text-white cursor-pointer"
+                  >
+                    <SlidersHorizontal className="w-3 h-3" /> Manage Subjects
+                  </button>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {subjectBreakdown.map((sub) => (
-                    <div key={sub.name} className="p-2 rounded-xl sp-inset space-y-1">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-semibold text-slate-200 truncate">{sub.name}</span>
-                        <span className="font-mono-num text-slate-300 font-bold shrink-0">
-                          {(sub.minutes / 60).toFixed(1)}h ({sub.pct}%)
-                        </span>
+                {subjectBreakdown.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {subjectBreakdown.map((sub) => (
+                      <div key={sub.name} className="p-2 rounded-xl sp-inset space-y-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-semibold text-slate-200 truncate">{sub.name}</span>
+                          <span className="font-mono-num text-slate-300 font-bold shrink-0">
+                            {(sub.minutes / 60).toFixed(1)}h ({sub.pct}%)
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${sub.pct}%`, backgroundColor: resolveAccent(sub.color, themeId) }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${sub.pct}%`, backgroundColor: resolveAccent(sub.color, themeId) }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {subjects.length > 1 && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {subjects.map((s) => (
-                      <span
-                        key={s.id}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full sp-badge text-[10px] font-semibold"
-                      >
-                        <span>{s.icon}</span>
-                        <span>{s.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteSubject(s.id)}
-                          title={`Delete ${s.name}`}
-                          className="ml-0.5 text-slate-400 hover:text-rose-400 cursor-pointer"
-                        >
-                          <Trash2 className="w-2.5 h-2.5" />
-                        </button>
-                      </span>
                     ))}
                   </div>
                 )}
@@ -626,7 +975,8 @@ export function ProfileView({
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 4. YPT STUDY LOGS, DAILY RECEIPT & DATA EXPORTS */}
       {(section === 'all' || section === 'receipt') && (
@@ -706,26 +1056,18 @@ export function ProfileView({
                 return (
                   <div
                     key={item.id}
-                    className={`p-2 rounded-xl sp-inset text-[11px] space-y-1.5 border transition ${
+                    className={`p-2.5 rounded-xl sp-inset text-[11px] space-y-1.5 border transition ${
                       isEditingRow ? 'sm:col-span-2 border-white/25' : 'border-transparent'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="font-mono-num text-[10px] text-slate-400 shrink-0">{stamp}</span>
-                        {onUpdateSessionTopic ? (
+                        {onUpdateSession ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (isEditingRow) {
-                                setEditingLogId(null);
-                              } else {
-                                setEditingLogId(item.id);
-                                setLogTopicInput(item.subjectName);
-                                setLogTopicColor(item.subjectColor);
-                              }
-                            }}
-                            title="Change topic"
+                            onClick={() => openLogEditor(item)}
+                            title="Edit study log"
                             className="inline-flex items-center gap-1 font-bold text-white hover:underline cursor-pointer truncate min-w-0"
                           >
                             <span
@@ -744,8 +1086,12 @@ export function ProfileView({
                       </span>
                     </div>
 
-                    {isEditingRow && onUpdateSessionTopic && (
-                      <div className="pt-1.5 border-t border-white/10 space-y-1.5">
+                    {item.note && !isEditingRow && (
+                      <div className="text-[10px] text-slate-400 truncate">&ldquo;{item.note}&rdquo;</div>
+                    )}
+
+                    {isEditingRow && onUpdateSession && (
+                      <div className="pt-2 border-t border-white/10 space-y-2">
                         {subjects.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {subjects.map((sub) => (
@@ -753,7 +1099,7 @@ export function ProfileView({
                                 key={sub.id}
                                 type="button"
                                 disabled={savingLogId === item.id}
-                                onClick={() => saveLogTopic(item.id, sub.name, sub.color)}
+                                onClick={() => saveLogEdit(item.id, { name: sub.name, color: sub.color })}
                                 className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border transition ${
                                   sub.name.toLowerCase() === item.subjectName.toLowerCase()
                                     ? 'sp-tab-active'
@@ -768,37 +1114,112 @@ export function ProfileView({
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
-                            saveLogTopic(item.id);
+                            saveLogEdit(item.id);
                           }}
-                          className="flex items-center gap-1.5"
+                          className="space-y-2"
                         >
-                          <input
-                            type="text"
-                            maxLength={40}
-                            value={logTopicInput}
-                            onChange={(e) => {
-                              setLogTopicInput(e.target.value);
-                              setLogTopicColor(undefined);
-                            }}
-                            placeholder="Custom topic name..."
-                            className="flex-1 px-2.5 py-1 rounded-lg sp-input text-[11px]"
-                          />
-                          <button
-                            type="submit"
-                            disabled={savingLogId === item.id || !logTopicInput.trim()}
-                            className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
-                          >
-                            <Check className="w-3 h-3" />
-                            <span>{savingLogId === item.id ? 'Saving...' : 'Save'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingLogId(null)}
-                            className="p-1 rounded-lg sp-badge text-slate-300 hover:text-white cursor-pointer"
-                            aria-label="Cancel topic edit"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            <div>
+                              <label className="block text-[9.5px] text-slate-400 mb-0.5">Topic</label>
+                              <input
+                                type="text"
+                                maxLength={40}
+                                value={logTopicInput}
+                                onChange={(e) => {
+                                  setLogTopicInput(e.target.value);
+                                  setLogTopicColor(undefined);
+                                }}
+                                placeholder="Custom topic name..."
+                                className="w-full px-2.5 py-1 rounded-lg sp-input text-[11px]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9.5px] text-slate-400 mb-0.5">Duration (mins)</label>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setLogDurationMins((m) => Math.max(1, m - 5))}
+                                  className="px-2 py-1 rounded-lg sp-badge text-[10px] font-mono-num font-bold cursor-pointer"
+                                >
+                                  -5m
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={720}
+                                  value={logDurationMins}
+                                  onChange={(e) => setLogDurationMins(Math.max(1, Math.min(720, Number(e.target.value) || 1)))}
+                                  className="w-16 text-center px-2 py-1 rounded-lg sp-input text-[11px] font-mono-num"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setLogDurationMins((m) => Math.min(720, m + 5))}
+                                  className="px-2 py-1 rounded-lg sp-badge text-[10px] font-mono-num font-bold cursor-pointer"
+                                >
+                                  +5m
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            <div>
+                              <label className="block text-[9.5px] text-slate-400 mb-0.5">Date &amp; Time</label>
+                              <input
+                                type="datetime-local"
+                                value={logDateInput}
+                                onChange={(e) => setLogDateInput(e.target.value)}
+                                className="w-full px-2.5 py-1 rounded-lg sp-input text-[10px] font-mono-num"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9.5px] text-slate-400 mb-0.5">Note</label>
+                              <input
+                                type="text"
+                                maxLength={240}
+                                value={logNoteInput}
+                                onChange={(e) => setLogNoteInput(e.target.value)}
+                                placeholder="Session note..."
+                                className="w-full px-2.5 py-1 rounded-lg sp-input text-[11px]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            {onDeleteSession ? (
+                              <button
+                                type="button"
+                                disabled={savingLogId === item.id}
+                                onClick={async () => {
+                                  setEditingLogId(null);
+                                  await onDeleteSession(item.id);
+                                }}
+                                className="px-2.5 py-1 rounded-lg sp-danger-pill text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" /> Delete Log
+                              </button>
+                            ) : (
+                              <span />
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="submit"
+                                disabled={savingLogId === item.id || !logTopicInput.trim()}
+                                className="px-2.5 py-1 rounded-lg sp-btn-primary text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>{savingLogId === item.id ? 'Saving...' : 'Save'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingLogId(null)}
+                                className="p-1 rounded-lg sp-badge text-slate-300 hover:text-white cursor-pointer"
+                                aria-label="Cancel log edit"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
                         </form>
                       </div>
                     )}
@@ -855,6 +1276,21 @@ export function ProfileView({
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showManageSubjects && (
+          <SubjectManagerModal
+            themeId={themeId}
+            subjects={subjects}
+            subjectBreakdown={subjectBreakdown}
+            onClose={() => setShowManageSubjects(false)}
+            onUpdateSubject={onUpdateSubject}
+            onReorderSubjects={onReorderSubjects}
+            onMergeSubjects={onMergeSubjects}
+            onDeleteSubject={onDeleteSubject}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

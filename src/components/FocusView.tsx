@@ -24,10 +24,21 @@ import {
   BookOpen,
   Layers,
   ChevronDown,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  VolumeX,
+  CloudRain,
+  Waves,
+  Brain,
+  Coffee,
+  Flame,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { FocusSpirit, getSpiritStage } from './FocusSpirit';
 import { UniversityVaultPanel } from './UniversityVaultPanel';
-import { Room, ShadowSlaveState, StudyTask, Subject, SubjectStat, TimerMode, UniversityData } from '../types';
+import { SubjectManagerModal, SUBJECT_PALETTE_12 } from './SubjectManagerModal';
+import { ActiveTimerState, Room, ShadowSlaveState, StudyTask, Subject, SubjectStat, TimerMode, UniversityData } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { SAVED_MIX_PRESETS, SoundPreset, TrackKey } from '../utils/soundEngine';
 
@@ -110,6 +121,17 @@ interface FocusViewProps {
   onToggleTaskDone: (task: StudyTask) => Promise<void>;
   onDeleteTask: (taskId: number) => Promise<void>;
   onLogManual: (mins: number, note: string) => Promise<void>;
+  timerSyncStatus?: 'synced' | 'syncing' | 'offline';
+  remoteTimer?: ActiveTimerState | null;
+  onResumeRemoteTimer?: () => Promise<void>;
+  onDiscardRemoteTimer?: () => Promise<void>;
+  onUpdateSubject?: (
+    subjectId: number,
+    payload: { name?: string; color?: string; icon?: string; cascadeSessions?: boolean }
+  ) => Promise<void>;
+  onReorderSubjects?: (orderedIds: number[]) => Promise<void>;
+  onMergeSubjects?: (sourceId: number, targetId: number) => Promise<void>;
+  onDeleteSubject?: (subjectId: number) => Promise<void>;
 }
 
 const MODES: { key: TimerMode; label: string; sub: string }[] = [
@@ -121,18 +143,18 @@ const MODES: { key: TimerMode; label: string; sub: string }[] = [
   { key: 'sprint', label: 'Sprint', sub: '1m' },
 ];
 
-const SOUNDS: { key: SoundPreset; label: string; icon: string }[] = [
-  { key: 'off', label: 'Silent', icon: '🔇' },
-  { key: 'rain', label: 'Rain', icon: '🌧️' },
-  { key: 'brown', label: 'Brown', icon: '🌊' },
-  { key: 'binaural', label: '40Hz', icon: '🧠' },
-  { key: 'cafe', label: 'Café', icon: '☕' },
-  { key: 'fire', label: 'Fire', icon: '🔥' },
-  { key: 'library', label: 'Library', icon: '📖' },
+const SOUNDS: { key: SoundPreset; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
+  { key: 'off', label: 'Silent', Icon: VolumeX },
+  { key: 'rain', label: 'Rain', Icon: CloudRain },
+  { key: 'brown', label: 'Brown', Icon: Waves },
+  { key: 'binaural', label: '40Hz', Icon: Brain },
+  { key: 'cafe', label: 'Café', Icon: Coffee },
+  { key: 'fire', label: 'Fire', Icon: Flame },
+  { key: 'library', label: 'Library', Icon: BookOpen },
 ];
 
 const SUBJECT_EMOJIS = ['📚', '💻', '🧠', '📐', '🦀', '⚡', '🎨', '🔬'];
-const SUBJECT_COLORS = ['#FAFAFA', '#E4E4E7', '#D4D4D8', '#A1A1AA', '#71717A', '#52525B'];
+const SUBJECT_COLORS = SUBJECT_PALETTE_12.slice(0, 8);
 
 export function formatClock(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -203,8 +225,17 @@ export function FocusView({
   onToggleTaskDone,
   onDeleteTask,
   onLogManual,
+  timerSyncStatus = 'synced',
+  remoteTimer,
+  onResumeRemoteTimer,
+  onDiscardRemoteTimer,
+  onUpdateSubject,
+  onReorderSubjects,
+  onMergeSubjects,
+  onDeleteSubject,
 }: FocusViewProps) {
   const [addingSubject, setAddingSubject] = useState(false);
+  const [manageSubjects, setManageSubjects] = useState(false);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [newSubName, setNewSubName] = useState('');
   const [newSubIcon, setNewSubIcon] = useState('📚');
@@ -316,6 +347,24 @@ export function FocusView({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              <span
+                title={
+                  timerSyncStatus === 'synced'
+                    ? 'Multi-device sync ready'
+                    : timerSyncStatus === 'syncing'
+                      ? 'Syncing timer...'
+                      : 'Offline — saved locally'
+                }
+                className="sp-badge px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 text-slate-300"
+              >
+                {timerSyncStatus === 'syncing' ? (
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                ) : timerSyncStatus === 'offline' ? (
+                  <CloudOff className="w-3 h-3 text-amber-300" />
+                ) : (
+                  <Cloud className="w-3 h-3 text-emerald-300" />
+                )}
+              </span>
               {currentRoom && (
                 <button
                   type="button"
@@ -393,6 +442,52 @@ export function FocusView({
                 </button>
               </div>
             </motion.form>
+          )}
+        </AnimatePresence>
+
+        {/* Cross-Device Handoff / Crash Recovery Banner */}
+        <AnimatePresence>
+          {remoteTimer && !isRunning && onResumeRemoteTimer && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="p-2.5 rounded-2xl sp-inset border border-white/20 flex flex-wrap items-center justify-between gap-2 overflow-hidden"
+            >
+              <div className="min-w-0">
+                <div className="text-[11px] font-extrabold text-white flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 text-sky-300" />
+                  <span>
+                    {remoteTimer.isRunning ? 'Active session on another device' : 'Recovered paused session'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-300 font-mono-num truncate">
+                  {remoteTimer.subjectName} • {formatClock(
+                    remoteTimer.isRunning
+                      ? remoteTimer.accumulatedSec + Math.max(0, Math.floor((Date.now() - remoteTimer.startedAtMs) / 1000))
+                      : remoteTimer.accumulatedSec
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={onResumeRemoteTimer}
+                  className="px-2.5 py-1 rounded-xl sp-btn-primary text-[10px] font-extrabold cursor-pointer"
+                >
+                  Resume Here
+                </button>
+                {onDiscardRemoteTimer && (
+                  <button
+                    type="button"
+                    onClick={onDiscardRemoteTimer}
+                    className="px-2.5 py-1 rounded-xl sp-badge text-[10px] font-bold cursor-pointer"
+                  >
+                    Discard
+                  </button>
+                )}
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
 
@@ -494,6 +589,17 @@ export function FocusView({
             {addingSubject ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
             <span>{addingSubject ? 'Cancel' : 'Subject'}</span>
           </button>
+          {onDeleteSubject && (
+            <button
+              type="button"
+              onClick={() => setManageSubjects(true)}
+              className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold sp-badge text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+              title="Rename, recolor, reorder, or merge subjects"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>Manage</span>
+            </button>
+          )}
         </div>
 
         {/* Inline Subject Creator */}
@@ -582,12 +688,12 @@ export function FocusView({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold">
-              🍅 {(pomoCycleCount % 4) + 1}/4
+            <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
+              <Clock className="w-3 h-3 opacity-80" /> {(pomoCycleCount % 4) + 1}/4
             </span>
             {mode === 'stopwatch' && (
-              <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold">
-                ☕ Earned +{Math.max(1, Math.floor(elapsedSec / 300))}m
+              <span className="sp-badge px-2 py-1 rounded-full text-[10px] font-mono-num font-bold inline-flex items-center gap-1">
+                <Coffee className="w-3 h-3 opacity-80" /> +{Math.max(1, Math.floor(elapsedSec / 300))}m
               </span>
             )}
             {onChangeWagerCoins && (
@@ -854,7 +960,7 @@ export function FocusView({
           <input
             type="text"
             maxLength={100}
-            placeholder="🎯 What are you focusing on?"
+            placeholder="What are you focusing on?"
             value={focusTask}
             onChange={(e) => onChangeFocusTask(e.target.value)}
             className="w-full px-3.5 py-2 rounded-2xl sp-input text-xs font-medium transition"
@@ -957,18 +1063,19 @@ export function FocusView({
         <div className="grid grid-cols-7 gap-1">
           {SOUNDS.map((s) => {
             const active = soundPreset === s.key;
+            const SIcon = s.Icon;
             return (
               <motion.button
                 key={s.key}
                 whileTap={{ scale: 0.94 }}
                 type="button"
                 onClick={() => onChangeSound(s.key)}
-                className={`py-1.5 px-1 rounded-xl text-center transition cursor-pointer border min-w-0 ${
+                className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition cursor-pointer border min-w-0 ${
                   active ? 'sp-tab-active font-bold' : 'sp-inset text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <div className="text-xs sm:text-sm leading-none">{s.icon}</div>
-                <div className="text-[9.5px] font-semibold mt-0.5 truncate">{s.label}</div>
+                <SIcon className="w-3.5 h-3.5 shrink-0" />
+                <div className="text-[9.5px] font-semibold truncate max-w-full">{s.label}</div>
               </motion.button>
             );
           })}
@@ -994,10 +1101,13 @@ export function FocusView({
               {SOUNDS.filter((s) => s.key !== 'off').map((s) => {
                 const tk = s.key as TrackKey;
                 const val = trackMix[tk] || 0;
+                const SIcon = s.Icon;
                 return (
                   <div key={tk} className="p-2 rounded-xl sp-inset space-y-1">
                     <div className="flex items-center justify-between text-[10px]">
-                      <span className="font-semibold text-slate-200 truncate">{s.icon} {s.label}</span>
+                      <span className="font-semibold text-slate-200 truncate inline-flex items-center gap-1">
+                        <SIcon className="w-3 h-3" /> {s.label}
+                      </span>
                       <span className="font-mono-num text-slate-400">{Math.round(val * 100)}%</span>
                     </div>
                     <input
@@ -1198,6 +1308,21 @@ export function FocusView({
             onSaveExamGoal={onSaveExamGoal}
           />
         )}
+
+      <AnimatePresence>
+        {manageSubjects && onDeleteSubject && (
+          <SubjectManagerModal
+            themeId={themeId}
+            subjects={subjects}
+            subjectBreakdown={subjectBreakdown}
+            onClose={() => setManageSubjects(false)}
+            onUpdateSubject={onUpdateSubject}
+            onReorderSubjects={onReorderSubjects}
+            onMergeSubjects={onMergeSubjects}
+            onDeleteSubject={onDeleteSubject}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,15 +1,31 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Send, ShieldCheck, Sparkles, Flame, Clock, Pencil, Check, X } from 'lucide-react';
+import {
+  MessageCircle,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Flame,
+  Clock,
+  Pencil,
+  Check,
+  X,
+  Users,
+  Globe,
+  User as UserIcon,
+} from 'lucide-react';
 import { FeedItem, Subject } from '../types';
-import { ThemeId, getThemeMeta } from '../themes';
+import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 
 interface FeedViewProps {
   themeId?: ThemeId;
   feed: FeedItem[];
   currentUserId?: number;
   subjects?: Subject[];
-  onUpdateSessionTopic?: (sessionId: number, subjectName: string, subjectColor?: string) => Promise<void>;
+  onUpdateSession?: (
+    sessionId: number,
+    payload: { subjectName?: string; subjectColor?: string; note?: string }
+  ) => Promise<void>;
   onReact: (sessionId: number, emoji: string) => Promise<void>;
   onComment: (sessionId: number, content: string) => Promise<void>;
   onJumpToFocus: () => void;
@@ -41,39 +57,46 @@ export function FeedView({
   feed,
   currentUserId,
   subjects = [],
-  onUpdateSessionTopic,
+  onUpdateSession,
   onReact,
   onComment,
   onJumpToFocus,
 }: FeedViewProps) {
-  const [filter, setFilter] = useState<'all' | 'friends'>('all');
+  const [filter, setFilter] = useState<'all' | 'friends' | 'mine'>('all');
+  const [subjectFilter, setSubjectFilter] = useState<string>('all');
   const [openCommentsId, setOpenCommentsId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
-  const [editingTopicId, setEditingTopicId] = useState<number | null>(null);
+  const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [topicInput, setTopicInput] = useState('');
   const [topicColor, setTopicColor] = useState<string | undefined>(undefined);
-  const [savingTopicId, setSavingTopicId] = useState<number | null>(null);
-
-  async function saveFeedTopic(sessionId: number, customName?: string, customColor?: string) {
-    if (!onUpdateSessionTopic) return;
-    const nextName = (customName ?? topicInput).trim().slice(0, 40);
-    if (!nextName || savingTopicId === sessionId) return;
-    setSavingTopicId(sessionId);
-    try {
-      await onUpdateSessionTopic(sessionId, nextName, customColor ?? topicColor);
-      setEditingTopicId(null);
-    } finally {
-      setSavingTopicId(null);
-    }
-  }
+  const [noteInput, setNoteInput] = useState('');
+  const [savingPostId, setSavingPostId] = useState<number | null>(null);
 
   const themeMeta = getThemeMeta(themeId);
 
-  const items = useMemo(
-    () => (filter === 'friends' ? feed.filter((f) => f.isFriend) : feed),
-    [feed, filter]
-  );
+  const scopedItems = useMemo(() => {
+    if (filter === 'friends') {
+      return feed.filter((f) => f.isFriend && f.userId !== currentUserId);
+    }
+    if (filter === 'mine') {
+      return feed.filter((f) => f.userId === currentUserId);
+    }
+    return feed;
+  }, [feed, filter, currentUserId]);
+
+  const availableSubjects = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of scopedItems) {
+      counts.set(item.subjectName, (counts.get(item.subjectName) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [scopedItems]);
+
+  const items = useMemo(() => {
+    if (subjectFilter === 'all') return scopedItems;
+    return scopedItems.filter((item) => item.subjectName === subjectFilter);
+  }, [scopedItems, subjectFilter]);
 
   async function submitComment(e: React.FormEvent, sessionId: number) {
     e.preventDefault();
@@ -88,31 +111,60 @@ export function FeedView({
     }
   }
 
+  async function savePostEdit(sessionId: number, customName?: string, customColor?: string) {
+    if (!onUpdateSession) return;
+    const nextName = (customName ?? topicInput).trim().slice(0, 40);
+    if (!nextName || savingPostId === sessionId) return;
+    setSavingPostId(sessionId);
+    try {
+      await onUpdateSession(sessionId, {
+        subjectName: nextName,
+        subjectColor: customColor ?? topicColor,
+        note: customName !== undefined ? undefined : noteInput,
+      });
+      setEditingPostId(null);
+    } finally {
+      setSavingPostId(null);
+    }
+  }
+
+  const filterTabs = [
+    { key: 'all' as const, label: 'Everyone', Icon: Globe },
+    { key: 'friends' as const, label: 'Friends', Icon: Users },
+    { key: 'mine' as const, label: 'Mine', Icon: UserIcon },
+  ];
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="grid grid-cols-2 p-1 rounded-2xl glass-card flex-1 max-w-[230px]">
-          {(
-            [
-              ['all', 'Everyone'],
-              ['friends', 'Friends'],
-            ] as const
-          ).map(([k, label]) => (
+    <div className="space-y-3.5">
+      {/* Header Controls: 3-Way Scope Segmented Filter + Log Session CTA */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          role="tablist"
+          aria-label="Study log scope"
+          className="grid grid-cols-3 p-1 rounded-2xl glass-card flex-1 max-w-[300px]"
+        >
+          {filterTabs.map(({ key, label, Icon }) => (
             <button
-              key={k}
+              key={key}
               type="button"
-              onClick={() => setFilter(k)}
-              className={`relative py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
-                filter === k ? 'text-white' : 'text-slate-400'
+              role="tab"
+              aria-selected={filter === key}
+              onClick={() => {
+                setFilter(key);
+                setSubjectFilter('all');
+              }}
+              className={`relative py-2 px-2 rounded-xl text-xs font-bold cursor-pointer flex items-center justify-center gap-1 transition ${
+                filter === key ? 'text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {filter === k && (
+              {filter === key && (
                 <motion.div
                   layoutId="feedFilterPill"
                   transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                   className="absolute inset-0 rounded-xl sp-tab-active"
                 />
               )}
+              <Icon className="w-3.5 h-3.5 relative z-10 shrink-0" />
               <span className="relative z-10">{label}</span>
             </button>
           ))}
@@ -122,47 +174,89 @@ export function FeedView({
           whileTap={{ scale: 0.94 }}
           type="button"
           onClick={onJumpToFocus}
-          className="px-3 py-2 rounded-2xl sp-btn-primary text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+          className="px-3.5 py-2.5 rounded-2xl sp-btn-primary text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
         >
-          <Flame className="w-3.5 h-3.5" /> Log Session
+          <Flame className="w-3.5 h-3.5" />
+          <span>Log Session</span>
         </motion.button>
       </div>
 
+      {/* Topic Filter Ribbon */}
+      {availableSubjects.length > 1 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+          <button
+            type="button"
+            onClick={() => setSubjectFilter('all')}
+            className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer border transition ${
+              subjectFilter === 'all' ? 'sp-tab-active' : 'sp-badge text-slate-300 hover:text-white'
+            }`}
+          >
+            All Topics ({scopedItems.length})
+          </button>
+          {availableSubjects.map(([name, count]) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setSubjectFilter(name)}
+              className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer border transition ${
+                subjectFilter === name ? 'sp-tab-active' : 'sp-badge text-slate-300 hover:text-white'
+              }`}
+            >
+              {name} ({count})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Feed Cards List */}
       {items.length === 0 ? (
-        <div className="glass-card rounded-3xl p-8 text-center">
-          <p className="text-sm font-bold text-white">
-            {filter === 'friends' ? 'No friend posts yet' : 'No study sessions shared yet'}
+        <div className="glass-card rounded-3xl p-8 text-center space-y-2">
+          <p className="text-sm font-extrabold text-white">
+            {filter === 'friends'
+              ? 'No friend study logs yet'
+              : filter === 'mine'
+                ? 'You have not shared any logs yet'
+                : 'No study sessions shared yet'}
           </p>
-          <p className="text-xs text-slate-400 mt-1">
-            Add study peers in Compete or finish a session to kick off the feed!
+          <p className="text-xs text-slate-400">
+            {filter === 'friends'
+              ? 'Add peers in Compete to see their focus logs here (your own logs live under Mine).'
+              : 'Finish a focus session and toggle Share to Feed to record your progress here.'}
           </p>
         </div>
       ) : (
         <div className="space-y-3">
           {items.map((item) => {
             const commentsOpen = openCommentsId === item.id || item.comments.length > 0;
+            const isOwn = Boolean(currentUserId && item.userId === currentUserId);
+            const postAccent = resolveAccent(item.subjectColor, themeId) || themeMeta.colors.accent;
+            const isEditing = editingPostId === item.id;
+
             return (
               <motion.article
                 key={item.id}
                 layout
-                initial={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="glass-card rounded-3xl p-4 relative overflow-hidden"
               >
-                {/* Top subtle hairline accent */}
+                {/* Top Subject Accent Bar */}
                 <div
-                  className="absolute inset-x-0 top-0 h-[2px] opacity-35"
-                  style={{ backgroundColor: themeMeta.colors.accent }}
+                  className="absolute inset-x-0 top-0 h-[2.5px] opacity-65"
+                  style={{ backgroundColor: postAccent }}
                 />
 
                 {/* Author Row */}
                 <div className="flex items-center justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl sp-inset flex items-center justify-center text-xl shrink-0">
+                    <div
+                      className="w-10 h-10 rounded-2xl sp-inset flex items-center justify-center text-xl shrink-0 border"
+                      style={{ borderColor: `${resolveAccent(item.themeColor, themeId)}55` }}
+                    >
                       {item.avatar}
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs font-extrabold text-white truncate">
                           {item.displayName}
                         </span>
@@ -170,8 +264,8 @@ export function FeedView({
                           Lv.{item.level}
                         </span>
                         {item.streakDays >= 2 && (
-                          <span className="px-1.5 py-0.5 rounded-md sp-badge text-[10px] font-bold">
-                            🔥 {item.streakDays}d
+                          <span className="px-1.5 py-0.5 rounded-md sp-badge text-[10px] font-mono-num font-bold inline-flex items-center gap-0.5">
+                            <Flame className="w-2.5 h-2.5" /> {item.streakDays}d
                           </span>
                         )}
                       </div>
@@ -181,42 +275,52 @@ export function FeedView({
                     </div>
                   </div>
 
-                  {currentUserId && item.userId === currentUserId && onUpdateSessionTopic ? (
+                  {isOwn && onUpdateSession ? (
                     <button
                       type="button"
                       onClick={() => {
-                        if (editingTopicId === item.id) {
-                          setEditingTopicId(null);
+                        if (isEditing) {
+                          setEditingPostId(null);
                         } else {
-                          setEditingTopicId(item.id);
+                          setEditingPostId(item.id);
                           setTopicInput(item.subjectName);
                           setTopicColor(item.subjectColor);
+                          setNoteInput(item.note || '');
                         }
                       }}
                       title="Change topic"
-                      className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer hover:opacity-90"
+                      className="shrink-0 min-h-[32px] px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
                     >
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: postAccent }}
+                      />
                       <span>{item.subjectName}</span>
-                      <Pencil className="w-2.5 h-2.5 opacity-75" />
+                      <Pencil className="w-3 h-3 opacity-75" />
                     </button>
                   ) : (
-                    <span className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold">
-                      {item.subjectName}
+                    <span className="shrink-0 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold inline-flex items-center gap-1.5">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: postAccent }}
+                      />
+                      <span>{item.subjectName}</span>
                     </span>
                   )}
                 </div>
 
-                {editingTopicId === item.id && onUpdateSessionTopic && (
-                  <div className="mb-3 p-2.5 rounded-2xl sp-inset border border-white/15 space-y-2">
+                {/* Inline Topic + Note Editor for Own Posts */}
+                {isEditing && onUpdateSession && (
+                  <div className="mb-3 p-3 rounded-2xl sp-inset border border-white/15 space-y-2">
                     {subjects.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {subjects.map((sub) => (
                           <button
                             key={sub.id}
                             type="button"
-                            disabled={savingTopicId === item.id}
-                            onClick={() => saveFeedTopic(item.id, sub.name, sub.color)}
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border transition ${
+                            disabled={savingPostId === item.id}
+                            onClick={() => savePostEdit(item.id, sub.name, sub.color)}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer border transition ${
                               sub.name.toLowerCase() === item.subjectName.toLowerCase()
                                 ? 'sp-tab-active'
                                 : 'sp-badge hover:opacity-90'
@@ -230,9 +334,9 @@ export function FeedView({
                     <form
                       onSubmit={(e) => {
                         e.preventDefault();
-                        saveFeedTopic(item.id);
+                        savePostEdit(item.id);
                       }}
-                      className="flex items-center gap-1.5"
+                      className="space-y-1.5"
                     >
                       <input
                         type="text"
@@ -243,29 +347,39 @@ export function FeedView({
                           setTopicColor(undefined);
                         }}
                         placeholder="Custom topic name..."
-                        className="flex-1 px-2.5 py-1.5 rounded-xl sp-input text-xs"
+                        className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
                       />
-                      <button
-                        type="submit"
-                        disabled={savingTopicId === item.id || !topicInput.trim()}
-                        className="px-2.5 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>{savingTopicId === item.id ? 'Saving...' : 'Save'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingTopicId(null)}
-                        className="p-1.5 rounded-xl sp-badge text-slate-300 hover:text-white cursor-pointer"
-                        aria-label="Cancel topic edit"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          maxLength={240}
+                          value={noteInput}
+                          onChange={(e) => setNoteInput(e.target.value)}
+                          placeholder="Session note (optional)..."
+                          className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                        />
+                        <button
+                          type="submit"
+                          disabled={savingPostId === item.id || !topicInput.trim()}
+                          className="px-3 py-1.5 rounded-xl sp-btn-primary text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{savingPostId === item.id ? 'Saving...' : 'Save'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingPostId(null)}
+                          className="w-8 h-8 rounded-xl sp-badge text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+                          aria-label="Cancel post edit"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </form>
                   </div>
                 )}
 
-                {/* Strava-style Session Stat Strip */}
+                {/* Session Stat Strip */}
                 <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl sp-inset mb-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-slate-400 flex items-center gap-1">
@@ -295,32 +409,25 @@ export function FeedView({
 
                 {item.note && (
                   <p className="text-xs text-slate-200 leading-relaxed mb-3 sp-inset px-3 py-2 rounded-xl">
-                    "{item.note}"
+                    &ldquo;{item.note}&rdquo;
                   </p>
                 )}
 
-                {/* Nightmare Spell Appraisal Badges */}
+                {/* Milestone Pills */}
                 <div className="flex flex-wrap gap-1 mb-2.5">
                   {item.purityPct >= 95 && (
-                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
-                      🌑 Glorious Appraisal (95%+)
+                    <span className="px-2 py-0.5 rounded-full sp-success-pill text-[10px] font-bold inline-flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> 95%+ Laser Lock
                     </span>
                   )}
                   {item.durationSec >= 2700 && (
-                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
-                      🌊 Deep Soul Meditation
+                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold inline-flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> Deep Block
                     </span>
                   )}
-                  {/Architect|Data|Cloud|Internet|OSPF|BGP|CIDR/i.test(item.subjectName) && (
-                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
-                      📜 Citadel Archive Mastery
-                    </span>
-                  )}
-                  {item.xpEarned >= 120 && (
-                    <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-bold">
-                      ⚔️ Nightmare Gate Striker
-                    </span>
-                  )}
+                  <span className="px-2 py-0.5 rounded-full sp-badge text-[10px] font-semibold uppercase tracking-wider">
+                    {item.mode}
+                  </span>
                 </div>
 
                 {/* Reaction Bar + Comment Toggle */}
@@ -329,10 +436,10 @@ export function FeedView({
                     {item.reactions.map((r) => (
                       <motion.button
                         key={r.emoji}
-                        whileTap={{ scale: 0.85 }}
+                        whileTap={{ scale: 0.88 }}
                         type="button"
                         onClick={() => onReact(item.id, r.emoji)}
-                        className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 cursor-pointer transition border ${
+                        className={`min-h-[32px] px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 cursor-pointer transition border ${
                           r.reacted ? 'sp-tab-active' : 'sp-badge hover:opacity-90'
                         }`}
                       >
@@ -345,10 +452,10 @@ export function FeedView({
                   <button
                     type="button"
                     onClick={() => setOpenCommentsId(openCommentsId === item.id ? null : item.id)}
-                    className="px-2.5 py-1 rounded-full sp-badge text-xs font-semibold hover:text-white flex items-center gap-1 cursor-pointer"
+                    className="min-h-[32px] px-2.5 py-1 rounded-full sp-badge text-xs font-semibold hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     <MessageCircle className="w-3.5 h-3.5" />
-                    <span>{item.comments.length}</span>
+                    <span className="font-mono-num">{item.comments.length}</span>
                   </button>
                 </div>
 
@@ -371,20 +478,20 @@ export function FeedView({
                         </div>
                       ))}
 
-                      <form onSubmit={(e) => submitComment(e, item.id)} className="flex items-center gap-1.5 pt-1">
+                      <form onSubmit={(e) => submitComment(e, item.id)} className="flex gap-1.5">
                         <input
                           type="text"
-                          maxLength={200}
-                          placeholder="Drop kudos or a quick note..."
+                          maxLength={180}
+                          placeholder="Drop encouragement or a tip..."
                           value={drafts[item.id] || ''}
-                          onChange={(e) => setDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          onChange={(e) => setDrafts((p) => ({ ...p, [item.id]: e.target.value }))}
                           className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
                         />
                         <button
                           type="submit"
-                          disabled={submittingId === item.id}
-                          className="p-2 rounded-xl sp-btn-primary cursor-pointer"
+                          disabled={submittingId === item.id || !(drafts[item.id] || '').trim()}
                           aria-label="Send comment"
+                          className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-bold flex items-center gap-1 disabled:opacity-45 cursor-pointer"
                         >
                           <Send className="w-3.5 h-3.5" />
                         </button>

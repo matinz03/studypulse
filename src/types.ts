@@ -1057,12 +1057,61 @@ export interface Room {
   icon: string;
   accent: string;
   createdBy: number | null;
+  isPrivate?: boolean;
+  locked?: boolean;
+  inviteCode?: string;
+  quietMode?: boolean;
   occupants: RoomOccupant[];
   activeCount: number;
   totalCount: number;
   raid?: RoomRaidState;
   syncTimer?: RoomSyncTimer;
   messages?: RoomChatMessage[];
+}
+
+export interface ActiveTimerState {
+  mode: TimerMode;
+  subjectId: number | null;
+  subjectName: string;
+  subjectColor: string;
+  taskId: number | null;
+  taskTitle: string;
+  targetSec: number;
+  startedAtMs: number;
+  accumulatedSec: number;
+  isRunning: boolean;
+  strictMode: boolean;
+  deviceId: string;
+  updatedAt: number;
+}
+
+export interface WeeklyAnalyticsDay {
+  date: string;
+  label: string;
+  minutes: number;
+  prevMinutes: number;
+  avgPurity: number;
+  sessions: number;
+}
+
+export interface WeeklyAnalyticsResponse {
+  offset: number;
+  weekStartIso: string;
+  weekEndIso: string;
+  label: string;
+  days: WeeklyAnalyticsDay[];
+  totalMins: number;
+  prevTotalMins: number;
+  wowDeltaPct: number;
+  topSubject: {
+    name: string;
+    color: string;
+    minutes: number;
+    wowDeltaPct: number;
+  } | null;
+  avgPurity: number;
+  peakWindowLabel: string;
+  goalDaysHit: number;
 }
 
 export interface FeedReaction {
@@ -1242,6 +1291,7 @@ export interface BootstrapData {
   prevWeekMins?: number;
   todayTimeline?: TodayTimelineItem[];
   studyLogs?: TodayTimelineItem[];
+  activeTimer?: ActiveTimerState | null;
   vapidPublicKey: string;
   directory: PeerUser[];
   leaderboards: {

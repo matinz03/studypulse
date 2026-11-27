@@ -1,18 +1,49 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Users, Sparkles, Flame, X, ChevronLeft, ChevronRight, LayoutGrid, Trash2, Swords, Send, Timer } from 'lucide-react';
+import {
+  Plus,
+  Users,
+  Sparkles,
+  Flame,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  LayoutGrid,
+  Trash2,
+  Swords,
+  Send,
+  Timer,
+  Lock,
+  Globe,
+  BellOff,
+  Bell,
+  Link2,
+  Check,
+  Eye,
+  EyeOff,
+  MessageSquare,
+} from 'lucide-react';
 import { FloatingEmoji, Room, RoomOccupant } from '../types';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { formatClock } from './FocusView';
 import { RoomTavernCanvas } from './RoomTavernCanvas';
+import { SUBJECT_PALETTE_12 } from './SubjectManagerModal';
 
 interface RoomsViewProps {
   themeId?: ThemeId;
   rooms: Room[];
   selectedRoomId: number;
   onSelectRoom: (roomId: number) => void;
-  onCreateRoom: (name: string, topic: string, icon: string, accent: string) => Promise<void>;
+  onCreateRoom: (
+    name: string,
+    topic: string,
+    icon: string,
+    accent: string,
+    opts?: { isPrivate?: boolean; passcode?: string; quietMode?: boolean }
+  ) => Promise<void>;
   onDeleteRoom?: (roomId: number) => Promise<void>;
+  onUnlockRoom?: (roomId: number, payload: { passcode?: string; inviteCode?: string }) => Promise<void>;
+  onToggleQuietMode?: (roomId: number, quietMode: boolean) => Promise<void>;
   floatingEmojis: FloatingEmoji[];
   onSendCheer: (emoji: string) => void;
   currentUserId: number;
@@ -27,7 +58,7 @@ interface RoomsViewProps {
 
 const CHEERS = ['🔥', '⚡', '👏', '☕', '🚀', '🤍'];
 const ROOM_ICONS = ['💻', '🏛️', '⚡', '🔥', '🚀', '🧠'];
-const ROOM_ACCENTS = ['#FAFAFA', '#E4E4E7', '#D4D4D8', '#A1A1AA', '#71717A'];
+const ROOM_ACCENTS = SUBJECT_PALETTE_12.slice(0, 6);
 
 function computeLiveSec(occ: RoomOccupant, nowMs: number) {
   if (occ.status !== 'studying') return occ.baseElapsedSec;
@@ -41,6 +72,8 @@ export function RoomsView({
   onSelectRoom,
   onCreateRoom,
   onDeleteRoom,
+  onUnlockRoom,
+  onToggleQuietMode,
   floatingEmojis,
   onSendCheer,
   currentUserId,
@@ -58,12 +91,23 @@ export function RoomsView({
   const [name, setName] = useState('');
   const [topic, setTopic] = useState('');
   const [icon, setIcon] = useState('🚀');
-  const [accent, setAccent] = useState('#FAFAFA');
+  const [accent, setAccent] = useState('#38BDF8');
+  const [isPrivateRoom, setIsPrivateRoom] = useState(false);
+  const [passcode, setPasscode] = useState('');
+  const [showCreatePass, setShowCreatePass] = useState(false);
+  const [quietModeCreate, setQuietModeCreate] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [chatText, setChatText] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [strikingRaid, setStrikingRaid] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [unlockModalRoom, setUnlockModalRoom] = useState<Room | null>(null);
+  const [unlockPasscode, setUnlockPasscode] = useState('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlockBusy, setUnlockBusy] = useState(false);
   const railRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ down: boolean; startX: number; scrollLeft: number; dragged: boolean }>({
     down: false,
@@ -110,15 +154,67 @@ export function RoomsView({
   async function submitRoom(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || busy) return;
+    if (isPrivateRoom && passcode.trim().length < 3) {
+      setCreateError('Passcode must be at least 3 characters.');
+      return;
+    }
     setBusy(true);
+    setCreateError(null);
     try {
-      await onCreateRoom(name.trim(), topic.trim() || 'Open focus desk', icon, accent);
+      await onCreateRoom(name.trim(), topic.trim() || 'Open focus desk', icon, accent, {
+        isPrivate: isPrivateRoom,
+        passcode: isPrivateRoom ? passcode.trim() : undefined,
+        quietMode: quietModeCreate,
+      });
       setName('');
       setTopic('');
+      setPasscode('');
+      setIsPrivateRoom(false);
+      setQuietModeCreate(false);
       setCreating(false);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Unable to create room');
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleRoomCardSelect(room: Room) {
+    if (room.locked) {
+      setUnlockModalRoom(room);
+      setUnlockPasscode('');
+      setUnlockError(null);
+      return;
+    }
+    onSelectRoom(room.id);
+  }
+
+  async function submitUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!unlockModalRoom || !onUnlockRoom || !unlockPasscode.trim() || unlockBusy) return;
+    setUnlockBusy(true);
+    setUnlockError(null);
+    try {
+      await onUnlockRoom(unlockModalRoom.id, { passcode: unlockPasscode.trim() });
+      setUnlockModalRoom(null);
+      setUnlockPasscode('');
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : 'Incorrect passcode');
+    } finally {
+      setUnlockBusy(false);
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!currentRoom?.inviteCode) return;
+    const url = `${window.location.origin}/?invite=${currentRoom.inviteCode}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // fallback ignore
+    }
+    setCopiedInvite(true);
+    window.setTimeout(() => setCopiedInvite(false), 2000);
   }
 
   async function handleDelete(roomId: number) {
@@ -135,9 +231,12 @@ export function RoomsView({
     e.preventDefault();
     if (!currentRoom || !onSendRoomChat || !chatText.trim() || sendingChat) return;
     setSendingChat(true);
+    setChatError(null);
     try {
       await onSendRoomChat(currentRoom.id, chatText.trim());
       setChatText('');
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : 'Could not send message');
     } finally {
       setSendingChat(false);
     }
@@ -263,6 +362,73 @@ export function RoomsView({
                 ))}
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl sp-inset">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPrivateRoom(false);
+                  setCreateError(null);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                  !isPrivateRoom ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" /> Public
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPrivateRoom(true);
+                  setCreateError(null);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                  isPrivateRoom ? 'sp-tab-active text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" /> Private
+              </button>
+            </div>
+
+            {isPrivateRoom && (
+              <div className="relative">
+                <input
+                  type={showCreatePass ? 'text' : 'password'}
+                  required
+                  minLength={3}
+                  maxLength={32}
+                  placeholder="Room passcode (3+ chars)"
+                  value={passcode}
+                  onChange={(e) => setPasscode(e.target.value)}
+                  className="w-full pl-3 pr-9 py-2 rounded-xl sp-input text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePass((v) => !v)}
+                  aria-label={showCreatePass ? 'Hide passcode' : 'Show passcode'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  {showCreatePass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )}
+
+            <label className="flex items-center justify-between p-2.5 rounded-xl sp-inset text-xs cursor-pointer">
+              <span className="flex items-center gap-2 font-semibold text-slate-200">
+                <BellOff className="w-3.5 h-3.5 text-slate-400" />
+                <span>Quiet Mode (pause chat during 25m focus)</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={quietModeCreate}
+                onChange={(e) => setQuietModeCreate(e.target.checked)}
+                className="w-4 h-4 accent-current"
+              />
+            </label>
+
+            {createError && (
+              <p className="text-[11px] font-bold px-2.5 py-1.5 rounded-xl sp-danger-pill">{createError}</p>
+            )}
+
             <button
               type="submit"
               disabled={busy}
@@ -319,12 +485,12 @@ export function RoomsView({
                   dragRef.current.dragged = false;
                   return;
                 }
-                onSelectRoom(room.id);
+                handleRoomCardSelect(room);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  onSelectRoom(room.id);
+                  handleRoomCardSelect(room);
                 }
               }}
               className={`${showAllGrid ? 'w-full' : 'shrink-0 w-48'} text-left rounded-2xl p-3.5 transition cursor-pointer border relative group ${
@@ -336,6 +502,14 @@ export function RoomsView({
                   {room.icon}
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
+                  {room.isPrivate && (
+                    <span
+                      title={room.locked ? 'Locked private room' : 'Unlocked private room'}
+                      className="w-7 h-7 rounded-full sp-badge flex items-center justify-center text-slate-300"
+                    >
+                      <Lock className="w-3 h-3" />
+                    </span>
+                  )}
                   <span className="px-2 py-0.5 rounded-full sp-badge text-[11px] font-bold flex items-center gap-1">
                     <span
                       className="w-1.5 h-1.5 rounded-full animate-pulse"
@@ -353,15 +527,20 @@ export function RoomsView({
                         e.stopPropagation();
                         handleDelete(room.id);
                       }}
-                      className="w-6 h-6 rounded-full sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
+                      className="w-8 h-8 rounded-full sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               </div>
-              <div className="text-xs font-bold text-white truncate">{room.name}</div>
-              <div className="text-[11px] text-slate-400 truncate mt-0.5">{room.topic}</div>
+              <div className="text-xs font-bold text-white truncate flex items-center gap-1">
+                <span className="truncate">{room.name}</span>
+                {room.quietMode && <BellOff className="w-3 h-3 text-slate-400 shrink-0" />}
+              </div>
+              <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                {room.locked ? 'Passcode protected' : room.topic}
+              </div>
             </motion.div>
           );
         })}
@@ -408,7 +587,31 @@ export function RoomsView({
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+              {currentRoom.inviteCode && (
+                <button
+                  type="button"
+                  onClick={handleCopyInvite}
+                  title="Copy shareable room invite link"
+                  className="h-9 px-2.5 rounded-xl sp-badge text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:text-white transition"
+                >
+                  {copiedInvite ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Link2 className="w-3.5 h-3.5" />}
+                  <span>{copiedInvite ? 'Copied' : 'Invite'}</span>
+                </button>
+              )}
+              {onToggleQuietMode && (!currentRoom.createdBy || currentRoom.createdBy === currentUserId) && (
+                <button
+                  type="button"
+                  onClick={() => onToggleQuietMode(currentRoom.id, !currentRoom.quietMode)}
+                  title="Toggle Quiet Mode during 25m focus blocks"
+                  className={`h-9 px-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer border transition ${
+                    currentRoom.quietMode ? 'sp-tab-active text-white' : 'sp-badge text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {currentRoom.quietMode ? <BellOff className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
+                  <span className="hidden sm:inline">{currentRoom.quietMode ? 'Quiet' : 'Open'}</span>
+                </button>
+              )}
               {rooms.length > 1 && onDeleteRoom && (
                 <button
                   type="button"
@@ -416,7 +619,7 @@ export function RoomsView({
                   title="Delete this room"
                   disabled={deletingId === currentRoom.id}
                   onClick={() => handleDelete(currentRoom.id)}
-                  className="w-8 h-8 rounded-xl sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
+                  className="w-9 h-9 rounded-xl sp-badge hover:border-rose-400/60 hover:text-rose-400 flex items-center justify-center cursor-pointer transition disabled:opacity-40"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -426,7 +629,7 @@ export function RoomsView({
                   whileTap={{ scale: 0.94 }}
                   type="button"
                   onClick={onJumpToFocus}
-                  className="shrink-0 px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center gap-1 cursor-pointer"
+                  className="shrink-0 h-9 px-3 rounded-xl sp-btn-primary text-xs font-extrabold flex items-center gap-1 cursor-pointer"
                 >
                   <Flame className="w-3.5 h-3.5" /> Lock In
                 </motion.button>
@@ -597,73 +800,150 @@ export function RoomsView({
             )}
           </div>
 
-          {/* Floating Emoji Cheer Dock */}
-          <div className="mt-4 pt-3 border-t border-white/10 relative z-10">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Send Silent Room Cheer
-              </span>
-              <span className="text-[10px] text-slate-500">Live WebSocket</span>
-            </div>
-            <div className="grid grid-cols-6 gap-1.5">
-              {CHEERS.map((emoji) => (
-                <motion.button
-                  key={emoji}
-                  whileTap={{ scale: 0.82 }}
-                  whileHover={{ scale: 1.08 }}
-                  type="button"
-                  onClick={() => onSendCheer(emoji)}
-                  className="py-2 rounded-xl sp-badge hover:opacity-90 text-lg cursor-pointer"
-                >
-                  {emoji}
-                </motion.button>
-              ))}
-            </div>
-          </div>
-
-          {/* Room Break Lounge Chat */}
-          {onSendRoomChat && (
-            <div className="mt-4 pt-3 border-t border-white/10 relative z-10 space-y-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-slate-300">💬 Room Lounge Chat</span>
-                <span className="text-[10px] text-slate-400">
-                  {syncPhase === 'focus' ? 'Focus phase — keep notes brief' : 'Break phase — chat open!'}
-                </span>
+          {/* Floating Emoji Cheer Dock & Room Break Lounge Chat (Quiet Mode aware) */}
+          {currentRoom.quietMode && syncPhase === 'focus' ? (
+            <div className="mt-4 p-4 rounded-2xl sp-inset border border-white/15 text-center space-y-1.5 relative z-10">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold text-slate-200">
+                <BellOff className="w-3.5 h-3.5" />
+                <span>Silent Sanctuary Active</span>
               </div>
-              {(currentRoom.messages || []).length > 0 && (
-                <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                  {(currentRoom.messages || []).slice(-6).map((m) => (
-                    <div key={m.id} className="text-[11px] flex items-baseline gap-1.5">
-                      <span className="font-bold text-white shrink-0">
-                        {m.avatar} {m.displayName}:
-                      </span>
-                      <span className="text-slate-300 break-words">{m.content}</span>
-                    </div>
+              <p className="text-[11px] text-slate-400">
+                Chat &amp; emoji cheers are paused during the 25m focus phase and reopen automatically on the 5m break.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="mt-4 pt-3 border-t border-white/10 relative z-10">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Send Silent Room Cheer
+                  </span>
+                  <span className="text-[10px] text-slate-500">Live WebSocket</span>
+                </div>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {CHEERS.map((emoji) => (
+                    <motion.button
+                      key={emoji}
+                      whileTap={{ scale: 0.82 }}
+                      whileHover={{ scale: 1.08 }}
+                      type="button"
+                      onClick={() => onSendCheer(emoji)}
+                      className="py-2 rounded-xl sp-badge hover:opacity-90 text-lg cursor-pointer"
+                    >
+                      {emoji}
+                    </motion.button>
                   ))}
                 </div>
+              </div>
+
+              {onSendRoomChat && (
+                <div className="mt-4 pt-3 border-t border-white/10 relative z-10 space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 opacity-80" /> Room Lounge Chat
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {syncPhase === 'focus' ? 'Focus phase — keep notes brief' : 'Break phase — chat open!'}
+                    </span>
+                  </div>
+                  {(currentRoom.messages || []).length > 0 && (
+                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                      {(currentRoom.messages || []).slice(-6).map((m) => (
+                        <div key={m.id} className="text-[11px] flex items-baseline gap-1.5">
+                          <span className="font-bold text-white shrink-0">
+                            {m.avatar} {m.displayName}:
+                          </span>
+                          <span className="text-slate-300 break-words">{m.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {chatError && (
+                    <p className="text-[10px] font-bold px-2.5 py-1 rounded-xl sp-warning-pill">{chatError}</p>
+                  )}
+                  <form onSubmit={submitChat} className="flex gap-1.5">
+                    <input
+                      type="text"
+                      maxLength={220}
+                      placeholder="Share a goal or break check-in..."
+                      value={chatText}
+                      onChange={(e) => setChatText(e.target.value)}
+                      className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
+                    />
+                    <button
+                      type="submit"
+                      disabled={sendingChat || !chatText.trim()}
+                      className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-45"
+                    >
+                      <Send className="w-3 h-3" /> Send
+                    </button>
+                  </form>
+                </div>
               )}
-              <form onSubmit={submitChat} className="flex gap-1.5">
-                <input
-                  type="text"
-                  maxLength={220}
-                  placeholder="Share a goal or break check-in..."
-                  value={chatText}
-                  onChange={(e) => setChatText(e.target.value)}
-                  className="flex-1 px-3 py-1.5 rounded-xl sp-input text-xs"
-                />
-                <button
-                  type="submit"
-                  disabled={sendingChat || !chatText.trim()}
-                  className="px-3 py-1.5 rounded-xl sp-btn-primary text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-45"
-                >
-                  <Send className="w-3 h-3" /> Send
-                </button>
-              </form>
-            </div>
+            </>
           )}
         </div>
       )}
+
+      {/* Private Room Passcode Gate Modal */}
+      <AnimatePresence>
+        {unlockModalRoom && (
+          <div
+            className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Unlock Private Room"
+          >
+            <motion.form
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              onSubmit={submitUnlock}
+              className="glass-card w-full max-w-sm rounded-3xl p-5 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center">
+                    <Lock className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-white">{unlockModalRoom.name}</h3>
+                    <p className="text-[11px] text-slate-400">Private Study Sanctuary</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUnlockModalRoom(null)}
+                  className="w-8 h-8 rounded-xl sp-badge flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                type="password"
+                required
+                autoFocus
+                placeholder="Enter room passcode..."
+                value={unlockPasscode}
+                onChange={(e) => setUnlockPasscode(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl sp-input text-xs"
+              />
+              {unlockError && (
+                <p className="text-[11px] font-bold px-2.5 py-1.5 rounded-xl sp-danger-pill">{unlockError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={unlockBusy || !unlockPasscode.trim()}
+                className="w-full py-2.5 rounded-xl sp-btn-primary text-xs font-extrabold cursor-pointer disabled:opacity-45"
+              >
+                {unlockBusy ? 'Verifying...' : 'Unlock Room'}
+              </button>
+            </motion.form>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
