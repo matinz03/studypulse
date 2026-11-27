@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -887,21 +888,22 @@ export function RoomsView({
       )}
 
       {/* Private Room Passcode Gate Modal */}
-      <AnimatePresence>
-        {unlockModalRoom && (
-          <div
-            className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Unlock Private Room"
-          >
-            <motion.form
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 10 }}
-              onSubmit={submitUnlock}
-              className="glass-card w-full max-w-sm rounded-3xl p-5 space-y-3"
+      {createPortal(
+        <AnimatePresence>
+          {unlockModalRoom && (
+            <div
+              className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Unlock Private Room"
             >
+              <motion.form
+                initial={{ opacity: 0, scale: 0.96, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                onSubmit={submitUnlock}
+                className="glass-card w-full max-w-sm rounded-3xl p-5 space-y-3"
+              >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="w-9 h-9 rounded-xl sp-badge flex items-center justify-center">
@@ -942,8 +944,10 @@ export function RoomsView({
               </button>
             </motion.form>
           </div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

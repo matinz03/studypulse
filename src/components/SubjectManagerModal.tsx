@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { ArrowDown, ArrowUp, Check, GitMerge, Pencil, Trash2, X } from 'lucide-react';
 import { Subject, SubjectStat } from '../types';
@@ -105,7 +106,7 @@ export function SubjectManagerModal({
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
       role="dialog"
@@ -386,6 +387,7 @@ export function SubjectManagerModal({
           })}
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
