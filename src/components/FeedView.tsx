@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageCircle,
@@ -14,17 +14,25 @@ import {
   Globe,
   User as UserIcon,
 } from 'lucide-react';
-import { FeedItem, Subject } from '../types';
+import { FeedFilters, FeedItem, LeaderboardEntry, SessionEditPayload, Subject, SubjectStat } from '../types';
+import { SubcategoryInput, subjectSubcategories } from './SubcategoryInput';
+import {
+  StudyFilters, StudyMetrics, selectStudyActivity, studyFilterLabel, subcategoryKey, subcategoryOptions,
+  subjectKey, subjectOptions,
+} from './StudyFilters';
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 
 interface FeedViewProps {
   themeId?: ThemeId;
   feed: FeedItem[];
+  publicLeaderboard: LeaderboardEntry[];
+  onFetchFeed: (filters: FeedFilters) => Promise<FeedItem[]>;
   currentUserId?: number;
   subjects?: Subject[];
+  subjectBreakdown?: SubjectStat[];
   onUpdateSession?: (
     sessionId: number,
-    payload: { subjectName?: string; subjectColor?: string; note?: string }
+    payload: SessionEditPayload
   ) => Promise<void>;
   onReact: (sessionId: number, emoji: string) => Promise<void>;
   onComment: (sessionId: number, content: string) => Promise<void>;
@@ -55,20 +63,26 @@ function formatDurationBadge(sec: number) {
 export function FeedView({
   themeId = 'shadcn-dark',
   feed,
+  publicLeaderboard,
+  onFetchFeed,
   currentUserId,
   subjects = [],
+  subjectBreakdown = [],
   onUpdateSession,
   onReact,
   onComment,
   onJumpToFocus,
 }: FeedViewProps) {
-  const [filter, setFilter] = useState<'all' | 'friends' | 'mine'>('all');
-  const [subjectFilter, setSubjectFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<FeedFilters['scope']>('all');
+  const [filteredFeed, setFilteredFeed] = useState<{ key: string; items: FeedItem[] | null }>();
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [subcategoryFilter, setSubcategoryFilter] = useState('');
   const [openCommentsId, setOpenCommentsId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [topicInput, setTopicInput] = useState('');
+  const [subcategoryInput, setSubcategoryInput] = useState('');
   const [topicColor, setTopicColor] = useState<string | undefined>(undefined);
   const [noteInput, setNoteInput] = useState('');
   const [savingPostId, setSavingPostId] = useState<number | null>(null);
@@ -85,18 +99,51 @@ export function FeedView({
     return feed;
   }, [feed, filter, currentUserId]);
 
-  const availableSubjects = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of scopedItems) {
-      counts.set(item.subjectName, (counts.get(item.subjectName) || 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, [scopedItems]);
+  const publicSubjects = useMemo(
+    () => publicLeaderboard.flatMap((entry) => entry.subjectActivity?.filter((item) => item.subcategories.length) ?? []),
+    [publicLeaderboard]
+  );
+  const availableSubjects = subjectOptions([
+    ...subjects.map(({ name }) => name),
+    ...subjectBreakdown.map(({ name }) => name),
+    ...publicSubjects.map(({ name }) => name),
+    ...feed.map(({ subjectName }) => subjectName),
+  ]);
+  const subject = availableSubjects.some((choice) => choice.value === subjectFilter) ? subjectFilter : '';
+  const availableSubcategories = subject ? subcategoryOptions([
+    ...subjectBreakdown
+      .filter((item) => subjectKey(item.name) === subject)
+      .flatMap((item) => item.subcategories?.map(({ name }) => name) ?? []),
+    ...publicSubjects.filter((item) => subjectKey(item.name) === subject)
+      .flatMap((item) => item.subcategories.map(({ name }) => name)),
+    ...feed.filter((item) => subjectKey(item.subjectName) === subject).map((item) => item.subcategory),
+  ]) : [];
+  const subcategory = availableSubcategories.some((choice) => choice.value === subcategoryFilter) ? subcategoryFilter : '';
+  const selectedLabel = studyFilterLabel(availableSubjects, availableSubcategories, subject, subcategory);
+  const myActivity = selectStudyActivity(subjectBreakdown, subject, subcategory);
+  const recentMatches = scopedItems.filter((item) =>
+    (!subject || subjectKey(item.subjectName) === subject) && (!subcategory || subcategoryKey(item.subcategory) === subcategory)
+  );
 
-  const items = useMemo(() => {
-    if (subjectFilter === 'all') return scopedItems;
-    return scopedItems.filter((item) => item.subjectName === subjectFilter);
-  }, [scopedItems, subjectFilter]);
+  const shouldFetch = filter !== 'all' || Boolean(subject || subcategory);
+  const requestKey = JSON.stringify([filter, subject, subcategory]);
+  const matchingResult = shouldFetch && filteredFeed?.key === requestKey ? filteredFeed : undefined;
+  const isLoading = shouldFetch && !matchingResult;
+  const items = matchingResult?.items ?? recentMatches;
+
+  useEffect(() => {
+    if (!shouldFetch) return;
+    let cancelled = false;
+    onFetchFeed({ scope: filter, subject, subcategory })
+      .then((items) => { if (!cancelled) setFilteredFeed({ key: requestKey, items }); })
+      .catch(() => { if (!cancelled) setFilteredFeed({ key: requestKey, items: null }); });
+    return () => { cancelled = true; };
+  }, [feed, filter, subject, subcategory, shouldFetch, requestKey, onFetchFeed]);
+
+  function changeSubject(value: string) {
+    setSubjectFilter(value);
+    setSubcategoryFilter('');
+  }
 
   async function submitComment(e: React.FormEvent, sessionId: number) {
     e.preventDefault();
@@ -120,6 +167,7 @@ export function FeedView({
       await onUpdateSession(sessionId, {
         subjectName: nextName,
         subjectColor: customColor ?? topicColor,
+        subcategory: customName !== undefined ? undefined : subcategoryInput,
         note: customName !== undefined ? undefined : noteInput,
       });
       setEditingPostId(null);
@@ -148,10 +196,7 @@ export function FeedView({
               key={key}
               type="button"
               aria-pressed={filter === key}
-              onClick={() => {
-                setFilter(key);
-                setSubjectFilter('all');
-              }}
+              onClick={() => setFilter(key)}
               className="focus-mode"
             >
               <Icon className="size-4 shrink-0" aria-hidden="true" />
@@ -171,47 +216,42 @@ export function FeedView({
         </motion.button>
       </div>
 
-      {/* Topic Filter Ribbon */}
-      {availableSubjects.length > 1 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-          <button
-            type="button"
-            onClick={() => setSubjectFilter('all')}
-            className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer border transition ${
-              subjectFilter === 'all' ? 'sp-tab-active' : 'sp-badge text-slate-300 hover:text-white'
-            }`}
-          >
-            All Topics ({scopedItems.length})
-          </button>
-          {availableSubjects.map(([name, count]) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => setSubjectFilter(name)}
-              className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer border transition ${
-                subjectFilter === name ? 'sp-tab-active' : 'sp-badge text-slate-300 hover:text-white'
-              }`}
-            >
-              {name} ({count})
-            </button>
-          ))}
-        </div>
-      )}
+      <StudyFilters
+        subjects={availableSubjects}
+        subcategories={availableSubcategories}
+        subject={subject}
+        subcategory={subcategory}
+        onSubjectChange={changeSubject}
+        onSubcategoryChange={setSubcategoryFilter}
+      />
 
+      <section className="studio-panel flex flex-wrap items-center justify-between gap-x-5 gap-y-3 p-3 sm:p-4" aria-label="Your study totals">
+        <div className="min-w-0">
+          <h2>Your study <span className="text-xs font-medium text-slate-400">· All time</span></h2>
+          <p className="text-xs text-slate-400 wrap-anywhere">{selectedLabel}</p>
+        </div>
+        <StudyMetrics activity={myActivity} />
+      </section>
+
+      {matchingResult?.items === null && (
+        <p className="text-xs text-slate-400" role="status">Showing matching posts from the recent feed.</p>
+      )}
       {/* Feed Cards List */}
-      {items.length === 0 ? (
+      {isLoading ? (
+        <p className="studio-panel p-4 text-sm text-slate-400" role="status">Loading posts…</p>
+      ) : items.length === 0 ? (
         <div className="glass-card rounded-3xl p-8 text-center space-y-2">
           <p className="text-sm font-extrabold text-white">
-            {filter === 'friends'
+            {subject || subcategory ? 'No posts match these filters' : filter === 'friends'
               ? 'No friend study logs yet'
               : filter === 'mine'
                 ? 'You have not shared any logs yet'
                 : 'No study sessions shared yet'}
           </p>
           <p className="text-xs text-slate-400">
-            {filter === 'friends'
-              ? 'Add peers in Compete to see their focus logs here (your own logs live under Mine).'
-              : 'Finish a focus session and toggle Share to Feed to record your progress here.'}
+            {subject || subcategory ? 'Choose another subject or subcategory to see more posts.' : filter === 'friends'
+              ? 'Add peers in Compete to see their focus logs here.'
+              : 'Share a completed study session to see it here.'}
           </p>
         </div>
       ) : (
@@ -274,11 +314,12 @@ export function FeedView({
                         } else {
                           setEditingPostId(item.id);
                           setTopicInput(item.subjectName);
+                          setSubcategoryInput(item.subcategory ?? '');
                           setTopicColor(item.subjectColor);
                           setNoteInput(item.note || '');
                         }
                       }}
-                      title="Change topic"
+                      title="Edit session topic and subcategory"
                       className="shrink-0 min-h-[32px] px-2.5 py-1 rounded-full sp-badge text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
                     >
                       <span
@@ -298,6 +339,10 @@ export function FeedView({
                     </span>
                   )}
                 </div>
+
+                {item.subcategory && !isEditing && (
+                  <div className="mb-2 inline-block max-w-full wrap-anywhere px-2 py-1 sp-badge text-xs">{item.subcategory}</div>
+                )}
 
                 {/* Inline Topic + Note Editor for Own Posts */}
                 {isEditing && onUpdateSession && (
@@ -333,11 +378,17 @@ export function FeedView({
                         maxLength={40}
                         value={topicInput}
                         onChange={(e) => {
+                          if (e.target.value.trim().toLowerCase() !== topicInput.trim().toLowerCase()) setSubcategoryInput('');
                           setTopicInput(e.target.value);
                           setTopicColor(undefined);
                         }}
                         placeholder="Custom topic name..."
                         className="w-full px-3 py-1.5 rounded-xl sp-input text-xs"
+                      />
+                      <SubcategoryInput
+                        value={subcategoryInput}
+                        options={subjectSubcategories(topicInput, subjectBreakdown)}
+                        onChange={setSubcategoryInput}
                       />
                       <div className="flex items-center gap-1.5">
                         <input

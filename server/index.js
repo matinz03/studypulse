@@ -95,6 +95,64 @@ function getCalendarWeekStartMs(ts = Date.now()) {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diffToMonday, 0, 0, 0, 0);
 }
 
+function normalizeSubcategory(value) {
+  if (typeof value !== 'string') return null;
+  return value.trim().replace(/\s+/gu, ' ').slice(0, 40).trimEnd() || null;
+}
+
+function studyFilterKey(value) {
+  return typeof value === 'string' ? value.trim().normalize('NFC').toLowerCase() : '';
+}
+
+db.function('study_filter_key', { deterministic: true }, studyFilterKey);
+
+function addSubjectSession(subjects, session, includeSubcategory = true) {
+  const key = studyFilterKey(session.subject_name);
+  let subject = subjects.get(key);
+  if (!subject) {
+    subject = {
+      name: session.subject_name,
+      color: session.subject_color,
+      seconds: 0,
+      sessions: 0,
+      subcategories: new Map(),
+    };
+    subjects.set(key, subject);
+  }
+  subject.seconds += session.duration_sec;
+  subject.sessions += 1;
+  if (!includeSubcategory) return;
+
+  const label = session.subcategory;
+  const categoryKey = label ? studyFilterKey(label) : null;
+  const category = subject.subcategories.get(categoryKey) || { name: label, seconds: 0, sessions: 0 };
+  category.seconds += session.duration_sec;
+  category.sessions += 1;
+  subject.subcategories.set(categoryKey, category);
+}
+
+function summarizeSubjects(subjects, totalSec) {
+  const percentage = (seconds, total) => total > 0 ? Math.round((seconds / total) * 100) : 0;
+  return [...subjects.values()]
+    .sort((a, b) => b.seconds - a.seconds)
+    .map((subject) => ({
+      name: subject.name,
+      color: subject.color,
+      minutes: Math.round(subject.seconds / 60),
+      seconds: subject.seconds,
+      sessions: subject.sessions,
+      pct: percentage(subject.seconds, totalSec),
+      subcategories: [...subject.subcategories.values()]
+        .sort((a, b) => b.seconds - a.seconds)
+        .map((category) => ({
+          name: category.name,
+          seconds: category.seconds,
+          sessions: category.sessions,
+          pct: percentage(category.seconds, subject.seconds),
+        })),
+    }));
+}
+
 function getUserStudyStats(userId) {
   const now = Date.now();
   const startOfToday = new Date();
@@ -695,6 +753,108 @@ function buildDuelState(userId, weekMins, weekBoard, directory) {
   };
 }
 
+function buildFeed(userId, friendSet, { scope = 'all', subject = '', subcategory = '' } = {}) {
+  const filters = ['s.shared_to_feed = 1'];
+  const params = [];
+
+  if (scope === 'mine') {
+    filters.push('s.user_id = ?');
+    params.push(userId);
+  } else if (scope === 'friends') {
+    filters.push('s.user_id IN (SELECT friend_id FROM friendships WHERE user_id = ?) AND s.user_id <> ?');
+    params.push(userId, userId);
+  }
+  if (subject) {
+    filters.push('study_filter_key(s.subject_name) = ?');
+    params.push(studyFilterKey(subject));
+  }
+  if (subcategory === 'uncategorized') {
+    filters.push('s.subcategory IS NULL');
+  } else if (subcategory.startsWith('tag:')) {
+    filters.push('study_filter_key(s.subcategory) = ?');
+    params.push(studyFilterKey(subcategory.slice(4)));
+  }
+
+  const feedRows = db.prepare(`
+    SELECT s.*, u.username, u.display_name, u.avatar, u.theme_color, u.streak_days, u.xp
+    FROM study_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE ${filters.join(' AND ')}
+    ORDER BY s.created_at DESC, s.id DESC
+    LIMIT 35
+  `).all(...params);
+  if (feedRows.length === 0) return [];
+
+  const ids = feedRows.map(({ id }) => id);
+  const placeholders = ids.map(() => '?').join(', ');
+  const reactRows = db.prepare(`
+    SELECT session_id, user_id, emoji
+    FROM feed_reactions
+    WHERE session_id IN (${placeholders})
+  `).all(...ids);
+  const commentRows = db.prepare(`
+    SELECT c.id, c.session_id, c.user_id, c.content, c.created_at, u.username, u.display_name, u.avatar
+    FROM feed_comments c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.session_id IN (${placeholders})
+    ORDER BY c.created_at ASC
+  `).all(...ids);
+
+  const reactBySession = new Map();
+  for (const r of reactRows) {
+    if (!reactBySession.has(r.session_id)) reactBySession.set(r.session_id, []);
+    reactBySession.get(r.session_id).push(r);
+  }
+  const commentsBySession = new Map();
+  for (const c of commentRows) {
+    if (!commentsBySession.has(c.session_id)) commentsBySession.set(c.session_id, []);
+    commentsBySession.get(c.session_id).push({
+      id: c.id,
+      userId: c.user_id,
+      username: c.username,
+      displayName: c.display_name,
+      avatar: c.avatar,
+      content: c.content,
+      createdAt: c.created_at,
+    });
+  }
+
+  const EMOJIS = ['🔥', '👏', '🧠', '❤️'];
+  return feedRows.map((row) => {
+    const rs = reactBySession.get(row.id) || [];
+    const reactions = EMOJIS.map((emoji) => {
+      const matching = rs.filter((x) => x.emoji === emoji);
+      return {
+        emoji,
+        count: matching.length,
+        reacted: matching.some((x) => x.user_id === userId),
+      };
+    });
+    return {
+      id: row.id,
+      userId: row.user_id,
+      username: row.username,
+      displayName: row.display_name,
+      avatar: row.avatar,
+      themeColor: row.theme_color,
+      streakDays: row.streak_days,
+      level: levelFromXp(row.xp).level,
+      isFriend: friendSet.has(row.user_id),
+      subjectName: row.subject_name,
+      subjectColor: row.subject_color,
+      subcategory: row.subcategory,
+      mode: row.mode,
+      durationSec: row.duration_sec,
+      purityPct: row.purity_pct,
+      xpEarned: row.xp_earned,
+      note: row.note,
+      createdAt: row.created_at,
+      reactions,
+      comments: commentsBySession.get(row.id) || [],
+    };
+  });
+}
+
 function buildBootstrap(userId) {
   ensureUniversitySeed(userId);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
@@ -713,7 +873,7 @@ function buildBootstrap(userId) {
 
   const allUsers = db.prepare('SELECT * FROM users ORDER BY xp DESC').all();
   const sessionsAll = db.prepare(`
-    SELECT user_id, subject_name, subject_color, duration_sec, purity_pct, created_at
+    SELECT user_id, subject_name, subject_color, subcategory, duration_sec, shared_to_feed, created_at
     FROM study_sessions
   `).all();
 
@@ -735,7 +895,7 @@ function buildBootstrap(userId) {
         isSelf: u.id === userId,
         seconds: 0,
         sessions: 0,
-        subjectSec: new Map(),
+        subjects: new Map(),
       });
     }
     for (const s of sessionsAll) {
@@ -744,19 +904,20 @@ function buildBootstrap(userId) {
       if (!entry) continue;
       entry.seconds += s.duration_sec;
       entry.sessions += 1;
-      entry.subjectSec.set(s.subject_name, (entry.subjectSec.get(s.subject_name) || 0) + s.duration_sec);
+      // Only sessions shared to the feed contribute labels and time to tagged rankings.
+      addSubjectSession(entry.subjects, s, Boolean(s.shared_to_feed));
     }
     return [...map.values()]
       .sort((a, b) => b.seconds - a.seconds || b.xp - a.xp)
       .map((e, idx) => {
-        let topSubject = 'General';
-        let topSec = -1;
-        for (const [k, v] of e.subjectSec.entries()) {
-          if (v > topSec) {
-            topSec = v;
-            topSubject = k;
-          }
-        }
+        const subjectActivity = [...e.subjects.values()]
+          .sort((a, b) => b.seconds - a.seconds)
+          .map(({ name, seconds, sessions, subcategories }) => ({
+            name,
+            seconds,
+            sessions,
+            subcategories: [...subcategories.values()],
+          }));
         return {
           rank: idx + 1,
           id: e.id,
@@ -771,11 +932,13 @@ function buildBootstrap(userId) {
           isFriend: e.isFriend,
           isSelf: e.isSelf,
           minutes: Math.round(e.seconds / 60),
+          seconds: e.seconds,
           sessions: e.sessions,
-          topSubject,
+          topSubject: subjectActivity[0]?.name ?? 'General',
           subjectMinutes: Object.fromEntries(
-            [...e.subjectSec.entries()].map(([k, v]) => [k, Math.round(v / 60)])
+            subjectActivity.map(({ name, seconds }) => [name, Math.round(seconds / 60)])
           ),
+          subjectActivity,
         };
       });
   };
@@ -809,84 +972,17 @@ function buildBootstrap(userId) {
   const rawRooms = db.prepare('SELECT * FROM study_rooms ORDER BY id ASC').all();
   const rooms = buildRoomOccupants(rawRooms, userId);
 
-  // Feed items (shared sessions)
-  const feedRows = db.prepare(`
-    SELECT s.*, u.username, u.display_name, u.avatar, u.theme_color, u.streak_days, u.xp
-    FROM study_sessions s
-    JOIN users u ON u.id = s.user_id
-    WHERE s.shared_to_feed = 1
-    ORDER BY s.created_at DESC
-    LIMIT 35
-  `).all();
-
-  const reactRows = db.prepare('SELECT session_id, user_id, emoji FROM feed_reactions').all();
-  const commentRows = db.prepare(`
-    SELECT c.id, c.session_id, c.user_id, c.content, c.created_at, u.username, u.display_name, u.avatar
-    FROM feed_comments c
-    JOIN users u ON u.id = c.user_id
-    ORDER BY c.created_at ASC
-  `).all();
-
-  const reactBySession = new Map();
-  for (const r of reactRows) {
-    if (!reactBySession.has(r.session_id)) reactBySession.set(r.session_id, []);
-    reactBySession.get(r.session_id).push(r);
-  }
-  const commentsBySession = new Map();
-  for (const c of commentRows) {
-    if (!commentsBySession.has(c.session_id)) commentsBySession.set(c.session_id, []);
-    commentsBySession.get(c.session_id).push({
-      id: c.id,
-      userId: c.user_id,
-      username: c.username,
-      displayName: c.display_name,
-      avatar: c.avatar,
-      content: c.content,
-      createdAt: c.created_at,
-    });
-  }
-
-  const EMOJIS = ['🔥', '👏', '🧠', '❤️'];
-  const feed = feedRows.map((row) => {
-    const rs = reactBySession.get(row.id) || [];
-    const reactions = EMOJIS.map((emoji) => {
-      const matching = rs.filter((x) => x.emoji === emoji);
-      return {
-        emoji,
-        count: matching.length,
-        reacted: matching.some((x) => x.user_id === userId),
-      };
-    });
-    return {
-      id: row.id,
-      userId: row.user_id,
-      username: row.username,
-      displayName: row.display_name,
-      avatar: row.avatar,
-      themeColor: row.theme_color,
-      streakDays: row.streak_days,
-      level: levelFromXp(row.xp).level,
-      isFriend: friendSet.has(row.user_id),
-      subjectName: row.subject_name,
-      subjectColor: row.subject_color,
-      mode: row.mode,
-      durationSec: row.duration_sec,
-      purityPct: row.purity_pct,
-      xpEarned: row.xp_earned,
-      note: row.note,
-      createdAt: row.created_at,
-      reactions,
-      comments: commentsBySession.get(row.id) || [],
-    };
-  });
+  const feed = buildFeed(userId, friendSet);
 
   // 365-day & 90-day heatmap, week-over-week delta, today timeline & 24h rhythm
   const mySessions = db
-    .prepare('SELECT id, subject_name, subject_color, mode, duration_sec, purity_pct, note, created_at FROM study_sessions WHERE user_id = ? ORDER BY created_at ASC')
+    .prepare('SELECT id, subject_name, subject_color, subcategory, mode, duration_sec, purity_pct, note, created_at FROM study_sessions WHERE user_id = ? ORDER BY created_at ASC')
     .all(userId);
   const daySecMap = new Map();
   const dayCountMap = new Map();
   const subjMap = new Map();
+  const todaySubjects = new Map();
+  const weekSubjects = new Map();
   const hourSec = new Array(24).fill(0);
   let pureSessions = 0;
   let prevWeekSec = 0;
@@ -898,18 +994,19 @@ function buildBootstrap(userId) {
     dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
     const hr = new Date(s.created_at).getHours();
     hourSec[hr] += s.duration_sec;
-    const curSub = subjMap.get(s.subject_name) || { name: s.subject_name, color: s.subject_color, seconds: 0 };
-    curSub.seconds += s.duration_sec;
-    subjMap.set(s.subject_name, curSub);
+    addSubjectSession(subjMap, s);
+    if (s.created_at >= weekStartMs) addSubjectSession(weekSubjects, s);
     if (s.purity_pct >= 95 && s.duration_sec >= 300) pureSessions++;
     if (s.created_at >= prevWeekStartMs && s.created_at < weekStartMs) {
       prevWeekSec += s.duration_sec;
     }
     if (s.created_at >= todayStartMs) {
+      addSubjectSession(todaySubjects, s);
       todayTimeline.push({
         id: s.id,
         subjectName: s.subject_name,
         subjectColor: s.subject_color,
+        subcategory: s.subcategory,
         mode: s.mode,
         durationSec: s.duration_sec,
         purityPct: s.purity_pct,
@@ -926,6 +1023,7 @@ function buildBootstrap(userId) {
       id: s.id,
       subjectName: s.subject_name,
       subjectColor: s.subject_color,
+      subcategory: s.subcategory,
       mode: s.mode,
       durationSec: s.duration_sec,
       purityPct: s.purity_pct,
@@ -979,14 +1077,7 @@ function buildBootstrap(userId) {
   }
 
   const totalSec = userStats.total_sec || 0;
-  const subjectBreakdown = [...subjMap.values()]
-    .sort((a, b) => b.seconds - a.seconds)
-    .map((x) => ({
-      name: x.name,
-      color: x.color,
-      minutes: Math.round(x.seconds / 60),
-      pct: totalSec > 0 ? Math.max(1, Math.round((x.seconds / totalSec) * 100)) : 0,
-    }));
+  const subjectBreakdown = summarizeSubjects(subjMap, totalSec);
 
   const totalHours = totalSec / 3600;
   const achievements = [
@@ -1048,6 +1139,7 @@ function buildBootstrap(userId) {
         subjectId: activeTimerRow.subject_id,
         subjectName: activeTimerRow.subject_name,
         subjectColor: activeTimerRow.subject_color,
+        subcategory: activeTimerRow.subcategory,
         taskId: activeTimerRow.task_id,
         taskTitle: activeTimerRow.task_title,
         targetSec: activeTimerRow.target_sec,
@@ -1103,6 +1195,10 @@ function buildBootstrap(userId) {
     hourlyDistribution,
     peakWindowLabel,
     subjectBreakdown,
+    recentSubjectBreakdown: {
+      today: summarizeSubjects(todaySubjects, userStats.today_sec || 0),
+      week: summarizeSubjects(weekSubjects, userStats.week_sec || 0),
+    },
     achievements,
     onlineCount: rooms.reduce((acc, r) => acc + r.activeCount, 0),
   };
@@ -1110,6 +1206,20 @@ function buildBootstrap(userId) {
 
 app.get('/api/bootstrap', authMiddleware, (req, res) => {
   res.json(buildBootstrap(req.user.id));
+});
+
+app.get('/api/feed', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  const friendships = db.prepare('SELECT friend_id FROM friendships WHERE user_id = ?').all(userId);
+  const friendSet = new Set(friendships.map(({ friend_id }) => friend_id));
+  const { scope, subject, subcategory } = req.query;
+  res.json({
+    feed: buildFeed(userId, friendSet, {
+      scope,
+      subject: typeof subject === 'string' ? subject : '',
+      subcategory: typeof subcategory === 'string' ? subcategory : '',
+    }),
+  });
 });
 
 app.get('/api/push/vapid-public-key', (_req, res) => {
@@ -1177,6 +1287,7 @@ app.put('/api/timer/active', authMiddleware, (req, res) => {
   const subjectId = req.body?.subjectId ? Number(req.body.subjectId) : null;
   const subjectName = String(req.body?.subjectName || 'Focus').trim().slice(0, 40);
   const subjectColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '') ? req.body.subjectColor : '#10B981';
+  const subcategory = normalizeSubcategory(req.body?.subcategory);
   const taskId = req.body?.taskId ? Number(req.body.taskId) : null;
   const taskTitle = String(req.body?.taskTitle || '').slice(0, 100);
   const targetSec = Math.max(0, Math.min(43200, Math.round(Number(req.body?.targetSec || 0))));
@@ -1188,13 +1299,14 @@ app.put('/api/timer/active', authMiddleware, (req, res) => {
   const now = Date.now();
 
   db.prepare(`
-    INSERT INTO active_timers (user_id, mode, subject_id, subject_name, subject_color, task_id, task_title, target_sec, started_at_ms, accumulated_sec, is_running, strict_mode, device_id, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO active_timers (user_id, mode, subject_id, subject_name, subject_color, subcategory, task_id, task_title, target_sec, started_at_ms, accumulated_sec, is_running, strict_mode, device_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       mode = excluded.mode,
       subject_id = excluded.subject_id,
       subject_name = excluded.subject_name,
       subject_color = excluded.subject_color,
+      subcategory = excluded.subcategory,
       task_id = excluded.task_id,
       task_title = excluded.task_title,
       target_sec = excluded.target_sec,
@@ -1204,13 +1316,14 @@ app.put('/api/timer/active', authMiddleware, (req, res) => {
       strict_mode = excluded.strict_mode,
       device_id = excluded.device_id,
       updated_at = excluded.updated_at
-  `).run(req.user.id, mode, subjectId, subjectName, subjectColor, taskId, taskTitle, targetSec, startedAtMs, accumulatedSec, isRunning, strictMode, deviceId, now);
+  `).run(req.user.id, mode, subjectId, subjectName, subjectColor, subcategory, taskId, taskTitle, targetSec, startedAtMs, accumulatedSec, isRunning, strictMode, deviceId, now);
 
   const activeTimer = {
     mode,
     subjectId,
     subjectName,
     subjectColor,
+    subcategory,
     taskId,
     taskTitle,
     targetSec,
@@ -1248,9 +1361,10 @@ app.get('/api/analytics/week', authMiddleware, (req, res) => {
   const prevWeekStartMs = weekStartMs - 7 * 86400_000;
 
   const sessions = db.prepare(`
-    SELECT subject_name, subject_color, duration_sec, purity_pct, created_at
+    SELECT subject_name, subject_color, subcategory, duration_sec, purity_pct, created_at
     FROM study_sessions
     WHERE user_id = ? AND created_at >= ? AND created_at < ?
+    ORDER BY created_at ASC, id ASC
   `).all(req.user.id, prevWeekStartMs, weekEndMs);
 
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1276,14 +1390,13 @@ app.get('/api/analytics/week', authMiddleware, (req, res) => {
       purityWeighted += s.purity_pct * s.duration_sec;
       const hr = new Date(s.created_at).getHours();
       hourSec[hr] += s.duration_sec;
-      const prevEntry = curSubjSec.get(s.subject_name) || { name: s.subject_name, color: s.subject_color, sec: 0 };
-      prevEntry.sec += s.duration_sec;
-      curSubjSec.set(s.subject_name, prevEntry);
+      addSubjectSession(curSubjSec, s);
     } else if (s.created_at >= prevWeekStartMs && s.created_at < weekStartMs) {
       const idx = Math.max(0, Math.min(6, Math.floor((s.created_at - prevWeekStartMs) / 86400_000)));
       curDays[idx].prevSec += s.duration_sec;
       prevTotalSec += s.duration_sec;
-      prevSubjSec.set(s.subject_name, (prevSubjSec.get(s.subject_name) || 0) + s.duration_sec);
+      const key = studyFilterKey(s.subject_name);
+      prevSubjSec.set(key, (prevSubjSec.get(key) || 0) + s.duration_sec);
     }
   }
 
@@ -1303,11 +1416,11 @@ app.get('/api/analytics/week', authMiddleware, (req, res) => {
   const wowDeltaPct = prevTotalMins > 0 ? Math.round(((totalMins - prevTotalMins) / prevTotalMins) * 100) : totalMins > 0 ? 100 : 0;
 
   let topSubject = null;
-  const sortedSubj = [...curSubjSec.values()].sort((a, b) => b.sec - a.sec);
-  if (sortedSubj.length > 0) {
-    const top = sortedSubj[0];
-    const topMins = Math.round(top.sec / 60);
-    const prevTopMins = Math.round((prevSubjSec.get(top.name) || 0) / 60);
+  const subjectBreakdown = summarizeSubjects(curSubjSec, totalSec);
+  const top = subjectBreakdown[0];
+  if (top) {
+    const topMins = top.minutes;
+    const prevTopMins = Math.round((prevSubjSec.get(studyFilterKey(top.name)) || 0) / 60);
     const subjDelta = prevTopMins > 0 ? Math.round(((topMins - prevTopMins) / prevTopMins) * 100) : topMins > 0 ? 100 : 0;
     topSubject = { name: top.name, color: top.color, minutes: topMins, wowDeltaPct: subjDelta };
   }
@@ -1337,6 +1450,7 @@ app.get('/api/analytics/week', authMiddleware, (req, res) => {
     prevTotalMins,
     wowDeltaPct,
     topSubject,
+    subjectBreakdown,
     avgPurity: totalSec > 0 ? Math.round(purityWeighted / totalSec) : 100,
     peakWindowLabel,
     goalDaysHit,
@@ -1887,6 +2001,7 @@ app.post('/api/university/exams', authMiddleware, (req, res) => {
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const subjectName = String(req.body?.subjectName || 'Focus Block').trim().slice(0, 40);
   const subjectColor = /^#[0-9a-fA-F]{6}$/.test(req.body?.subjectColor || '') ? req.body.subjectColor : '#10B981';
+  const subcategory = normalizeSubcategory(req.body?.subcategory);
   const mode = String(req.body?.mode || 'pomodoro').slice(0, 20);
   const durationSec = Math.max(5, Math.min(43200, Math.round(Number(req.body?.durationSec || 0))));
   const purityPct = Math.max(10, Math.min(100, Math.round(Number(req.body?.purityPct ?? 100))));
@@ -1938,9 +2053,9 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
   }
 
   const info = db.prepare(`
-    INSERT INTO study_sessions (user_id, subject_name, subject_color, mode, duration_sec, purity_pct, xp_earned, note, shared_to_feed, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.user.id, subjectName, subjectColor, mode, durationSec, purityPct, xpEarned, note, shareToFeed, now);
+    INSERT INTO study_sessions (user_id, subject_name, subject_color, subcategory, mode, duration_sec, purity_pct, xp_earned, note, shared_to_feed, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(req.user.id, subjectName, subjectColor, subcategory, mode, durationSec, purityPct, xpEarned, note, shareToFeed, now);
 
   db.prepare(`
     UPDATE users SET xp = xp + ?, coins = MAX(0, coins + ?), streak_days = ?, last_study_date = ?, streak_freezes = ? WHERE id = ?
@@ -2028,6 +2143,14 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
     if (matchedSubject?.color) subjectColor = matchedSubject.color;
   }
 
+  // A tag introduced for one subject should not follow a session moved to another subject.
+  let subcategory = existing.subcategory;
+  if (req.body?.subcategory !== undefined) {
+    subcategory = normalizeSubcategory(req.body.subcategory);
+  } else if (subjectName.toLowerCase() !== existing.subject_name.toLowerCase()) {
+    subcategory = null;
+  }
+
   const nextDurationSec =
     req.body?.durationSec !== undefined
       ? Math.max(60, Math.min(43200, Math.round(Number(req.body.durationSec))))
@@ -2053,8 +2176,8 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
 
   const tx = db.transaction(() => {
     db.prepare(
-      'UPDATE study_sessions SET subject_name = ?, subject_color = ?, duration_sec = ?, note = ?, created_at = ?, xp_earned = ? WHERE id = ? AND user_id = ?'
-    ).run(subjectName, subjectColor, nextDurationSec, nextNote, nextCreatedAt, nextXp, sessionId, req.user.id);
+      'UPDATE study_sessions SET subject_name = ?, subject_color = ?, subcategory = ?, duration_sec = ?, note = ?, created_at = ?, xp_earned = ? WHERE id = ? AND user_id = ?'
+    ).run(subjectName, subjectColor, subcategory, nextDurationSec, nextNote, nextCreatedAt, nextXp, sessionId, req.user.id);
     if (xpDelta !== 0) {
       db.prepare('UPDATE users SET xp = MAX(0, xp + ?) WHERE id = ?').run(xpDelta, req.user.id);
     }
@@ -2067,6 +2190,7 @@ app.patch('/api/sessions/:id', authMiddleware, (req, res) => {
       id: sessionId,
       subjectName,
       subjectColor,
+      subcategory,
       durationSec: nextDurationSec,
       note: nextNote,
       createdAt: nextCreatedAt,
@@ -2100,6 +2224,7 @@ app.delete('/api/sessions/:id', authMiddleware, (req, res) => {
     deletedSession: {
       subjectName: existing.subject_name,
       subjectColor: existing.subject_color,
+      subcategory: existing.subcategory,
       mode: existing.mode,
       durationSec: existing.duration_sec,
       purityPct: existing.purity_pct,
@@ -2115,6 +2240,7 @@ app.post('/api/sessions/restore', authMiddleware, (req, res) => {
   const s = req.body?.session || req.body || {};
   const subjectName = String(s.subjectName || 'Focus Block').trim().slice(0, 40);
   const subjectColor = /^#[0-9a-fA-F]{6}$/.test(s.subjectColor || '') ? s.subjectColor : '#10B981';
+  const subcategory = normalizeSubcategory(s.subcategory);
   const mode = String(s.mode || 'pomodoro').slice(0, 20);
   const durationSec = Math.max(5, Math.min(43200, Math.round(Number(s.durationSec || 60))));
   const purityPct = Math.max(10, Math.min(100, Math.round(Number(s.purityPct ?? 100))));
@@ -2126,9 +2252,9 @@ app.post('/api/sessions/restore', authMiddleware, (req, res) => {
   let restoredId = 0;
   const tx = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO study_sessions (user_id, subject_name, subject_color, mode, duration_sec, purity_pct, xp_earned, note, shared_to_feed, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, subjectName, subjectColor, mode, durationSec, purityPct, xpEarned, note, sharedToFeed, createdAt);
+      INSERT INTO study_sessions (user_id, subject_name, subject_color, subcategory, mode, duration_sec, purity_pct, xp_earned, note, shared_to_feed, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, subjectName, subjectColor, subcategory, mode, durationSec, purityPct, xpEarned, note, sharedToFeed, createdAt);
     restoredId = Number(info.lastInsertRowid);
     if (xpEarned > 0) {
       db.prepare('UPDATE users SET xp = xp + ? WHERE id = ?').run(xpEarned, req.user.id);

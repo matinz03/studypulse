@@ -1,3 +1,4 @@
+import { SubcategoryInput } from './SubcategoryInput';
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -58,6 +59,9 @@ interface FocusViewProps {
   onFinishSession: () => void;
   subjects: Subject[];
   activeSubject: Subject;
+  subcategory: string;
+  subcategoryOptions: string[];
+  onChangeSubcategory: (name: string) => void;
   onSelectSubject: (s: Subject) => void;
   onCreateSubject: (name: string, color: string, icon: string) => Promise<void>;
   purityPct: number;
@@ -120,7 +124,7 @@ interface FocusViewProps {
   onCreateTask: (title: string, subjectName: string, targetPomos: number) => Promise<void>;
   onToggleTaskDone: (task: StudyTask) => Promise<void>;
   onDeleteTask: (taskId: number) => Promise<void>;
-  onLogManual: (mins: number, note: string) => Promise<void>;
+  onLogManual: (mins: number, note: string, subcategory: string) => Promise<void>;
   timerSyncStatus?: 'synced' | 'syncing' | 'offline';
   remoteTimer?: ActiveTimerState | null;
   onResumeRemoteTimer?: () => Promise<void>;
@@ -183,6 +187,9 @@ export function FocusView({
   onFinishSession,
   subjects,
   activeSubject,
+  subcategory,
+  subcategoryOptions,
+  onChangeSubcategory,
   onSelectSubject,
   onCreateSubject,
   purityPct,
@@ -245,6 +252,8 @@ export function FocusView({
   const [loggingManual, setLoggingManual] = useState(false);
   const [manualMins, setManualMins] = useState(30);
   const [manualNote, setManualNote] = useState('');
+  const [manualCategoryDraft, setManualCategoryDraft] = useState<{ subjectId: number; name: string }>();
+  const manualSubcategory = manualCategoryDraft?.subjectId === activeSubject.id ? manualCategoryDraft.name : '';
   const [savingManual, setSavingManual] = useState(false);
 
   const [addingTask, setAddingTask] = useState(false);
@@ -307,7 +316,7 @@ export function FocusView({
     if (savingManual) return;
     setSavingManual(true);
     try {
-      await onLogManual(manualMins, manualNote);
+      await onLogManual(manualMins, manualNote, manualSubcategory);
       setManualNote('');
       setLoggingManual(false);
     } finally {
@@ -333,7 +342,10 @@ export function FocusView({
           <h2 id="focus-timer-heading">Focus timer</h2>
           <button
             type="button"
-            onClick={() => setLoggingManual((value) => !value)}
+            onClick={() => {
+              if (!loggingManual) setManualCategoryDraft({ subjectId: activeSubject.id, name: subcategory });
+              setLoggingManual(!loggingManual);
+            }}
             className="studio-text-button"
             aria-expanded={loggingManual}
           >
@@ -420,6 +432,12 @@ export function FocusView({
                 value={manualMins}
                 onChange={(e) => setManualMins(Number(e.target.value))}
                 className="w-full accent-current"
+              />
+              <SubcategoryInput
+                value={manualSubcategory}
+                options={subcategoryOptions}
+                onChange={(name) => setManualCategoryDraft({ subjectId: activeSubject.id, name })}
+                disabled={savingManual}
               />
               <div className="flex gap-2">
                 <input
@@ -848,6 +866,13 @@ export function FocusView({
                 </motion.form>
               )}
             </AnimatePresence>
+
+            <SubcategoryInput
+              value={subcategory}
+              options={subcategoryOptions}
+              onChange={onChangeSubcategory}
+              disabled={isRunning || elapsedSec > 0}
+            />
 
             {/* Balanced Dial Telemetry Strip */}
             <div className="focus-options">

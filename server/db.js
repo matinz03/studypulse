@@ -59,6 +59,7 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     subject_name TEXT NOT NULL,
     subject_color TEXT NOT NULL,
+    subcategory TEXT,
     mode TEXT NOT NULL DEFAULT 'pomodoro',
     duration_sec INTEGER NOT NULL,
     purity_pct INTEGER NOT NULL DEFAULT 100,
@@ -304,6 +305,7 @@ db.exec(`
     subject_id INTEGER,
     subject_name TEXT NOT NULL DEFAULT 'Focus',
     subject_color TEXT NOT NULL DEFAULT '#10B981',
+    subcategory TEXT,
     task_id INTEGER,
     task_title TEXT NOT NULL DEFAULT '',
     target_sec INTEGER NOT NULL DEFAULT 1500,
@@ -342,6 +344,14 @@ if (!subCols.has('sort_order')) {
   db.exec('ALTER TABLE subjects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
   db.exec('UPDATE subjects SET sort_order = id');
 }
+
+db.transaction(() => {
+  for (const table of ['study_sessions', 'active_timers']) {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some((column) => column.name === 'subcategory')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN subcategory TEXT`);
+    }
+  }
+}).immediate();
 
 const roomCols = new Set(db.prepare('PRAGMA table_info(study_rooms)').all().map((c) => c.name));
 if (!roomCols.has('is_private')) {

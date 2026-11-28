@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Crown, Flame, Swords, Zap, UserPlus, UserCheck, Search, Award } from 'lucide-react';
-import { FocusDuel, LeaderboardEntry, LeagueStatus, PeerUser, User } from '../types';
+import { FocusDuel, LeaderboardEntry, LeagueStatus, PeerUser, SubjectStat, User } from '../types';
+import {
+  StudyFilters, StudyMetrics, formatStudyActivity, selectStudyActivity, studyFilterLabel, subcategoryOptions,
+  subjectKey, subjectOptions,
+} from './StudyFilters';
 
 interface CompeteViewProps {
   user: User;
@@ -10,6 +14,8 @@ interface CompeteViewProps {
     week: LeaderboardEntry[];
     all: LeaderboardEntry[];
   };
+  subjectBreakdown: SubjectStat[];
+  recentSubjectBreakdown?: Record<'today' | 'week', SubjectStat[]>;
   directory: PeerUser[];
   league?: LeagueStatus;
   activeDuel?: FocusDuel;
@@ -31,6 +37,8 @@ function formatMinsShort(mins: number) {
 export function CompeteView({
   user,
   leaderboards,
+  subjectBreakdown,
+  recentSubjectBreakdown,
   directory,
   league,
   activeDuel,
@@ -41,51 +49,72 @@ export function CompeteView({
 }: CompeteViewProps) {
   const [timeframe, setTimeframe] = useState<'today' | 'week' | 'all'>('week');
   const [scope, setScope] = useState<'all' | 'friends'>('all');
-  const [subjectFilter, setSubjectFilter] = useState<string>('all');
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [subcategoryFilter, setSubcategoryFilter] = useState('');
   const [query, setQuery] = useState('');
   const [selectedRivalId, setSelectedRivalId] = useState<number | null>(null);
   const [nudgedId, setNudgedId] = useState<number | null>(null);
 
   const friends = useMemo(() => directory.filter((d) => d.isFriend), [directory]);
 
-  const availableSubjects = useMemo(() => {
-    const raw = leaderboards[timeframe] || [];
-    const totals = new Map<string, number>();
-    for (const entry of raw) {
-      if (!entry.subjectMinutes) continue;
-      for (const [sub, mins] of Object.entries(entry.subjectMinutes)) {
-        if (mins > 0) totals.set(sub, (totals.get(sub) || 0) + mins);
-      }
-    }
-    return Array.from(totals.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([name]) => name);
-  }, [leaderboards, timeframe]);
+  const boardSubjects = useMemo(
+    () => leaderboards.all.flatMap((entry) =>
+      entry.subjectActivity ?? Object.entries(entry.subjectMinutes ?? {}).map(([name, minutes]) => ({
+        name, seconds: minutes * 60, sessions: 0, subcategories: [],
+      }))
+    ),
+    [leaderboards.all]
+  );
+  const availableSubjects = subjectOptions([
+    ...subjectBreakdown.map(({ name }) => name),
+    ...boardSubjects.map(({ name }) => name),
+  ]);
+  const subject = availableSubjects.some((choice) => choice.value === subjectFilter) ? subjectFilter : '';
+  const availableSubcategories = subject ? subcategoryOptions([
+    ...subjectBreakdown
+      .filter((item) => subjectKey(item.name) === subject)
+      .flatMap((item) => item.subcategories?.map(({ name }) => name) ?? []),
+    ...boardSubjects
+      .filter((item) => subjectKey(item.name) === subject)
+      .flatMap((item) => item.subcategories.map(({ name }) => name)),
+  ]) : [];
+  const subcategory = availableSubcategories.some((choice) => choice.value === subcategoryFilter) ? subcategoryFilter : '';
+  const selectedLabel = studyFilterLabel(availableSubjects, availableSubcategories, subject, subcategory);
 
-  const effectiveSubject =
-    subjectFilter !== 'all' && availableSubjects.includes(subjectFilter) ? subjectFilter : 'all';
+  function changeSubject(value: string) {
+    setSubjectFilter(value);
+    setSubcategoryFilter('');
+  }
 
   const activeBoard = useMemo(() => {
-    const raw = leaderboards[timeframe] || [];
-    const scoped = scope === 'friends' ? raw.filter((r) => r.isSelf || r.isFriend) : raw;
-    if (effectiveSubject === 'all') {
-      return scoped.map((r, i) => ({ ...r, displayRank: i + 1 }));
+    const board = leaderboards[timeframe];
+    const scoped = scope === 'friends' ? board.filter((entry) => entry.isSelf || entry.isFriend) : board;
+    if (!subject) {
+      return scoped.map((entry, index) => ({
+        ...entry, rankSeconds: entry.seconds ?? entry.minutes * 60, displayRank: index + 1,
+      }));
     }
     return scoped
-      .map((r) => ({
-        ...r,
-        minutes: r.subjectMinutes?.[effectiveSubject] || 0,
-      }))
-      .filter((r) => r.minutes > 0)
-      .sort((a, b) => b.minutes - a.minutes || b.xp - a.xp)
-      .map((r, i) => ({ ...r, displayRank: i + 1 }));
-  }, [leaderboards, timeframe, scope, effectiveSubject]);
+      .map((entry) => {
+        const subjects = entry.subjectActivity ?? Object.entries(entry.subjectMinutes ?? {})
+          .map(([name, minutes]) => ({ name, minutes }));
+        const activity = selectStudyActivity(subjects, subject, subcategory);
+        return { ...entry, rankSeconds: activity.seconds };
+      })
+      .filter((entry) => entry.rankSeconds > 0)
+      .sort((a, b) => b.rankSeconds - a.rankSeconds || b.xp - a.xp)
+      .map((entry, index) => ({ ...entry, displayRank: index + 1 }));
+  }, [leaderboards, timeframe, scope, subject, subcategory]);
 
-  const selfIdx = activeBoard.findIndex((r) => r.isSelf);
-  const selfEntry = selfIdx >= 0 ? activeBoard[selfIdx] : null;
-  const personAbove = selfIdx > 0 ? activeBoard[selfIdx - 1] : null;
-  const gapToNext =
-    selfEntry && personAbove ? Math.max(1, personAbove.minutes - selfEntry.minutes + 1) : 0;
+  const selfIdx = activeBoard.findIndex((entry) => entry.isSelf);
+  const selfEntry = activeBoard[selfIdx];
+  const personAbove = activeBoard[selfIdx - 1];
+  const gapToNext = selfEntry && personAbove ? personAbove.rankSeconds - selfEntry.rankSeconds + 1 : 0;
+  const personalBreakdown = timeframe === 'all' ? subjectBreakdown : recentSubjectBreakdown?.[timeframe];
+  const myActivity = personalBreakdown
+    ? selectStudyActivity(personalBreakdown, subject, subcategory)
+    : { seconds: selfEntry?.rankSeconds ?? 0, sessions: selfEntry?.sessions ?? 0 };
+  const periodLabel = { today: 'Today', week: 'This week', all: 'All time' }[timeframe];
 
   const top3 = activeBoard.slice(0, 3);
   const rest = activeBoard.slice(3);
@@ -191,61 +220,43 @@ export function CompeteView({
         </button>
       </div>
 
-      {/* Wrapping Subject Filter Pills */}
-      {availableSubjects.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
-          <button
-            type="button"
-            onClick={() => setSubjectFilter('all')}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold cursor-pointer transition ${
-              effectiveSubject === 'all' ? 'sp-btn-primary' : 'sp-badge text-slate-300 hover:text-white'
-            }`}
-          >
-            All Subjects
-          </button>
-          {availableSubjects.map((sub) => {
-            const active = effectiveSubject === sub;
-            return (
-              <button
-                key={sub}
-                type="button"
-                onClick={() => setSubjectFilter(sub)}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold cursor-pointer transition ${
-                  active ? 'sp-tab-active' : 'sp-badge text-slate-300 hover:text-white'
-                }`}
-              >
-                {sub}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <StudyFilters
+        subjects={availableSubjects}
+        subcategories={availableSubcategories}
+        subject={subject}
+        subcategory={subcategory}
+        onSubjectChange={changeSubject}
+        onSubcategoryChange={setSubcategoryFilter}
+      />
 
-      {/* Your Standing Shadcn Glass Strip */}
-      <div className="liquid-card rounded-2xl px-3.5 py-2.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="sp-badge px-2 py-1 rounded-xl font-mono-num text-xs font-extrabold shrink-0">
-            {selfEntry ? `#${selfEntry.displayRank}` : '--'}
-          </span>
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-white truncate">
-              Your Standing {effectiveSubject !== 'all' ? `• ${effectiveSubject}` : ''}
-            </div>
-            <div className="text-[11px] text-slate-300 truncate">
-              {selfEntry
-                ? selfEntry.displayRank === 1
-                  ? 'Leading the board 👑'
-                  : personAbove
-                    ? `${formatMinsShort(gapToNext)} to pass ${personAbove.displayName}`
-                    : `${formatMinsShort(selfEntry.minutes)} logged`
-                : `No ${effectiveSubject} focus logged yet`}
+      <section className="studio-panel space-y-2 p-3 sm:p-4" aria-label="Your standing">
+        <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="shrink-0 px-2 py-1 sp-badge font-mono-num text-xs font-bold" aria-label={selfEntry ? `Rank ${selfEntry.displayRank}` : 'Unranked'}>
+              {selfEntry ? `#${selfEntry.displayRank}` : '—'}
+            </span>
+            <div className="min-w-0">
+              <h2>Your standing <span className="text-xs font-medium text-slate-400">· {periodLabel}</span></h2>
+              <p className="text-xs text-slate-400 wrap-anywhere">{selectedLabel}</p>
             </div>
           </div>
+          <StudyMetrics activity={myActivity} />
         </div>
-        <span className="font-mono-num text-xs font-extrabold text-white shrink-0">
-          {selfEntry ? formatMinsShort(selfEntry.minutes) : '0m'}
-        </span>
-      </div>
+        {selfEntry && (
+          <p className="text-xs text-slate-300 wrap-anywhere">
+            {selfEntry.displayRank === 1 && selfEntry.rankSeconds > 0
+              ? 'Leading the board'
+              : gapToNext > 0 ? `${formatStudyActivity(gapToNext)} to pass ${personAbove.displayName}` : null}
+          </p>
+        )}
+        {subcategory && (
+          <p className="text-xs text-slate-400">Rank uses shared sessions. Your totals include private sessions.</p>
+        )}
+      </section>
+
+      {activeBoard.length === 0 && (
+        <p className="studio-panel p-4 text-sm text-slate-400">No ranked activity matches these filters.</p>
+      )}
 
       {/* Monochrome Animated Top-3 Podium */}
       {podiumOrder.length > 0 && (
@@ -288,7 +299,7 @@ export function CompeteView({
                     {entry.displayName}
                   </div>
                   <div className="text-[11px] font-mono-num font-bold text-slate-300 mb-1.5">
-                    {formatMinsShort(entry.minutes)}
+                    {formatStudyActivity(entry.rankSeconds)}
                   </div>
                   <div
                     className={`w-full ${heightClass} rounded-t-2xl backdrop-blur-md flex flex-col items-center justify-center gap-1 ${pedestalGlass}`}
@@ -467,13 +478,13 @@ export function CompeteView({
                     {entry.isSelf && <span className="text-[10px] text-slate-400">(You)</span>}
                   </div>
                   <div className="text-[10px] text-slate-400 truncate">
-                    Lv.{entry.level} • {entry.topSubject} • 🔥 {entry.streakDays}d
+                    Lv.{entry.level} • {subject ? selectedLabel : entry.topSubject} • 🔥 {entry.streakDays}d
                   </div>
                 </div>
               </div>
               <div className="text-right shrink-0">
                 <div className="font-mono-num text-xs font-extrabold text-white">
-                  {formatMinsShort(entry.minutes)}
+                  {formatStudyActivity(entry.rankSeconds)}
                 </div>
                 <div className="text-[10px] text-slate-500">{entry.sessions} blocks</div>
               </div>

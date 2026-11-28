@@ -976,6 +976,16 @@ export interface PeerUser {
   isOnline: boolean;
 }
 
+export interface StudyActivity {
+  seconds: number;
+  sessions: number;
+}
+
+export interface LeaderboardSubjectActivity extends StudyActivity {
+  name: string;
+  subcategories: (StudyActivity & { name: string | null })[];
+}
+
 export interface LeaderboardEntry {
   rank: number;
   id: number;
@@ -993,6 +1003,8 @@ export interface LeaderboardEntry {
   sessions: number;
   topSubject: string;
   subjectMinutes?: Record<string, number>;
+  seconds?: number;
+  subjectActivity?: LeaderboardSubjectActivity[];
 }
 
 export interface RoomOccupant {
@@ -1074,6 +1086,7 @@ export interface ActiveTimerState {
   subjectId: number | null;
   subjectName: string;
   subjectColor: string;
+  subcategory?: string | null;
   taskId: number | null;
   taskTitle: string;
   targetSec: number;
@@ -1110,6 +1123,7 @@ export interface WeeklyAnalyticsResponse {
     wowDeltaPct: number;
   } | null;
   avgPurity: number;
+  subjectBreakdown?: SubjectStat[];
   peakWindowLabel: string;
   goalDaysHit: number;
 }
@@ -1130,6 +1144,12 @@ export interface FeedComment {
   createdAt: number;
 }
 
+export interface FeedFilters {
+  scope: 'all' | 'friends' | 'mine';
+  subject: string;
+  subcategory: string;
+}
+
 export interface FeedItem {
   id: number;
   userId: number;
@@ -1142,6 +1162,7 @@ export interface FeedItem {
   isFriend: boolean;
   subjectName: string;
   subjectColor: string;
+  subcategory?: string | null;
   mode: string;
   durationSec: number;
   purityPct: number;
@@ -1164,11 +1185,28 @@ export interface WeekDay {
   minutes: number;
 }
 
+export interface SubcategoryStat extends StudyActivity {
+  name: string | null;
+  pct: number;
+}
+
+export interface SessionEditPayload {
+  subjectName?: string;
+  subjectColor?: string;
+  subcategory?: string | null;
+  durationSec?: number;
+  note?: string;
+  createdAt?: number;
+}
+
 export interface SubjectStat {
   name: string;
   color: string;
   minutes: number;
   pct: number;
+  seconds?: number;
+  sessions?: number;
+  subcategories?: SubcategoryStat[];
 }
 
 export interface Achievement {
@@ -1271,6 +1309,7 @@ export interface TodayTimelineItem {
   id: number;
   subjectName: string;
   subjectColor: string;
+  subcategory?: string | null;
   mode: string;
   durationSec: number;
   purityPct: number;
@@ -1307,6 +1346,7 @@ export interface BootstrapData {
   hourlyDistribution: number[];
   peakWindowLabel: string;
   subjectBreakdown: SubjectStat[];
+  recentSubjectBreakdown?: Record<'today' | 'week', SubjectStat[]>;
   achievements: Achievement[];
   onlineCount: number;
 }

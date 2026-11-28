@@ -24,12 +24,12 @@ import {
   Shield,
   Eye,
   EyeOff,
-  SlidersHorizontal,
 } from 'lucide-react';
 import {
   Achievement,
   GameState,
   HeatmapDay,
+  SessionEditPayload,
   ShopBuyResponse,
   ShopState,
   Subject,
@@ -42,6 +42,8 @@ import {
 import { ThemeId, getThemeMeta, resolveAccent } from '../themes';
 import { StorePanel } from './StorePanel';
 import { SubjectManagerModal } from './SubjectManagerModal';
+import { SubcategoryInput, subjectSubcategories } from './SubcategoryInput';
+import { SubjectAnalytics, type SubjectAnalyticsPeriod } from './SubjectAnalytics';
 
 function toLocalDateTimeValue(ts: number) {
   const d = new Date(ts);
@@ -68,7 +70,7 @@ interface ProfileViewProps {
   onUpdateProfile: (payload: { displayName?: string; bio?: string; dailyGoalMins?: number }) => Promise<void>;
   onUpdateSession?: (
     sessionId: number,
-    payload: { subjectName?: string; subjectColor?: string; durationSec?: number; note?: string; createdAt?: number }
+    payload: SessionEditPayload
   ) => Promise<void>;
   onDeleteSession?: (sessionId: number) => Promise<void>;
   onFetchWeeklyAnalytics?: (offset: number) => Promise<WeeklyAnalyticsResponse>;
@@ -148,6 +150,8 @@ export function ProfileView({
   const [logScope, setLogScope] = useState<'today' | 'all'>(() => (todayTimeline.length > 0 ? 'today' : 'all'));
   const [editingLogId, setEditingLogId] = useState<number | null>(null);
   const [logTopicInput, setLogTopicInput] = useState('');
+  const [logSubcategory, setLogSubcategory] = useState('');
+  const [logRevision, setLogRevision] = useState(0);
   const [logTopicColor, setLogTopicColor] = useState<string | undefined>(undefined);
   const [logDurationMins, setLogDurationMins] = useState<number>(25);
   const [logNoteInput, setLogNoteInput] = useState<string>('');
@@ -158,6 +162,7 @@ export function ProfileView({
   const [showManageSubjects, setShowManageSubjects] = useState(false);
 
   // Week-by-Week Analytics (#9)
+  const [breakdownPeriod, setBreakdownPeriod] = useState<SubjectAnalyticsPeriod>('all');
   const [weekOffset, setWeekOffset] = useState<number>(0);
   const [weeklyData, setWeeklyData] = useState<WeeklyAnalyticsResponse | null>(null);
   const [loadingWeek, setLoadingWeek] = useState(false);
@@ -185,8 +190,9 @@ export function ProfileView({
     return () => {
       cancelled = true;
     };
-  }, [weekOffset, user.sessionsCount, user.totalMins]);
+  }, [weekOffset, user.sessionsCount, user.totalMins, logRevision]);
 
+  const selectedWeek = weeklyData?.offset === weekOffset ? weeklyData : undefined;
   const allLogs = studyLogs.length > 0 ? studyLogs : [...todayTimeline].reverse();
   const visibleLogs = logScope === 'today' ? todayTimeline : allLogs;
 
@@ -197,6 +203,7 @@ export function ProfileView({
     }
     setEditingLogId(item.id);
     setLogTopicInput(item.subjectName);
+    setLogSubcategory(item.subcategory ?? '');
     setLogTopicColor(item.subjectColor);
     setLogDurationMins(Math.max(1, Math.round(item.durationSec / 60)));
     setLogNoteInput(item.note || '');
@@ -209,17 +216,12 @@ export function ProfileView({
     if (!nextName || savingLogId === sessionId) return;
     setSavingLogId(sessionId);
     try {
-      const payload: {
-        subjectName?: string;
-        subjectColor?: string;
-        durationSec?: number;
-        note?: string;
-        createdAt?: number;
-      } = {
+      const payload: SessionEditPayload = {
         subjectName: nextName,
         subjectColor: quickSubject?.color ?? logTopicColor,
       };
       if (!quickSubject) {
+        payload.subcategory = logSubcategory;
         payload.durationSec = Math.max(60, Math.min(43200, Math.round((logDurationMins || 1) * 60)));
         payload.note = logNoteInput;
         if (logDateInput) {
@@ -230,6 +232,7 @@ export function ProfileView({
         }
       }
       await onUpdateSession(sessionId, payload);
+      setLogRevision((revision) => revision + 1);
       setEditingLogId(null);
     } finally {
       setSavingLogId(null);
@@ -281,13 +284,14 @@ export function ProfileView({
   }
 
   function exportCsv() {
-    const rows = ['date,subject,mode,duration_min,purity_pct,note'];
+    const rows = ['date,subject,mode,duration_min,purity_pct,note,subcategory'];
+    const cell = (value: string) => `"${value.replace(/"/g, '""')}"`;
     for (const s of todayTimeline) {
       rows.push(
-        `${new Date(s.createdAt).toISOString()},"${s.subjectName}","${s.mode}",${Math.max(
-          1,
-          Math.round(s.durationSec / 60)
-        )},${s.purityPct},"${(s.note || '').replace(/"/g, '""')}"`
+        [
+          new Date(s.createdAt).toISOString(), cell(s.subjectName), cell(s.mode),
+          Math.max(1, Math.round(s.durationSec / 60)), s.purityPct, cell(s.note || ''), cell(s.subcategory || ''),
+        ].join(',')
       );
     }
     triggerDownload(`studypulse_sessions_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv', rows.join('\n'));
@@ -298,7 +302,7 @@ export function ProfileView({
       `studypulse_analytics_${new Date().toISOString().slice(0, 10)}.json`,
       'application/json',
       JSON.stringify(
-        { user: user.username, weekMins: user.weekMins, prevWeekMins, todayTimeline, heatmap365: activeHeatmap },
+        { user: user.username, weekMins: user.weekMins, prevWeekMins, subjectBreakdown, todayTimeline, heatmap365: activeHeatmap },
         null,
         2
       )
@@ -938,43 +942,16 @@ export function ProfileView({
               </div>
             </div>
 
-            {/* Integrated 2-Column Subject Breakdown & Manage Subjects CTA */}
-            {(subjectBreakdown.length > 0 || subjects.length > 0) && (
-              <div className="pt-3 border-t border-white/10 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
-                    Subject Breakdown ({subjects.length})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowManageSubjects(true)}
-                    className="px-2.5 py-1 rounded-xl sp-badge text-[10px] font-bold inline-flex items-center gap-1 hover:text-white cursor-pointer"
-                  >
-                    <SlidersHorizontal className="w-3 h-3" /> Manage Subjects
-                  </button>
-                </div>
-                {subjectBreakdown.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {subjectBreakdown.map((sub) => (
-                      <div key={sub.name} className="p-2 rounded-xl sp-inset space-y-1">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-semibold text-slate-200 truncate">{sub.name}</span>
-                          <span className="font-mono-num text-slate-300 font-bold shrink-0">
-                            {(sub.minutes / 60).toFixed(1)}h ({sub.pct}%)
-                          </span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ width: `${sub.pct}%`, backgroundColor: resolveAccent(sub.color, themeId) }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <SubjectAnalytics
+              breakdown={breakdownPeriod === 'all' ? subjectBreakdown : selectedWeek?.subjectBreakdown}
+              themeId={themeId}
+              period={breakdownPeriod}
+              onChangePeriod={setBreakdownPeriod}
+              onManageSubjects={() => setShowManageSubjects(true)}
+              hasWeeklyBreakdown={weeklyData?.subjectBreakdown !== undefined}
+              weekLabel={selectedWeek?.label}
+              loading={breakdownPeriod === 'week' && loadingWeek}
+            />
           </div>
         </div>
         );
@@ -1088,6 +1065,9 @@ export function ProfileView({
                       </span>
                     </div>
 
+                    {item.subcategory && !isEditingRow && (
+                      <span className="inline-block max-w-full wrap-anywhere px-2 py-0.5 sp-badge">{item.subcategory}</span>
+                    )}
                     {item.note && !isEditingRow && (
                       <div className="text-[10px] text-slate-400 truncate">&ldquo;{item.note}&rdquo;</div>
                     )}
@@ -1128,6 +1108,7 @@ export function ProfileView({
                                 maxLength={40}
                                 value={logTopicInput}
                                 onChange={(e) => {
+                                  if (e.target.value.trim().toLowerCase() !== logTopicInput.trim().toLowerCase()) setLogSubcategory('');
                                   setLogTopicInput(e.target.value);
                                   setLogTopicColor(undefined);
                                 }}
@@ -1164,6 +1145,11 @@ export function ProfileView({
                             </div>
                           </div>
 
+                          <SubcategoryInput
+                            value={logSubcategory}
+                            options={subjectSubcategories(logTopicInput, subjectBreakdown)}
+                            onChange={setLogSubcategory}
+                          />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                             <div>
                               <label className="block text-[9.5px] text-slate-400 mb-0.5">Date &amp; Time</label>

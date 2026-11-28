@@ -23,6 +23,7 @@ import {
 import { AuthScreen } from './components/AuthScreen';
 import { FocusView, formatClock } from './components/FocusView';
 import { SessionCompleteModal } from './components/SessionCompleteModal';
+import { subjectSubcategories } from './components/SubcategoryInput';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 
 const QuestView = lazy(() => import('./components/QuestView').then((m) => ({ default: m.QuestView })));
@@ -51,10 +52,13 @@ function TabSkeleton() {
 import {
   ActiveTimerState,
   BootstrapData,
+  FeedFilters,
+  FeedItem,
   FloatingEmoji,
   GameActionResponse,
   IdleAutomationConfig,
   IdleGambitsConfig,
+  SessionEditPayload,
   SessionGameRewards,
   ShadowActionPayload,
   ShopBuyResponse,
@@ -150,6 +154,7 @@ interface PersistedTimerState {
   activeTaskId: number | null;
   selectedRoomId?: number;
   selectedSubjectId?: number | null;
+  subcategorySelection?: { subjectId: number; name: string };
 }
 
 function loadPersistedTimer(): Partial<PersistedTimerState> & { initialElapsed: number; finishedOffline: boolean; finishedSec: number } {
@@ -219,6 +224,7 @@ export function App() {
   const [strictMode, setStrictMode] = useState<boolean>(Boolean(restored.strictMode));
   const [wakeLocked, setWakeLocked] = useState(false);
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(restored.selectedSubjectId ?? null);
+  const [subcategorySelection, setSubcategorySelection] = useState(restored.subcategorySelection);
   const [selectedRoomId, setSelectedRoomId] = useState<number>(restored.selectedRoomId || 1);
   const [soundPreset, setSoundPreset] = useState<SoundPreset>('off');
   const [soundVolume, setSoundVolume] = useState<number>(0.45);
@@ -293,6 +299,12 @@ export function App() {
     [token]
   );
 
+  const fetchFilteredFeed = useCallback(async (filters: FeedFilters): Promise<FeedItem[]> => {
+    const params = new URLSearchParams({ ...filters });
+    const response = await apiFetch(`/api/feed?${params}`);
+    return response.feed;
+  }, [apiFetch]);
+
   const refreshBootstrap = useCallback(async () => {
     if (!token) return;
     try {
@@ -332,6 +344,11 @@ export function App() {
     const subs = data?.subjects || [];
     return subs.find((s) => s.id === selectedSubjectId) || subs[0] || { id: 0, name: 'Deep Focus', color: '#10B981', icon: '⚡' };
   }, [data?.subjects, selectedSubjectId]);
+
+  const subcategory = subcategorySelection?.subjectId === activeSubject.id
+    ? subcategorySelection.name
+    : '';
+  const subcategoryOptions = subjectSubcategories(activeSubject.name, data?.subjectBreakdown ?? []);
 
   const currentRoom = useMemo(() => {
     const rooms = data?.rooms || [];
@@ -443,6 +460,7 @@ export function App() {
         activeTaskId,
         selectedRoomId,
         selectedSubjectId,
+        subcategorySelection,
       };
       localStorage.setItem(TIMER_STATE_KEY, JSON.stringify(payload));
     } catch {
@@ -461,10 +479,19 @@ export function App() {
     activeTaskId,
     selectedRoomId,
     selectedSubjectId,
+    subcategorySelection,
   ]);
 
   const syncServerSchedule = useCallback(
-    async (running: boolean, curMode: TimerMode, curElapsed: number, targetSecVal: number, subName: string, task: string) => {
+    async (
+      running: boolean,
+      curMode: TimerMode,
+      curElapsed: number,
+      targetSecVal: number,
+      subName: string,
+      task: string,
+      source?: ActiveTimerState
+    ) => {
       if (!token) return;
       setTimerSyncStatus('syncing');
       try {
@@ -473,16 +500,17 @@ export function App() {
             method: 'PUT',
             body: JSON.stringify({
               mode: curMode,
-              subjectId: selectedSubjectId,
+              subjectId: source ? source.subjectId : activeSubject.id || null,
               subjectName: subName,
-              subjectColor: activeSubject.color,
-              taskId: activeTaskId,
+              subjectColor: source?.subjectColor ?? activeSubject.color,
+              subcategory: source ? source.subcategory ?? null : subcategory,
+              taskId: source ? source.taskId : activeTaskId,
               taskTitle: task,
               targetSec: targetSecVal,
               startedAtMs: startedAtMsRef.current,
               accumulatedSec: curElapsed,
               isRunning: running,
-              strictMode,
+              strictMode: source?.strictMode ?? strictMode,
               deviceId,
             }),
           });
@@ -510,7 +538,7 @@ export function App() {
         setTimerSyncStatus('offline');
       }
     },
-    [token, apiFetch, selectedSubjectId, activeSubject.color, activeTaskId, strictMode, deviceId]
+    [token, apiFetch, activeSubject.id, activeSubject.color, subcategory, activeTaskId, strictMode, deviceId]
   );
 
   // Auto-join room from ?invite=<code> deep-link once authenticated
@@ -788,6 +816,7 @@ export function App() {
     pipEngine.close();
     setSoundPreset('off');
     setIsRunning(false);
+    setSubcategorySelection(undefined);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(TIMER_STATE_KEY);
     setToken(null);
@@ -1017,10 +1046,12 @@ export function App() {
 
   async function handleSaveSession({
     note,
+    subcategory: savedSubcategory,
     shareToFeed,
     startBreakAfter,
   }: {
     note: string;
+    subcategory: string;
     shareToFeed: boolean;
     startBreakAfter?: boolean;
   }) {
@@ -1029,6 +1060,7 @@ export function App() {
       body: JSON.stringify({
         subjectName: activeSubject.name,
         subjectColor: activeSubject.color,
+        subcategory: savedSubcategory,
         mode,
         durationSec: pendingDurationSec || elapsedSec,
         purityPct,
@@ -1072,12 +1104,13 @@ export function App() {
     }
   }
 
-  async function handleLogManual(mins: number, note: string) {
+  async function handleLogManual(mins: number, note: string, manualSubcategory: string) {
     const res = await apiFetch('/api/sessions', {
       method: 'POST',
       body: JSON.stringify({
         subjectName: activeSubject.name,
         subjectColor: activeSubject.color,
+        subcategory: manualSubcategory,
         mode: 'manual',
         durationSec: Math.max(60, Math.round(mins * 60)),
         purityPct: 100,
@@ -1136,6 +1169,9 @@ export function App() {
     setBonusSec(0);
     if (remoteTimer.subjectId && data?.subjects.some((s) => s.id === remoteTimer.subjectId)) {
       setSelectedSubjectId(remoteTimer.subjectId);
+      setSubcategorySelection({ subjectId: remoteTimer.subjectId, name: remoteTimer.subcategory ?? '' });
+    } else {
+      setSubcategorySelection(undefined);
     }
     setActiveTaskId(remoteTimer.taskId ?? null);
     setFocusTask(remoteTimer.taskTitle || '');
@@ -1151,7 +1187,8 @@ export function App() {
       elapsedNow,
       remoteTimer.targetSec || getTargetSec(remoteTimer.mode, customMins),
       remoteTimer.subjectName,
-      remoteTimer.taskTitle
+      remoteTimer.taskTitle,
+      remoteTimer
     );
     pushToast('Resumed synced session on this device');
   }
@@ -1554,7 +1591,7 @@ export function App() {
 
   async function handleUpdateSession(
     sessionId: number,
-    payload: { subjectName?: string; subjectColor?: string; durationSec?: number; note?: string; createdAt?: number }
+    payload: SessionEditPayload
   ) {
     await apiFetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
@@ -1848,6 +1885,9 @@ export function App() {
                     onFinishSession={handleOpenFinish}
                     subjects={data.subjects}
                     activeSubject={activeSubject}
+                    subcategory={subcategory}
+                    subcategoryOptions={subcategoryOptions}
+                    onChangeSubcategory={(name) => setSubcategorySelection({ subjectId: activeSubject.id, name })}
                     onSelectSubject={(s) => setSelectedSubjectId(s.id)}
                     onCreateSubject={handleCreateSubject}
                     purityPct={purityPct}
@@ -1974,6 +2014,8 @@ export function App() {
                     <CompeteView
                       user={user}
                       leaderboards={data.leaderboards}
+                      subjectBreakdown={data.subjectBreakdown}
+                      recentSubjectBreakdown={data.recentSubjectBreakdown}
                       directory={data.directory}
                       league={data.league}
                       activeDuel={data.activeDuel}
@@ -1990,8 +2032,11 @@ export function App() {
                     <FeedView
                       themeId={themeId}
                       feed={data.feed}
+                      publicLeaderboard={data.leaderboards.all}
+                      onFetchFeed={fetchFilteredFeed}
                       currentUserId={user.id}
                       subjects={data.subjects}
+                      subjectBreakdown={data.subjectBreakdown}
                       onUpdateSession={(id, payload) => handleUpdateSession(id, payload)}
                       onReact={handleReactFeed}
                       onComment={handleCommentFeed}
@@ -2129,6 +2174,8 @@ export function App() {
             purityPct={purityPct}
             strictMode={strictMode}
             initialNote={focusTask}
+            initialSubcategory={subcategory}
+            subcategoryOptions={subcategoryOptions}
             onSave={handleSaveSession}
             onDiscard={() => {
               setShowCompleteModal(false);

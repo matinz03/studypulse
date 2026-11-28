@@ -5,6 +5,7 @@ import { Sparkles, Share2, ShieldCheck, Flame, X, Download, Coffee } from 'lucid
 import { Subject, TimerMode, User } from '../types';
 import { ThemeId, getThemeMeta } from '../themes';
 import { formatClock } from './FocusView';
+import { SubcategoryInput } from './SubcategoryInput';
 
 interface SessionCompleteModalProps {
   themeId?: ThemeId;
@@ -15,7 +16,9 @@ interface SessionCompleteModalProps {
   purityPct: number;
   strictMode?: boolean;
   initialNote?: string;
-  onSave: (payload: { note: string; shareToFeed: boolean; startBreakAfter?: boolean }) => Promise<void>;
+  initialSubcategory: string;
+  subcategoryOptions: string[];
+  onSave: (payload: { note: string; subcategory: string; shareToFeed: boolean; startBreakAfter?: boolean }) => Promise<void>;
   onDiscard: () => void;
 }
 
@@ -28,10 +31,13 @@ export function SessionCompleteModal({
   purityPct,
   strictMode = false,
   initialNote,
+  initialSubcategory,
+  subcategoryOptions,
   onSave,
   onDiscard,
 }: SessionCompleteModalProps) {
   const [note, setNote] = useState(initialNote || '');
+  const [subcategory, setSubcategory] = useState(initialSubcategory);
   const [shareToFeed, setShareToFeed] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -61,7 +67,7 @@ export function SessionCompleteModal({
     if (saving) return;
     setSaving(true);
     try {
-      await onSave({ note, shareToFeed });
+      await onSave({ note, subcategory, shareToFeed });
     } finally {
       setSaving(false);
     }
@@ -71,7 +77,7 @@ export function SessionCompleteModal({
     if (saving) return;
     setSaving(true);
     try {
-      await onSave({ note, shareToFeed: false, startBreakAfter: true });
+      await onSave({ note, subcategory, shareToFeed: false, startBreakAfter: true });
     } finally {
       setSaving(false);
     }
@@ -138,7 +144,7 @@ export function SessionCompleteModal({
         initial={{ opacity: 0, y: 40, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 40, scale: 0.95 }}
-        className="w-full max-w-md liquid-dock rounded-3xl p-5 relative"
+        className="w-full max-w-md max-h-[calc(100dvh-32px)] overflow-y-auto liquid-dock rounded-3xl p-5 relative"
       >
         <button
           type="button"
@@ -223,6 +229,8 @@ export function SessionCompleteModal({
               className="w-full px-3.5 py-2.5 rounded-xl sp-input text-xs resize-none"
             />
           </div>
+
+          <SubcategoryInput value={subcategory} onChange={setSubcategory} options={subcategoryOptions} disabled={saving} />
 
           <label className="flex items-center justify-between p-3 rounded-2xl sp-inset cursor-pointer">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
